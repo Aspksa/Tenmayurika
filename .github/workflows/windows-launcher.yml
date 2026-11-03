@@ -13,6 +13,13 @@ jobs:
           node-version: '24'
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: Check JavaScript syntax
+        shell: pwsh
+        run: |
+          node --check server.js
+          node --check storage.js
+          node --check tools/launcher.js
+          node --check sync-worker.js
       - name: Run tests
         run: npm test
       - name: Test Windows BAT doctor in Cyrillic path
