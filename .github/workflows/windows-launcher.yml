@@ -38,6 +38,12 @@ jobs:
           $rejected=$false
           try { & ./tools/download-monitor.ps1 -Url 'http://example.com/file' -Destination (Join-Path $env:RUNNER_TEMP 'invalid.zip') } catch { $rejected=$true }
           if (-not $rejected) { throw 'Expected insecure URL rejection' }
+          $rejected=$false
+          try { & ./tools/download-monitor.ps1 -Url 'https://example.com/file' -Destination (Join-Path $env:RUNNER_TEMP 'invalid.zip') -ExpectedSha256 'bad' } catch { $rejected=$true }
+          if (-not $rejected) { throw 'Expected invalid SHA256 rejection' }
+          $rejected=$false
+          try { & ./tools/download-monitor.ps1 -Url 'https://example.com/file' -Destination (Join-Path $env:RUNNER_TEMP 'invalid.zip') -MaxAttempts 0 } catch { $rejected=$true }
+          if (-not $rejected) { throw 'Expected invalid retry count rejection' }
       - name: Run tests
         run: npm test
       - name: Test Windows BAT doctor in Cyrillic path
