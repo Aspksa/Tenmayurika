@@ -20,6 +20,7 @@ jobs:
           node --check storage.js
           node --check tools/launcher.js
           node --check sync-worker.js
+          node --check tools/verify-backup.js
       - name: Run tests
         run: npm test
       - name: Test Windows BAT doctor in Cyrillic path
