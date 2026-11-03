@@ -55,6 +55,20 @@ function addFact(input){
   }catch(e){db.exec('ROLLBACK');throw e}
  }finally{db.close()}
 }
+function extractFacts(text,sourceId){
+ if(typeof text!=='string'||Buffer.byteLength(text,'utf8')>1048576)throw new TypeError('Invalid text');
+ const source=normalize(sourceId,'sourceId',300);
+ const results=[];
+ for(const line of text.split(/\r?\n/)){
+  const parts=line.trim().split('|');
+  if(parts.length!==4||parts[0].trim()!=='FACT:')continue;
+  const [subject,predicate,object]=parts.slice(1).map(x=>x.trim());
+  if(!subject||!predicate||!object)continue;
+  results.push(addFact({subject,predicate,object,sourceId:source}));
+  if(results.length>=100)break;
+ }
+ return results;
+}
 function searchFacts(query,limit=30){
  const term=normalize(query,'query',300).toLocaleLowerCase();
  if(!Number.isInteger(limit)||limit<1||limit>100)throw new TypeError('Invalid limit');
@@ -78,13 +92,14 @@ function diagnostics(){
    pendingVectors:db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='vector_queue'").get()?db.prepare('SELECT COUNT(*) AS n FROM vector_queue').get().n:0};
  }finally{db.close()}
 }
-module.exports={addFact,queryFacts,searchFacts,diagnostics};
+module.exports={addFact,extractFacts,queryFacts,searchFacts,diagnostics};
 if(require.main===module){
  try{
   const command=process.argv[2];
   if(command==='diagnostics')console.log(JSON.stringify(diagnostics(),null,2));
   else if(command==='facts')console.log(JSON.stringify(queryFacts({subject:process.argv[3]}),null,2));
   else if(command==='search')console.log(JSON.stringify(searchFacts(process.argv.slice(3).join(' ')),null,2));
+  else if(command==='ingest'){const [source,filename]=process.argv.slice(3);if(!source||!filename)throw Error('Usage: ingest source file');console.log(JSON.stringify(extractFacts(fs.readFileSync(filename,'utf8'),source),null,2))}
   else throw Error('Usage: node memory-core.js diagnostics|facts [subject]');
  }catch(e){console.error(e.message);process.exitCode=1}
 }
