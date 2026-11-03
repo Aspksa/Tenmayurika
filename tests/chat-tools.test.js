@@ -47,3 +47,21 @@ test('fact retrieval ranks the subject above many matches of a common word',asyn
  const r=await reply({message:'Что любит Юрика?'});
  assert.match(r.reply,/Юрика — любит → матча/);
 });
+test('overlong messages are rejected instead of truncated',async()=>{
+ const {reply}=require('../chat');
+ await assert.rejects(reply({message:'заметка: Длинная — '+'я'.repeat(2500)}),TypeError);
+});
+test('completed tool work is reported when a later model round fails',async()=>{
+ const http=require('node:http'),{reply}=require('../chat');let calls=0;
+ const fake=http.createServer((req,res)=>{calls++;req.resume();req.on('end',()=>{if(calls===1){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({choices:[{message:{role:'assistant',content:null,tool_calls:[{id:'c1',type:'function',function:{name:'add_task',arguments:JSON.stringify({title:'купить чай'})}}]}}]}))}else{res.writeHead(500);res.end('{}')}})});
+ await new Promise(r=>fake.listen(0,'127.0.0.1',r));
+ process.env.CHAT_URL='http://127.0.0.1:'+fake.address().port+'/v1/chat/completions';
+ const created=[];
+ try{
+  const r=await reply({message:'запиши мне купить чай пожалуйста'},{addItem:(c,t)=>{created.push(t);return {title:t}},setTaskDone(){}});
+  assert.deepEqual(created,['купить чай']);
+  assert.equal(r.fallback,true);assert.equal(r.changed,true);
+  assert.match(r.reply,/уже сделано:[\s\S]*купить чай/);
+  assert.equal('done' in r,false);
+ }finally{delete process.env.CHAT_URL;await new Promise(r=>fake.close(r))}
+});

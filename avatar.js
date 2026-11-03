@@ -137,7 +137,7 @@
  const chatSub=h('small',{text:'Хранительница памяти'});
  const log=h('div',{class:'chat-log',role:'log','aria-live':'polite'});
  const quick=h('div',{class:'chat-quick',role:'toolbar','aria-label':'Быстрые действия'});
- const input=h('textarea',{rows:'1',placeholder:'Спросите или попросите что-то сделать…','aria-label':'Сообщение'});
+ const input=h('textarea',{rows:'1',maxlength:'2000',placeholder:'Спросите или попросите что-то сделать…','aria-label':'Сообщение'});
  const send=h('button',{type:'submit',class:'primary','aria-label':'Отправить'},icon('i-send'));
  const form=h('form',{class:'chat-form'},input,send);
  const chat=h('section',{class:'floating chat',role:'dialog','aria-label':'Чат с аватаром',hidden:true},
@@ -192,7 +192,7 @@
   if(gen!==conversation)return; // чат очистили, пока шёл ответ
   history.push({role:'assistant',text:answer,tag});history=history.slice(-100);store(CHAT_KEY,history);
   bubble('assistant',answer,tag);state('answer',2600);
-  if(data.changed)window.TenmaApp?.refresh();
+  if(data.changed)window.TenmaApp?.refresh({keepDrafts:true});
   for(const a of data.actions||[])if(a.type==='navigate')window.TenmaApp?.go(a.page);
   if(chat.hidden)avatar.classList.add('has-unread');else input.focus();
  });

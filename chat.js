@@ -181,29 +181,31 @@ async function modelReply(name,message,history,facts,notes,enabled,impl,result){
  }
  return result.tools.length?'Готово.':'Не удалось завершить ответ.';
 }
-function track(result,fn,out){result.tools.push(fn);if(out.changed)result.changed=true;if(out.action)result.actions.push(out.action)}
+const pub=({done,...rest})=>rest;
+function track(result,fn,out){result.tools.push(fn);if(out.ok!==false)result.done.push(out.text);if(out.changed)result.changed=true;if(out.action)result.actions.push(out.action)}
 
 async function reply(input,ctx={}){
  if(!input||typeof input!=='object'||typeof input.message!=='string'||!input.message.trim())throw new TypeError('Invalid message');
- const message=input.message.trim().slice(0,MAX_MESSAGE);
+ const message=input.message.trim();
+ if(message.length>MAX_MESSAGE)throw new TypeError('Сообщение длиннее '+MAX_MESSAGE+' символов. Сократите его или разбейте на части.');
  const name=typeof input.avatar==='string'&&input.avatar.trim()?input.avatar.trim().slice(0,40):'Юрика';
  // Без списка — все инструменты включены; с пустым списком — все выключены.
  const enabled=new Set(Array.isArray(input.tools)?input.tools.filter(id=>TOOL_IDS.includes(id)):TOOL_IDS);
- const impl=makeTools(ctx),result={tools:[],actions:[],changed:false};
+ const impl=makeTools(ctx),result={tools:[],actions:[],changed:false,done:[]};
  const command=parseCommand(message);
  if(command){
-  if(command.help)return {reply:helpText(enabled),source:'tool',...result};
-  if(command.error)return {reply:command.error,source:'tool',...result};
-  if(!enabled.has(OWNER[command.fn]))return {reply:'Инструмент «'+TOOLS[OWNER[command.fn]].label+'» выключен в моих настройках (правый клик по мне → «Инструменты»).',source:'tool',...result};
+  if(command.help)return {reply:helpText(enabled),source:'tool',...pub(result)};
+  if(command.error)return {reply:command.error,source:'tool',...pub(result)};
+  if(!enabled.has(OWNER[command.fn]))return {reply:'Инструмент «'+TOOLS[OWNER[command.fn]].label+'» выключен в моих настройках (правый клик по мне → «Инструменты»).',source:'tool',...pub(result)};
   let out;try{out=await impl[command.fn](command.args)}catch(e){if(e instanceof TypeError)out={ok:false,text:'Не получилось: '+e.message};else throw e}
   track(result,command.fn,out);
-  return {reply:out.text,source:'tool',...result};
+  return {reply:out.text,source:'tool',...pub(result)};
  }
  const facts=findFacts(message),notes=await findNotes(message);
  if(process.env.CHAT_URL){
-  try{return {reply:await modelReply(name,message,cleanHistory(input.history),facts,notes,enabled,impl,result),source:'model',...result}}
-  catch(e){console.error('Chat model failed:',e.name);return {reply:localReply(name,facts,notes,enabled),source:'local',fallback:true,...result}}
+  try{return {reply:await modelReply(name,message,cleanHistory(input.history),facts,notes,enabled,impl,result),source:'model',...pub(result)}}
+  catch(e){console.error('Chat model failed:',e.name);const done=result.done.length?'Модель не ответила до конца, но уже сделано:\n'+result.done.map(t=>'• '+t).join('\n'):null;return {reply:done||localReply(name,facts,notes,enabled),source:'local',fallback:true,...pub(result)}}
  }
- return {reply:localReply(name,facts,notes,enabled),source:'local',...result};
+ return {reply:localReply(name,facts,notes,enabled),source:'local',...pub(result)};
 }
 module.exports={reply,parseCommand,TOOLS};
