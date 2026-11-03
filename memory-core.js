@@ -55,6 +55,11 @@ function addFact(input){
   }catch(e){db.exec('ROLLBACK');throw e}
  }finally{db.close()}
 }
+function searchFacts(query,limit=30){
+ const term=normalize(query,'query',300).toLocaleLowerCase();
+ if(!Number.isInteger(limit)||limit<1||limit>100)throw new TypeError('Invalid limit');
+ return queryFacts({limit:500}).map(f=>({...f,score:[f.subject,f.predicate,f.object].filter(x=>x.toLocaleLowerCase().includes(term)).length})).filter(f=>f.score>0).sort((a,b)=>b.score-a.score||b.observed_at.localeCompare(a.observed_at)).slice(0,limit);
+}
 function queryFacts({subject,limit=50}={}){
  if(!Number.isInteger(limit)||limit<1||limit>500)throw new TypeError('Invalid limit');
  const db=open();
@@ -73,12 +78,13 @@ function diagnostics(){
    pendingVectors:db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='vector_queue'").get()?db.prepare('SELECT COUNT(*) AS n FROM vector_queue').get().n:0};
  }finally{db.close()}
 }
-module.exports={addFact,queryFacts,diagnostics};
+module.exports={addFact,queryFacts,searchFacts,diagnostics};
 if(require.main===module){
  try{
   const command=process.argv[2];
   if(command==='diagnostics')console.log(JSON.stringify(diagnostics(),null,2));
   else if(command==='facts')console.log(JSON.stringify(queryFacts({subject:process.argv[3]}),null,2));
+  else if(command==='search')console.log(JSON.stringify(searchFacts(process.argv.slice(3).join(' ')),null,2));
   else throw Error('Usage: node memory-core.js diagnostics|facts [subject]');
  }catch(e){console.error(e.message);process.exitCode=1}
 }
