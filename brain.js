@@ -118,7 +118,7 @@ window.TenmaLearn=TenmaLearn;
 
 /* ---------- Монтирование ---------- */
 function mount(host){
- const cfg=Object.assign({paused:false,mode3d:false,labels:'all'},read(CFG_KEY,{}));
+ const cfg=Object.assign({paused:false,mode3d:false,labels:'all',clean:false},read(CFG_KEY,{}));
  const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};
  const stage=el('div','brain-stage'),canvas=el('canvas'),tip=el('div','brain-tip');tip.hidden=true;
  const top=el('div','brain-top'),bar=el('div','brain-bar'),ctrl=el('div','brain-ctrl');
@@ -127,10 +127,13 @@ function mount(host){
  const find=el('input','brain-find');find.type='search';find.placeholder='Найти в мозге…';find.setAttribute('aria-label','Найти в мозге: зона, дело, заметка или факт');
  const btn3d=el('button','brain-btn');btn3d.type='button';btn3d.title='Объёмный режим: тяните мышью или пальцем, колесо или щипок — приблизить';
  const labelBtn=el('button','brain-btn');labelBtn.type='button';labelBtn.title='Подписи зон: все, только при наведении или скрыть';
+ const cleanBtn=el('button','brain-btn brain-keep');cleanBtn.type='button';cleanBtn.title='Чисто: только рой, без панелей и подписей';
+ const fsBtn=el('button','brain-btn brain-keep','⛶');fsBtn.type='button';fsBtn.title='На весь экран (выход — Esc)';fsBtn.setAttribute('aria-label','На весь экран');
  const viewBtn=el('button','brain-btn','⟲ Вид');viewBtn.type='button';viewBtn.title='Вернуть вид по центру';
- ctrl.append(find,btn3d,labelBtn,viewBtn,resetBtn,pauseBtn);top.append(bar,ctrl);
+ ctrl.append(find,btn3d,labelBtn,viewBtn,resetBtn,pauseBtn,cleanBtn,fsBtn);top.append(bar,ctrl);
  const empty=el('div','brain-empty');empty.hidden=true;
- stage.append(canvas,top,tip,empty);
+ const fixBox=el('div','brain-fix');fixBox.hidden=true;fixBox.setAttribute('role','dialog');fixBox.setAttribute('aria-label','Разбор противоречий');
+ stage.append(canvas,top,tip,empty,fixBox);
  stage.setAttribute('role','img');
  const teach=el('form','brain-teach'),tIn=el('input'),tBtn=el('button','primary','Научить');
  tIn.placeholder='Научи меня: Анна | любит | зелёный чай';tIn.setAttribute('aria-label','Новый факт: субъект | связь | объект');tIn.maxLength=900;tBtn.type='submit';
@@ -143,7 +146,8 @@ function mount(host){
  const scanBtn=el('button','brain-btn','Разобрать заметки');scanBtn.type='button';scanBtn.title='Найти факты в заметках (с моделью — её силами, без неё — по простым правилам)';
  const allBtn=el('button','brain-btn','✓ Запомнить всё');allBtn.type='button';
  const learnMsg=el('span','brain-hint'),learnList=el('ul','brain-learn-list');
- learnHead.append(learnTitle,chatToggle,scanBtn,allBtn);learnBox.append(learnHead,learnList,learnMsg);
+ const fixBtn=el('button','brain-btn brain-alarm-btn');fixBtn.type='button';fixBtn.hidden=true;
+ learnHead.append(learnTitle,chatToggle,scanBtn,allBtn,fixBtn);learnBox.append(learnHead,learnList,learnMsg);
  const hud=el('div','brain-hud');
  const pLog=el('section','brain-panel'),pAct=el('section','brain-panel'),pTree=el('section','brain-panel');
  const logHead=el('div','brain-k'),logAlert=el('span','brain-alert','сбой узла');logAlert.hidden=true;logHead.append(el('span','','01 // журнал событий'),logAlert);
@@ -183,6 +187,19 @@ function mount(host){
  function setLabels(){labelBtn.textContent=LABELS[cfg.labels]||LABELS.all;labelBtn.setAttribute('aria-label','Подписи: '+(LABELS[cfg.labels]||'').replace('Аа ',''));dirty=true}
  setLabels();
  labelBtn.onclick=()=>{cfg.labels=cfg.labels==='all'?'hover':cfg.labels==='hover'?'off':'all';write(CFG_KEY,cfg);setLabels()};
+ // «Чисто»: только рой — панели, подписи и кнопки прячутся (остаются «Чисто» и «На весь экран»).
+ function setClean(){cleanBtn.textContent=cfg.clean?'◉ Чисто':'○ Чисто';cleanBtn.setAttribute('aria-pressed',String(cfg.clean));host.classList.toggle('clean',cfg.clean);stage.classList.toggle('clean',cfg.clean);requestAnimationFrame(()=>{drawSpark();drawFan()});dirty=true}
+ setClean();
+ cleanBtn.onclick=()=>{cfg.clean=!cfg.clean;write(CFG_KEY,cfg);setClean()};
+ // На весь экран: Fullscreen API, а где его нет (iPhone) — растягиваем поверх страницы.
+ const isFs=()=>document.fullscreenElement===stage||stage.classList.contains('fs');
+ function setFs(){fsBtn.textContent=isFs()?'✕':'⛶';fsBtn.title=isFs()?'Выйти из полноэкранного режима (Esc)':'На весь экран (выход — Esc)';document.documentElement.classList.toggle('brain-fs-lock',stage.classList.contains('fs'));dirty=true}
+ fsBtn.onclick=async()=>{
+  if(isFs()){if(document.fullscreenElement)await document.exitFullscreen().catch(()=>{});stage.classList.remove('fs');setFs();return}
+  if(stage.requestFullscreen){try{await stage.requestFullscreen();setFs();return}catch{}}
+  stage.classList.add('fs');setFs();
+ };
+ const onFsChange=()=>setFs();document.addEventListener('fullscreenchange',onFsChange);
  btn3d.onclick=()=>{cfg.mode3d=!cfg.mode3d;write(CFG_KEY,cfg);if(cfg.mode3d){camT.pitch=-.35;camT.yaw=.5}set3d()};
  viewBtn.onclick=()=>{find.value='';setFocus('');Object.assign(camT,{yaw:cfg.mode3d?.5:0,pitch:cfg.mode3d?-.35:0,zoom:1,px:0,py:0});dirty=true};
  find.addEventListener('input',()=>setFocus(find.value));
@@ -265,7 +282,7 @@ function mount(host){
   actNum.textContent=day.toLocaleString('ru-RU');actCap.textContent='за 7 дней: '+week+' · L1:'+model.lobes.length+' L2:'+total+' L3:'+links;
   treeN.textContent='N='+total;fanFoot.textContent='ядро → '+model.lobes.length+' '+plural(model.lobes.length,'зона','зоны','зон')+' → '+total+' '+plural(total,'нейрон','нейрона','нейронов');
   tree.replaceChildren(...model.lobes.map(l=>{const li=el('li');const dot=el('i');dot.style.background=rgba(l.color,1);dot.style.boxShadow='0 0 8px '+rgba(l.color,.8);const b=el('button','brain-link',l.label);b.type='button';b.onclick=l.open;li.append(dot,b,el('span','brain-count',String(l.items.length)));return li}));
-  drawSpark();drawFan();
+  drawSpark();drawFan();renderFix();
  }
  function when(t){if(!t)return '';const d=new Date(t),now=new Date();const hm=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');return d.toDateString()===now.toDateString()?hm:d.getDate()+'.'+String(d.getMonth()+1).padStart(2,'0')}
  function prep(c){const w=c.clientWidth||200,h=c.clientHeight||48,sd=Math.min(2,window.devicePixelRatio||1);c.width=Math.round(w*sd);c.height=Math.round(h*sd);const g=c.getContext('2d');g.scale(sd,sd);return [g,w,h]}
@@ -430,7 +447,7 @@ function mount(host){
   const small=W<520,fs1=(small?9.5:10.5)*ui,fs2=(small?8.5:9)*ui;
   for(const l of model.lobes){const s=l.state;if(G.b<.55)continue;
    const dim=dimOf(l);if(dim<.5&&W<640)continue;
-   if(cfg.labels==='off'||cfg.labels==='hover'&&hoverLobe!==l.id&&!focusLobes.has(l.id)&&!(pinned&&(pinned.l===l||pinned.n?.lobe===l)))continue;
+   if(cfg.clean||cfg.labels==='off'||cfg.labels==='hover'&&hoverLobe!==l.id&&!focusLobes.has(l.id)&&!(pinned&&(pinned.l===l||pinned.n?.lobe===l)))continue;
    const right=Math.cos(s.a)>=-.15,title=trim(l.label,small?16:26),sub=trim(l.sub,small?20:30);
    ctx.font='600 '+Math.round(fs1*dpr)+'px '+MONO;const w1=ctx.measureText(title).width;ctx.font=Math.round(fs2*dpr)+'px '+MONO;const w2=ctx.measureText(sub).width;
    const pad=5*dpr,bw=Math.max(w1,w2)+pad*2,bh=(fs1+fs2)*dpr+pad*2.4;
@@ -486,9 +503,9 @@ function mount(host){
  canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
  canvas.addEventListener('pointerleave',()=>{if(!pinned){tip.hidden=true;hover=null;dirty=true}});
  canvas.addEventListener('wheel',e=>{if(!cfg.mode3d)return;e.preventDefault();camT.zoom=clamp(camT.zoom*Math.exp(-e.deltaY*.0015),.45,3.2);idleT=0;dirty=true},{passive:false});
- canvas.addEventListener('click',e=>{if(moved){moved=false;return}const [x,y]=local(e),hit=pick(x,y);pinned=hit;hover=hit&&hit.type==='neuron'?hit.n.item:null;showTip(hit,x,y,true);if(hit&&hit.type==='lobe')hit.l.state.pulse=1;dirty=true});
+ canvas.addEventListener('click',e=>{if(moved){moved=false;return}const [x,y]=local(e),hit=pick(x,y);pinned=hit;hover=hit&&hit.type==='neuron'?hit.n.item:null;showTip(hit,x,y,true);if(hit&&hit.type==='lobe'){hit.l.state.pulse=1;if(hit.l.bad){tip.hidden=true;pinned=null;fixBox.hidden=false;renderFix()}}dirty=true});
  document.addEventListener('keydown',onKey);
- function onKey(e){if(e.key==='Escape'&&pinned){pinned=null;tip.hidden=true;hover=null;dirty=true}}
+ function onKey(e){if(e.key!=='Escape')return;if(!fixBox.hidden){fixBox.hidden=true;return}if(isFs()){if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});stage.classList.remove('fs');setFs();return}if(pinned){pinned=null;tip.hidden=true;hover=null;dirty=true}}
 
  /* ---------- Обучение: новый факт прямо отсюда ---------- */
  teach.onsubmit=async e=>{
@@ -502,7 +519,7 @@ function mount(host){
 
  /* ---------- Данные и цикл ---------- */
  async function loadFacts(){
-  try{const [f,c]=await Promise.all([fetch('/api/facts?limit=500').then(r=>r.ok?r.json():[]),fetch('/api/facts/conflicts?limit=100').then(r=>r.ok?r.json():[])]);facts=Array.isArray(f)?f:[];conflicts=Array.isArray(c)?c:[]}catch{}
+  try{const [f,c]=await Promise.all([fetch('/api/facts?limit=500').then(r=>r.ok?r.json():[]),fetch('/api/facts/conflicts?limit=100').then(r=>r.ok?r.json():[])]);facts=Array.isArray(f)?f.filter(x=>!x.valid_to):[];conflicts=Array.isArray(c)?c:[]}catch{}
   if(host.isConnected)apply();
   firstVisit=false;
  }
@@ -534,6 +551,32 @@ function mount(host){
   scanBtn.disabled=false};
  const onLearn=()=>renderLearn();
  window.addEventListener('tenma:thinking',onThinking);window.addEventListener('tenma:recall',onRecall);window.addEventListener('tenma:learn',onLearn);
+ /* ---------- Разбор противоречий ---------- */
+ // Совет: предпочтения («любит», «умеет») могут быть верны оба; остальное обычно меняется — новее вернее.
+ const MULTI=/любит|обожает|нравит|умеет|говорит на|увлекается|играет|занимается|пьёт|пьет|ест|знает/i;
+ const advice=c=>MULTI.test(c.predicate)?'both':'newer';
+ function renderFix(){
+  fixBtn.hidden=!conflicts.length;fixBtn.textContent='⚠ Разобрать противоречия ('+conflicts.length+')';
+  if(fixBox.hidden)return;
+  const head=el('div','brain-fix-head'),close=el('button','brain-btn','✕');close.type='button';close.setAttribute('aria-label','Закрыть');close.onclick=()=>{fixBox.hidden=true};
+  head.append(el('div','brain-k','сбой узла // разбор противоречий'),close);
+  if(!conflicts.length){fixBox.replaceChildren(head,el('p','brain-fix-ok','Противоречий нет — память согласована ✓'));return}
+  fixBox.replaceChildren(head,...conflicts.map(c=>{
+   const card=el('div','brain-fix-card'),adv=advice(c);
+   card.append(el('div','brain-fix-q',c.subject+' — '+c.predicate+':'));
+   const opt=(keep,label,meta)=>{const b=el('button','brain-fix-opt'+(adv===keep?' advised':''));b.type='button';b.append(el('span','',label),el('small','',meta+(adv===keep?' · совет':'')));b.onclick=()=>resolveFix(c,keep,b);return b};
+   const t=x=>x?when(Date.parse(x)):'';
+   card.append(el('div','brain-fix-row'));
+   card.lastChild.append(opt('earlier','«'+c.earlier+'»','раньше · '+t(c.earlier_at)),opt('newer','«'+c.newer+'»','новее · '+t(c.newer_at)),opt('both','Оба верны','это не противоречие'));
+   return card}));
+ }
+ async function resolveFix(c,keep,b){
+  b.disabled=true;
+  try{const r=await fetch('/api/facts/conflicts/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:c.id,keep})});if(!r.ok&&r.status!==404)throw Error((await r.json().catch(()=>({}))).error||'Не удалось');
+   coreKind='память';coreText=keep==='both'?'оба факта верны':'оставила «'+(keep==='earlier'?c.earlier:c.newer)+'»';coreTextT=3.5;core.pulse=1;await loadFacts()}
+  catch(e){b.disabled=false;learnMsg.textContent=e.message;learnMsg.classList.add('err')}
+ }
+ fixBtn.onclick=()=>{fixBox.hidden=false;renderFix()};
  const onWorkspace=()=>apply();
  const onMemory=()=>loadFacts();
  const onWide=()=>placeHud();
@@ -552,7 +595,7 @@ function mount(host){
   // Адаптивное качество: на слабой видеокарте частиц становится меньше, на сильной — возвращаются.
   fpsT+=dt;fpsN++;if(fpsT>=1.2){const fps=fpsN/fpsT;if(fps<42&&quality>.25)quality*=.8;else if(fps>56&&quality<baseQ)quality=Math.min(baseQ,quality*1.1);fpsT=0;fpsN=0}
  }
- function destroy(){cancelAnimationFrame(raf);clearInterval(poll);ro.disconnect();hudRo.disconnect();window.removeEventListener('tenma:workspace',onWorkspace);window.removeEventListener('tenma:memory',onMemory);wideQuery.removeEventListener('change',onWide);document.removeEventListener('keydown',onKey);window.removeEventListener('tenma:thinking',onThinking);window.removeEventListener('tenma:recall',onRecall);window.removeEventListener('tenma:learn',onLearn)}
+ function destroy(){cancelAnimationFrame(raf);clearInterval(poll);ro.disconnect();hudRo.disconnect();window.removeEventListener('tenma:workspace',onWorkspace);window.removeEventListener('tenma:memory',onMemory);wideQuery.removeEventListener('change',onWide);document.removeEventListener('keydown',onKey);document.removeEventListener('fullscreenchange',onFsChange);document.documentElement.classList.remove('brain-fs-lock');window.removeEventListener('tenma:thinking',onThinking);window.removeEventListener('tenma:recall',onRecall);window.removeEventListener('tenma:learn',onLearn)}
  placeHud();resize();apply();renderLearn();loadFacts();raf=requestAnimationFrame(frame);
  return {destroy};
 }

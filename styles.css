@@ -716,3 +716,28 @@ input[type=date],input[type=time]{color-scheme:dark}
 .brain-learn-list .brain-btn{padding:.3em .65em}
 .brain-learn-src{font-size:.66rem;color:var(--ember);text-transform:uppercase;letter-spacing:.06em}
 @media (max-width:640px){.brain-ctrl{flex-wrap:wrap}.brain-find{flex:1 1 100%;width:auto}}
+/* «Чисто»: только рой — без панелей, строки статуса и лишних кнопок */
+.brain.clean .brain-hud,.brain-stage.clean .brain-bar,.brain-stage.clean .brain-ctrl>:not(.brain-keep){display:none}
+.brain-stage.clean .brain-top{justify-content:flex-end}
+.brain-btn.brain-keep{min-width:2.4em}
+/* На весь экран: Fullscreen API или запасной вариант поверх страницы (iPhone) */
+.brain-stage:fullscreen{height:100vh;width:100vw;border:0;border-radius:0}
+.brain-stage.fs{position:fixed;inset:0;width:100vw;height:100dvh;z-index:1000;border:0;border-radius:0}
+html.brain-fs-lock,html.brain-fs-lock body{overflow:hidden}
+/* Разбор противоречий */
+.brain-alarm-btn{border-color:rgba(255,74,56,.55);color:#ff8a7c}
+.brain-alarm-btn:hover{border-color:var(--alarm);color:#ffb3a9}
+.brain-alarm-btn[hidden]{display:none}
+.brain-fix{position:absolute;z-index:4;left:50%;top:50%;transform:translate(-50%,-50%);width:min(36rem,calc(100% - 1.5rem));max-height:calc(100% - 1.5rem);overflow:auto;display:grid;gap:.7rem;padding:.85rem 1rem;background:rgba(6,3,2,.95);border:1px solid rgba(255,74,56,.5);border-radius:4px;box-shadow:0 18px 50px rgba(0,0,0,.8);font-family:var(--mono)}
+.brain-fix[hidden]{display:none}
+.brain-fix-head{display:flex;align-items:center;justify-content:space-between;gap:.5rem}
+.brain-fix-head .brain-k{margin:0;color:var(--alarm)}
+.brain-fix-card{display:grid;gap:.5rem;padding-top:.6rem;border-top:1px solid rgba(255,255,255,.07)}
+.brain-fix-q{color:#efe6d6;font-size:.8rem;overflow-wrap:anywhere}
+.brain-fix-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.4rem}
+.brain-fix-opt{display:grid;gap:.2em;text-align:left;padding:.55em .7em;border-radius:3px;background:rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.14);color:#e9e2d6;font:600 .76rem/1.3 var(--mono);overflow-wrap:anywhere}
+.brain-fix-opt small{font-weight:400;font-size:.64rem;color:#8d8272}
+.brain-fix-opt:hover{border-color:var(--ember);box-shadow:none}
+.brain-fix-opt.advised{border-color:rgba(238,138,60,.75);box-shadow:inset 0 0 0 1px rgba(238,138,60,.35)}
+.brain-fix-opt.advised small{color:var(--ember)}
+.brain-fix-ok{margin:0;color:#cfc6b6;font-size:.8rem}

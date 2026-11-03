@@ -87,7 +87,7 @@ function searchFacts(query,limit=30){
     CASE WHEN instr(unicode_lower(predicate),?)>0 THEN 1 ELSE 0 END +
     CASE WHEN instr(unicode_lower(object),?)>0 THEN 1 ELSE 0 END) AS score
    FROM memory_facts
-   WHERE unicode_lower(subject) LIKE ? ESCAPE '\\' OR unicode_lower(predicate) LIKE ? ESCAPE '\\' OR unicode_lower(object) LIKE ? ESCAPE '\\'
+   WHERE valid_to IS NULL AND (unicode_lower(subject) LIKE ? ESCAPE '\\' OR unicode_lower(predicate) LIKE ? ESCAPE '\\' OR unicode_lower(object) LIKE ? ESCAPE '\\')
    ORDER BY score DESC,observed_at DESC LIMIT ?`).all(term,term,term,pattern,pattern,pattern,limit);
  }finally{db.close()}
 }
@@ -108,7 +108,30 @@ function relations(subject,limit=100){
 function conflicts(limit=100){
  if(!Number.isInteger(limit)||limit<1||limit>500)throw new TypeError('Invalid limit');
  const db=open();
- try{return db.prepare('SELECT c.id,c.detected_at,a.subject,a.predicate,a.object AS earlier,b.object AS newer,a.source_id AS earlier_source,b.source_id AS newer_source FROM memory_conflicts c JOIN memory_facts a ON a.id=c.earlier_id JOIN memory_facts b ON b.id=c.newer_id ORDER BY c.detected_at DESC LIMIT ?').all(limit)}finally{db.close()}
+ try{return db.prepare('SELECT c.id,c.detected_at,a.subject,a.predicate,a.object AS earlier,b.object AS newer,a.source_id AS earlier_source,b.source_id AS newer_source,a.id AS earlier_id,b.id AS newer_id,a.observed_at AS earlier_at,b.observed_at AS newer_at FROM memory_conflicts c JOIN memory_facts a ON a.id=c.earlier_id JOIN memory_facts b ON b.id=c.newer_id ORDER BY c.detected_at DESC LIMIT ?').all(limit)}finally{db.close()}
+}
+// Разбор противоречия: keep = 'earlier' | 'newer' | 'both'. Отвергнутый факт не удаляется,
+// а получает valid_to (остаётся в истории), противоречие снимается.
+function resolveConflict(id,keep){
+ const cid=normalize(id,'id',100);
+ if(!['earlier','newer','both'].includes(keep))throw new TypeError('Invalid keep');
+ const db=open();
+ try{
+  db.exec('BEGIN IMMEDIATE');
+  try{
+   const c=db.prepare('SELECT earlier_id,newer_id FROM memory_conflicts WHERE id=?').get(cid);
+   if(!c){db.exec('COMMIT');return null}
+   const now=new Date().toISOString(),retired=keep==='earlier'?c.newer_id:keep==='newer'?c.earlier_id:null;
+   if(retired){
+    db.prepare('UPDATE memory_facts SET valid_to=? WHERE id=? AND valid_to IS NULL').run(now,retired);
+    db.prepare('INSERT INTO memory_events(fact_id,action) VALUES(?,?)').run(retired,'retired');
+    // Отвергнутый факт больше ни с чем не спорит.
+    db.prepare('DELETE FROM memory_conflicts WHERE earlier_id=? OR newer_id=?').run(retired,retired);
+   }
+   db.prepare('DELETE FROM memory_conflicts WHERE id=?').run(cid);
+   db.exec('COMMIT');return {id:cid,keep,retired};
+  }catch(e){db.exec('ROLLBACK');throw e}
+ }finally{db.close()}
 }
 function diagnostics(){
  const db=open();
@@ -120,7 +143,7 @@ function diagnostics(){
    pendingVectors:db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='vector_queue'").get()?db.prepare('SELECT COUNT(*) AS n FROM vector_queue').get().n:0};
  }finally{db.close()}
 }
-module.exports={addFact,extractFacts,queryFacts,searchFacts,relations,conflicts,diagnostics};
+module.exports={addFact,extractFacts,queryFacts,searchFacts,relations,conflicts,resolveConflict,diagnostics};
 if(require.main===module){
  try{
   const command=process.argv[2];

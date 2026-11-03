@@ -44,6 +44,7 @@ async function handleFacts(req,res,p,url){
    return respond(res,result.duplicate?200:201,result);
   }
   if(req.method==='GET'&&p==='/api/facts/relations'){const subject=url.searchParams.get('subject')||'';return respond(res,200,memory.relations(subject,limitParam(url,100,500)))}
+  if(req.method==='POST'&&p==='/api/facts/conflicts/resolve'){const input=await body(req);if(!input||typeof input!=='object')return respond(res,400,{error:'Invalid input'});const r=memory.resolveConflict(input.id,input.keep);return r?respond(res,200,r):respond(res,404,{error:'Not found'})}
   if(req.method==='GET'&&p==='/api/facts/conflicts')return respond(res,200,memory.conflicts(limitParam(url,100,500)));
   if(req.method==='GET'&&p==='/api/facts/diagnostics')return respond(res,200,memory.diagnostics());
   return respond(res,404,{error:'Not found'});
