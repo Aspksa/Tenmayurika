@@ -1,8 +1,10 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
+set "OLDCP="
+for /f "tokens=2 delims=:." %%A in ('chcp') do set /a "OLDCP=%%A" >nul 2>nul
 chcp 65001 >nul
-title 🎮 Tenmayurika | Запуск
-pushd "%~dp0" || exit /b 1
+title 🎮 Tenmayurika ^| Запуск
+pushd "%~dp0" || goto :pushd_error
 echo.
 echo  ====================================================
 echo   🎮 TENMAYURIKA
@@ -16,12 +18,12 @@ if exist "runtime\node\node.exe" (
  set "NPM=%~dp0runtime\node\npm.cmd"
  set "PATH=%~dp0runtime\node;%PATH%"
 )
-"%NODE%" -e "process.exit(Number(process.versions.node.split('.')[0])>=24?0:1)"
+"%NODE%" -e "process.exit(Number(process.versions.node.split('.')[0])>=24?0:1)" >nul 2>nul
 if errorlevel 1 goto :bootstrap_node
 goto :python_check
 :bootstrap_node
 echo [*] 🧩 Подготовка Node.js 24...
-powershell.exe -NoProfile -NonInteractive -File "%~dp0tools\bootstrap-node.ps1"
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0tools\bootstrap-node.ps1"
 if errorlevel 1 goto :node_error
 if not exist "%~dp0runtime\node\node.exe" (
  node.exe -e "process.exit(Number(process.versions.node.split('.')[0])>=24?0:1)" >nul 2>nul
@@ -36,7 +38,7 @@ if /i "%~1"=="doctor" goto :check_files
 if exist "%~dp0tools\progress.js" "%NODE%" "%~dp0tools\progress.js" 2
 if not exist "%~dp0runtime\python\python.exe" (
  echo [*] 🐍 Проверка Python...
- powershell.exe -NoProfile -NonInteractive -File "%~dp0tools\bootstrap-python.ps1"
+ powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0tools\bootstrap-python.ps1"
  if errorlevel 1 (
   echo [!] ⚠ Python недоступен. Основной запуск продолжится.
  )
@@ -59,17 +61,27 @@ set "RESULT=%ERRORLEVEL%"
 if "%RESULT%"=="0" echo [OK] 🌸 Работа завершена.
 if not "%RESULT%"=="0" echo [!] ⚠ Завершено с ошибкой %RESULT%.
 if not "%RESULT%"=="0" pause
-popd
-exit /b %RESULT%
+goto :finish
 :node_error
 echo [X] ❌ Не удалось подготовить Node.js 24 или новее.
 pause
-exit /b 1
+set "RESULT=1"
+goto :finish
 :missing
 echo [ОШИБКА] Не найден tools\launcher.js.
 pause
-exit /b 2
+set "RESULT=2"
+goto :finish
 :dependencies
 echo [ОШИБКА] Не удалось установить зависимости.
 pause
-exit /b 4
+set "RESULT=4"
+goto :finish
+:pushd_error
+echo [ОШИБКА] Не удалось перейти в папку запуска.
+if defined OLDCP chcp %OLDCP% >nul
+exit /b 1
+:finish
+popd
+if defined OLDCP chcp %OLDCP% >nul
+exit /b %RESULT%
