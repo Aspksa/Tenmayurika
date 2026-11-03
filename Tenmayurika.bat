@@ -12,7 +12,7 @@ if exist "runtime\node\node.exe" (
 )
 "%NODE%" -e "process.exit(Number(process.versions.node.split('.')[0])>=24?0:1)"
 if errorlevel 1 (
- echo [INFO] Preparing portable Node.js 24...
+ echo [INFO] Подготовка переносного Node.js 24...
  powershell.exe -NoProfile -NonInteractive -File "%~dp0tools\bootstrap-node.ps1"
  if errorlevel 1 goto :node_error
  if exist "runtime\node\node.exe" (
@@ -23,15 +23,15 @@ if errorlevel 1 (
 )
 
 if not exist "%~dp0runtime\python\python.exe" (
- echo [INFO] Checking portable Python...
+ echo [INFO] Проверка переносного Python...
  powershell.exe -NoProfile -NonInteractive -File "%~dp0tools\bootstrap-python.ps1"
  if errorlevel 1 (
-  echo [WARN] Python setup failed; core Node.js app can still start.
+  echo [WARN] Python не установлен. Основное приложение продолжит запуск.
  )
 )
 if not exist "%~dp0tools\launcher.js" goto :missing
 if not exist "%~dp0node_modules\@lancedb\lancedb" (
- echo Installing dependencies once...
+ echo [INFO] Установка зависимостей...
  call "%NPM%" install --no-audit --no-fund
  if errorlevel 1 goto :dependencies
 )
@@ -41,14 +41,14 @@ if not "%RESULT%"=="0" pause
 popd
 exit /b %RESULT%
 :node_error
-echo Node.js 24 or newer required. Put portable Node.js in runtime\node.
+echo [ОШИБКА] Не удалось подготовить Node.js 24 или новее.
 pause
 exit /b 1
 :missing
-echo tools\launcher.js is missing.
+echo [ОШИБКА] Не найден tools\launcher.js.
 pause
 exit /b 2
 :dependencies
-echo Dependencies missing or npm install failed.
+echo [ОШИБКА] Не удалось установить зависимости.
 pause
 exit /b 4
