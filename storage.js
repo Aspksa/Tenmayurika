@@ -1,10 +1,11 @@
 'use strict';
-const fs=require('node:fs'),path=require('node:path');
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const {DatabaseSync}=require('node:sqlite');
 const dir=path.join(__dirname,'data'),file=path.join(dir,'tenmayurika.sqlite');
 let db;
 function empty(){return {notes:[],tasks:[]}}
 function connect(){
+ if(db)return;
  fs.mkdirSync(dir,{recursive:true});db=new DatabaseSync(file);
  db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS workspace(id INTEGER PRIMARY KEY CHECK(id=1),payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS knowledge_nodes(id TEXT PRIMARY KEY,title TEXT NOT NULL,content TEXT NOT NULL DEFAULT ''); CREATE TABLE IF NOT EXISTS vector_queue(id TEXT PRIMARY KEY,attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT); CREATE TABLE IF NOT EXISTS knowledge_edges(source TEXT NOT NULL,target TEXT NOT NULL,relation TEXT NOT NULL,PRIMARY KEY(source,target,relation));");
  const prior=db.prepare('SELECT payload FROM workspace WHERE id=1').get();
@@ -21,6 +22,6 @@ function graph(){ensure();return {nodes:db.prepare('SELECT * FROM knowledge_node
 function pending(){ensure();return db.prepare('SELECT id,attempts FROM vector_queue ORDER BY attempts,id LIMIT 20').all()}
 function indexed(id){ensure();db.prepare('DELETE FROM vector_queue WHERE id=?').run(id)}
 function failed(id,error){ensure();db.prepare('UPDATE vector_queue SET attempts=attempts+1,last_error=? WHERE id=?').run(String(error).slice(0,200),id)}
-async function backup(){ensure();const folder=path.join(__dirname,'backups');fs.mkdirSync(folder,{recursive:true});const name='tenmayurika-'+Date.now()+'.sqlite';await require('node:sqlite').backup(db,path.join(folder,name));return {file:name}}
+async function backup(){ensure();const folder=path.join(__dirname,'backups');fs.mkdirSync(folder,{recursive:true});const name='tenmayurika-'+Date.now()+'-'+crypto.randomBytes(4).toString('hex')+'.sqlite';const destination=path.join(folder,name);try{await require('node:sqlite').backup(db,destination);const check=new DatabaseSync(destination,{readOnly:true});try{if(check.prepare('PRAGMA quick_check').get().quick_check!=='ok')throw Error('Backup integrity check failed')}finally{check.close()}const sha256=crypto.createHash('sha256').update(fs.readFileSync(destination)).digest('hex');fs.writeFileSync(destination+'.sha256',sha256+'  '+name+'\n',{flag:'wx'});return {file:name,sha256}}catch(e){try{fs.unlinkSync(destination)}catch{}throw e}}
 function close(){if(db){db.close();db=undefined}}
 module.exports={connect,load,save,mutate,syncNode,graph,pending,indexed,failed,backup,close};
