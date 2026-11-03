@@ -14,3 +14,12 @@ test('memory core isolated smoke test',()=>{
   assert.equal(result.status,0,result.stderr);
  }finally{fs.rmSync(dir,{recursive:true,force:true})}
 });
+
+test('extractFacts accepts both FACT line formats',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'tenmayurika-extract-'));
+ try{
+  const script=`const m=require(${JSON.stringify(modulePath)});const r=m.extractFacts('FACT: Кицунэ | любит | матча\\nFACT: | Кицунэ | живёт в | Киото\\nFACT: неполная | строка','note:t');if(r.length!==2||m.queryFacts({subject:'Кицунэ'}).length!==2)process.exit(2);`;
+  const result=spawnSync(process.execPath,['-e',script],{cwd:dir,encoding:'utf8',env:{...process.env,TENMAYURIKA_MEMORY_DB:path.join(dir,'test.sqlite')}});
+  assert.equal(result.status,0,result.stderr);
+ }finally{fs.rmSync(dir,{recursive:true,force:true})}
+});

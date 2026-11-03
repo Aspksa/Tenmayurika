@@ -63,9 +63,11 @@ function extractFacts(text,sourceId){
  const source=normalize(sourceId,'sourceId',300);
  const results=[];
  for(const line of text.split(/\r?\n/)){
-  const parts=line.trim().split('|');
-  if(parts.length!==4||parts[0].trim()!=='FACT:')continue;
-  const [subject,predicate,object]=parts.slice(1).map(x=>x.trim());
+  // Поддерживаются «FACT: субъект | связь | объект» и «FACT: | субъект | связь | объект».
+  const trimmed=line.trim();if(!trimmed.startsWith('FACT:'))continue;
+  const parts=trimmed.slice(5).split('|');if(parts.length===4&&!parts[0].trim())parts.shift();
+  if(parts.length!==3)continue;
+  const [subject,predicate,object]=parts.map(x=>x.trim());
   if(!subject||!predicate||!object)continue;
   results.push(addFact({subject,predicate,object,sourceId:source}));
   if(results.length>=100)break;

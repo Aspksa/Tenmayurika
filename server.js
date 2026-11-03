@@ -9,6 +9,7 @@ const vectorStore=require('./vector-store');
 const syncWorker=require('./sync-worker');
 const maintenance=require('./tools/maintenance');
 const memory=require('./memory-core');
+const chat=require('./chat');
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
 const HOST='127.0.0.1',PORT=Number(process.env.PORT)||5173;
@@ -19,8 +20,11 @@ let backupTimer;
 async function scheduledBackup(){try{ensureDisk();const result=await storage.backup();console.log('Резервная копия SQLite создана:',result.file);if(result.retentionWarnings?.length)console.warn('Не все старые копии удалось удалить')}catch(e){console.error('Автоматическое резервное копирование не выполнено:',e.code||e.name)}}
 function startBackupSchedule(){backupTimer=setInterval(()=>{void scheduledBackup()},BACKUP_INTERVAL_MS);backupTimer.unref()}
 
-const allowed=new Map([['/', 'index.html'],['/index.html','index.html'],['/styles.css','styles.css'],['/app.js','app.js']]);
-function respond(res,status,body,type='application/json; charset=utf-8'){res.writeHead(status,{'Content-Type':type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});res.end(typeof body==='string'?body:JSON.stringify(body))}
+const allowed=new Map([['/', 'index.html'],['/index.html','index.html'],['/styles.css','styles.css'],['/app.js','app.js'],['/avatar.js','avatar.js'],['/favicon.svg','favicon.svg']]);
+// Аватары: только файлы с безопасными именами из assets/avatars.
+const AVATAR_PATH=/^\/assets\/avatars\/[a-z0-9-]{1,40}\.webp$/;
+const TYPES={'.css':'text/css; charset=utf-8','.js':'application/javascript; charset=utf-8','.html':'text/html; charset=utf-8','.svg':'image/svg+xml','.webp':'image/webp'};
+function respond(res,status,body,type='application/json; charset=utf-8'){res.writeHead(status,{'Content-Type':type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});res.end(typeof body==='string'||Buffer.isBuffer(body)?body:JSON.stringify(body))}
 async function body(req){const chunks=[];let bytes=0;for await(const part of req){bytes+=part.length;if(bytes>100000)throw Error('Request too large');chunks.push(part)}return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}')}
 // Факты памяти (memory-core.js). Ошибки валидации memory-core — TypeError, отдаются как 400.
 function limitParam(url,fallback,max){const raw=url.searchParams.get('limit');if(raw===null)return fallback;const n=Number(raw);if(!Number.isInteger(n)||n<1||n>max)throw new TypeError('Invalid limit');return n}
@@ -58,6 +62,7 @@ if(req.method==='POST'&&p==='/api/sync')return respond(res,200,await syncWorker.
 if(req.method==='GET'&&p==='/api/graph')return respond(res,200,storage.graph());
 if(req.method==='GET'&&p==='/api/search'){const query=url.searchParams.get('q')||'';if(!query.trim())return respond(res,400,{error:'Missing query'});return respond(res,200,await vectorStore.search(query));}
 if(p==='/api/facts'||p.startsWith('/api/facts/'))return handleFacts(req,res,p,url);
+if(req.method==='POST'&&p==='/api/chat'){try{return respond(res,200,await chat.reply(await body(req)))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
 if(req.method==='GET'&&p==='/api/workspace')return respond(res,200,await storage.load());
 if(req.method==='POST'&&p==='/api/items'){
 const input=await body(req),collection=input.collection;
@@ -66,7 +71,8 @@ const item={id:require('node:crypto').randomUUID(),title:input.title.trim(),cont
 if(req.method==='PATCH'&&p==='/api/items'){
 const input=await body(req);if(!['notes','tasks'].includes(input.collection))return respond(res,400,{error:'Invalid collection'});
 const item=storage.mutate(data=>{const found=(data[input.collection]||[]).find(x=>x.id===input.id);if(!found)return null;if(typeof input.done==='boolean'&&input.collection==='tasks')found.done=input.done;return {...found}});if(!item)return respond(res,404,{error:'Not found'});return respond(res,200,item)}
-if(req.method==='GET'&&allowed.has(p)){const name=allowed.get(p),type=name.endsWith('.css')?'text/css; charset=utf-8':name.endsWith('.js')?'application/javascript; charset=utf-8':'text/html; charset=utf-8';return respond(res,200,fs.readFileSync(path.join(ROOT,name),'utf8'),type)}
+if(req.method==='GET'&&allowed.has(p)){const name=allowed.get(p);return respond(res,200,fs.readFileSync(path.join(ROOT,name),'utf8'),TYPES[path.extname(name)])}
+if(req.method==='GET'&&AVATAR_PATH.test(p)){const file=path.join(ROOT,p.slice(1));if(!fs.existsSync(file))return respond(res,404,{error:'Not found'});res.writeHead(200,{'Content-Type':'image/webp','X-Content-Type-Options':'nosniff','Cache-Control':'public, max-age=86400'});return res.end(fs.readFileSync(file))}
 return respond(res,404,{error:'Not found'})
 }catch(e){console.error('Request failed:',e.name,e.code||'',e instanceof SyntaxError?'invalid JSON':'request processing error');respond(res,e.message==='Request too large'?413:e instanceof SyntaxError?400:500,{error:e.message==='Request too large'?'Request too large':e instanceof SyntaxError?'Invalid JSON':'Internal server error'})}});
 server.on('error',e=>{console.error('Server error:',e.code||e.name);process.exitCode=1});

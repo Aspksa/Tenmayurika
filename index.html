@@ -1,1 +1,50 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tenmayurika</title><link rel="stylesheet" href="/styles.css"></head><body><div class="layout"><aside><h1>天 · Tenmayurika</h1><p class="subtitle">Личное пространство</p><nav><button data-page="home" class="active">Обзор</button><button data-page="notes">Знания</button><button data-page="tasks">Дела</button><button data-page="facts">Факты</button><button data-page="settings">Настройки</button></nav><small>Локальное хранение · Windows</small></aside><main><header><span id="status">Подключение...</span><span class="accent">✦</span></header><section id="content"></section></main></div><script src="/app.js"></script></body></html>
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<title>Tenmayurika</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" class="sprite" aria-hidden="true">
+ <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5"/></symbol>
+ <symbol id="i-notes" viewBox="0 0 24 24"><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H19v15H5.5A1.5 1.5 0 0 0 4 19.5z"/><path d="M4 19.5A1.5 1.5 0 0 0 5.5 21H19v-3"/><path d="M8 7.5h7M8 11h5"/></symbol>
+ <symbol id="i-tasks" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="m8 12.5 2.7 2.7L16.5 9"/></symbol>
+ <symbol id="i-facts" viewBox="0 0 24 24"><circle cx="6" cy="6.5" r="2.5"/><circle cx="18" cy="6.5" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8.3 7.6 10.8 16M15.7 7.6 13.2 16M8.5 6.5h7"/></symbol>
+ <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+ <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12 20 4l-6 16-2.5-6.5z"/><path d="M11.5 13.5 20 4"/></symbol>
+ <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+ <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
+ <symbol id="i-fox" viewBox="0 0 24 24"><path d="M4 3l4 5h8l4-5v8a8 8 0 0 1-16 0z"/><path d="M9 13h.01M15 13h.01M10.5 17h3"/></symbol>
+</svg>
+
+<div class="layout">
+ <nav class="rail" aria-label="Главное меню">
+  <a class="rail-logo" href="#" data-page="home" aria-label="Tenmayurika — обзор"><span>天</span></a>
+  <div class="rail-group">
+   <button type="button" data-page="home" class="active" data-tip="Обзор" aria-label="Обзор"><svg class="icon"><use href="#i-home"/></svg></button>
+   <button type="button" data-page="notes" data-tip="Знания" aria-label="Знания"><svg class="icon"><use href="#i-notes"/></svg></button>
+   <button type="button" data-page="tasks" data-tip="Дела" aria-label="Дела"><svg class="icon"><use href="#i-tasks"/></svg></button>
+   <button type="button" data-page="facts" data-tip="Факты памяти" aria-label="Факты памяти"><svg class="icon"><use href="#i-facts"/></svg></button>
+  </div>
+  <div class="rail-group rail-bottom">
+   <button type="button" id="avatar-toggle" data-tip="Аватар" aria-label="Показать или скрыть аватар"><svg class="icon"><use href="#i-fox"/></svg></button>
+   <button type="button" data-page="settings" data-tip="Настройки проекта" aria-label="Настройки проекта"><svg class="icon"><use href="#i-settings"/></svg></button>
+  </div>
+ </nav>
+ <main>
+  <header class="topbar">
+   <div class="brand"><strong>Tenmayurika</strong><span>Личное пространство</span></div>
+   <span id="status" class="status">Подключение...</span>
+  </header>
+  <section id="content" aria-live="polite"></section>
+ </main>
+</div>
+<script src="/app.js"></script>
+<script src="/avatar.js"></script>
+</body>
+</html>
