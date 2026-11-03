@@ -7,6 +7,9 @@ test('launcher files are present and Windows BAT uses CRLF',()=>{
  assert.ok(!bat.replace(/\r\n/g,'').includes('\n'));
  assert.match(bat,/DisableDelayedExpansion/);
  assert.match(bat,/"%~dp0"/);
+ assert.ok(!/^title [^\r\n]*[^^]\|/m.test(bat),'title must escape the pipe character');
+ assert.ok(bat.split('\r\n').filter(l=>/powershell\.exe/i.test(l)).every(l=>/-ExecutionPolicy Bypass/.test(l)),'PowerShell must ignore restricted policy for this process only');
+ assert.match(bat,/chcp %OLDCP%/);
  assert.ok(fs.existsSync(path.join(root,'tools','launcher.js')));
 });
 test('portable launcher parses correctly',()=>{
