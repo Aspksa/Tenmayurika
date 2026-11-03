@@ -8,9 +8,9 @@ test('database status does not expose credentials',async()=>{
   const response=await fetch(base+'/api/services');
   assert.equal(response.status,200);
   const data=await response.json();
-  assert.equal(typeof data.postgresql.configured,'boolean');
-  assert.equal(typeof data.qdrant.configured,'boolean');
-  assert.equal(typeof data.neo4j.configured,'boolean');
+  assert.equal(data.sqlite.ok,true);
+  assert.equal(typeof data.lancedb.ok,'boolean');
+  assert.equal(typeof data.graph.ok,'boolean');
   assert.equal(JSON.stringify(data).includes('PASSWORD='),false);
  }finally{await new Promise(resolve=>server.close(resolve))}
 });
