@@ -22,6 +22,13 @@ if errorlevel 1 (
  )
 )
 
+if not exist "runtime\python\python.exe" (
+ echo [INFO] Checking portable Python...
+ powershell.exe -NoProfile -NonInteractive -File "tools\bootstrap-python.ps1"
+ if errorlevel 1 (
+  echo [WARN] Python setup failed; core Node.js app can still start.
+ )
+)
 if not exist "tools\launcher.js" goto :missing
 if not exist "node_modules\@lancedb\lancedb" (
  echo Installing dependencies once...
