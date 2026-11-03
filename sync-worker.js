@@ -10,7 +10,7 @@ async function run(){
    const note=notes.get(job.id);
    if(!note){storage.indexed(job.id);continue}
    try{const result=await vectors.syncNote(note);if(result.enabled){storage.indexed(job.id);processed++}}
-   catch(error){storage.failed(job.id,error.message);console.error('Vector retry:',error.message)}
+   catch(error){storage.failed(job.id,error.code||error.name||'EMBEDDING_ERROR');console.error('Vector retry failed:',error.code||error.name||'EMBEDDING_ERROR')}
   }
   return {processed}
  }finally{busy=false}
