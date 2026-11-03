@@ -25,19 +25,7 @@ if not exist "package.json" (
  pause
  exit /b 2
 )
-if not exist "node_modules\" (
- echo [INFO] Installing dependencies...
- if exist "package-lock.json" (
-  call npm.cmd ci
- ) else (
-  call npm.cmd install
- )
- if errorlevel 1 goto :failed
-)
-echo [INFO] Checking project dependencies...
-call npm.cmd install --no-audit --no-fund
-if errorlevel 1 goto :failed
-node.exe -e "const s=require('./package.json').scripts||{};process.exit(s.start?0:s.dev?1:2)"
+echo [INFO] Installing or updating Node.js dependencies...\ncall npm.cmd install --no-audit --no-fund\nif errorlevel 1 goto :failed\nnode.exe -e "const s=require('./package.json').scripts||{};process.exit(s.start?0:s.dev?1:2)"
 if errorlevel 1 goto :check_dev
 echo [INFO] Open http://127.0.0.1:5173 in your browser.
 start "" "http://127.0.0.1:5173"
