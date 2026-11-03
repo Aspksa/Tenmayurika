@@ -21,7 +21,8 @@ async function run(){
  function scan(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const full=path.join(dir,entry.name);if(entry.isSymbolicLink())throw Error('Символическая ссылка в резервной копии');if(entry.isDirectory())scan(full);else if(entry.isFile()){const hash=crypto.createHash('sha256');const fd=fs.openSync(full,'r');try{const buffer=Buffer.allocUnsafe(1048576);let n;while((n=fs.readSync(fd,buffer,0,buffer.length,null))>0)hash.update(buffer.subarray(0,n))}finally{fs.closeSync(fd)}manifest.files.push({path:path.relative(dest,full).split(path.sep).join('/'),sha256:hash.digest('hex')})}}}
  scan(dest);
  fs.writeFileSync(path.join(dest,'manifest.json'),JSON.stringify(manifest,null,2));
- console.log('Копия SQLite и LanceDB:',dest);
+ const verified=require('./verify-complete').verify(dest);
+ console.log('Проверенная копия SQLite и LanceDB:',dest,verified.files,'файлов');
 }
 if(require.main===module)run().catch(e=>{console.error('Ошибка:',e.message);process.exitCode=1});
 module.exports={run};
