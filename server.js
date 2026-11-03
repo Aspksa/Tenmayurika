@@ -25,12 +25,10 @@ if(req.method==='GET'&&p==='/api/workspace')return respond(res,200,await storage
 if(req.method==='POST'&&p==='/api/items'){
 const input=await body(req),collection=input.collection;
 if(!['notes','tasks'].includes(collection)||typeof input.title!=='string'||!input.title.trim()||input.title.length>200)return respond(res,400,{error:'Invalid item'});
-const data=await storage.load();data[collection]??=[];const item={id:require('node:crypto').randomUUID(),title:input.title.trim(),content:String(input.content||'').slice(0,20000),done:false,createdAt:new Date().toISOString()};data[collection].unshift(item);await storage.save(data);if(collection==='notes'){storage.syncNode(item);syncWorker.run().catch(e=>console.error('LanceDB indexing failed:',e.message))}return respond(res,201,item)}
+const item={id:require('node:crypto').randomUUID(),title:input.title.trim(),content:typeof input.content==='string'?input.content.slice(0,20000):'',done:false,createdAt:new Date().toISOString()};storage.mutate(data=>{data[collection]??=[];data[collection].unshift(item)});if(collection==='notes'){storage.syncNode(item);syncWorker.run().catch(e=>console.error('LanceDB indexing failed:',e.message))}return respond(res,201,item)}
 if(req.method==='PATCH'&&p==='/api/items'){
 const input=await body(req);if(!['notes','tasks'].includes(input.collection))return respond(res,400,{error:'Invalid collection'});
-const data=await storage.load(),item=(data[input.collection]||[]).find(x=>x.id===input.id);if(!item)return respond(res,404,{error:'Not found'});
-if(typeof input.done==='boolean'&&input.collection==='tasks')item.done=input.done;
-await storage.save(data);return respond(res,200,item)}
+const item=storage.mutate(data=>{const found=(data[input.collection]||[]).find(x=>x.id===input.id);if(!found)return null;if(typeof input.done==='boolean'&&input.collection==='tasks')found.done=input.done;return {...found}});if(!item)return respond(res,404,{error:'Not found'});return respond(res,200,item)}
 if(req.method==='GET'&&allowed.has(p)){const name=allowed.get(p),type=name.endsWith('.css')?'text/css; charset=utf-8':name.endsWith('.js')?'application/javascript; charset=utf-8':'text/html; charset=utf-8';return respond(res,200,fs.readFileSync(path.join(ROOT,name),'utf8'),type)}
 return respond(res,404,{error:'Not found'})
 }catch(e){console.error('Request failed:',e);respond(res,e.message==='Request too large'?413:e instanceof SyntaxError?400:500,{error:e.message==='Request too large'?'Request too large':e instanceof SyntaxError?'Invalid JSON':'Internal server error'})}});
