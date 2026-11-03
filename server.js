@@ -13,6 +13,7 @@ const allowed=new Map([['/', 'index.html'],['/index.html','index.html'],['/style
 function respond(res,status,body,type='application/json; charset=utf-8'){res.writeHead(status,{'Content-Type':type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});res.end(typeof body==='string'?body:JSON.stringify(body))}
 async function body(req){let data='';for await(const part of req){data+=part;if(data.length>100000)throw Error('Request too large')}return JSON.parse(data||'{}')}
 const server=http.createServer(async(req,res)=>{try{
+const host=req.headers.host||'';if(!/^127\.0\.0\.1:\d+$/.test(host)&&host!=='localhost:'+String(server.address()?.port||PORT))return respond(res,403,{error:'Forbidden host'});
 const url=new URL(req.url,'http://localhost');const p=url.pathname;
 if(!['GET','HEAD','OPTIONS'].includes(req.method)){const origin=req.headers.origin;if(origin){let parsed;try{parsed=new URL(origin)}catch{return respond(res,403,{error:'Forbidden origin'})}if(parsed.hostname!=='127.0.0.1'||Number(parsed.port||80)!==Number(server.address()?.port||PORT))return respond(res,403,{error:'Forbidden origin'})}}
 if(req.method==='GET'&&p==='/api/health')return respond(res,200,{ok:true,version:'0.3.0'});
