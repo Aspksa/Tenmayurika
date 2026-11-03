@@ -6,9 +6,9 @@ cd /d "%~dp0" || exit /b 1
 set "NODE=node.exe"
 set "NPM=npm.cmd"
 if exist "runtime\node\node.exe" (
- set "NODE=%CD%\runtime\node\node.exe"
- set "NPM=%CD%\runtime\node\npm.cmd"
- set "PATH=%CD%\runtime\node;%PATH%"
+ set "NODE=%~dp0runtime\node\node.exe"
+ set "NPM=%~dp0runtime\node\npm.cmd"
+ set "PATH=%~dp0runtime\node;%PATH%"
 )
 "%NODE%" -e "process.exit(Number(process.versions.node.split('.')[0])>=24?0:1)"
 if errorlevel 1 (
@@ -16,9 +16,9 @@ if errorlevel 1 (
  powershell.exe -NoProfile -NonInteractive -File "tools\bootstrap-node.ps1"
  if errorlevel 1 goto :node_error
  if exist "runtime\node\node.exe" (
-  set "NODE=%CD%\runtime\node\node.exe"
-  set "NPM=%CD%\runtime\node\npm.cmd"
-  set "PATH=%CD%\runtime\node;%PATH%"
+  set "NODE=%~dp0runtime\node\node.exe"
+  set "NPM=%~dp0runtime\node\npm.cmd"
+  set "PATH=%~dp0runtime\node;%PATH%"
  )
 )
 
