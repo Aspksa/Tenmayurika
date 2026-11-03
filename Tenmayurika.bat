@@ -11,17 +11,17 @@ if exist "runtime\node\node.exe" (
  set "PATH=%~dp0runtime\node;%PATH%"
 )
 "%NODE%" -e "process.exit(Number(process.versions.node.split('.')[0])>=24?0:1)"
-if errorlevel 1 (
- echo [INFO] Подготовка переносного Node.js 24...
- powershell.exe -NoProfile -NonInteractive -File "%~dp0tools\bootstrap-node.ps1"
- if errorlevel 1 goto :node_error
- if exist "runtime\node\node.exe" (
-  set "NODE=%~dp0runtime\node\node.exe"
-  set "NPM=%~dp0runtime\node\npm.cmd"
-  set "PATH=%~dp0runtime\node;%PATH%"
- )
-)
-
+if errorlevel 1 goto :bootstrap_node
+goto :python_check
+:bootstrap_node
+echo [INFO] Подготовка переносного Node.js 24...
+powershell.exe -NoProfile -NonInteractive -File "%~dp0tools\bootstrap-node.ps1"
+if errorlevel 1 goto :node_error
+if not exist "%~dp0runtime\node\node.exe" goto :node_error
+set "NODE=%~dp0runtime\node\node.exe"
+set "NPM=%~dp0runtime\node\npm.cmd"
+set "PATH=%~dp0runtime\node;%PATH%"
+:python_check
 if not exist "%~dp0runtime\python\python.exe" (
  echo [INFO] Проверка переносного Python...
  powershell.exe -NoProfile -NonInteractive -File "%~dp0tools\bootstrap-python.ps1"
