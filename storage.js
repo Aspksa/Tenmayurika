@@ -13,6 +13,7 @@ function connect(){
 function ensure(){if(!db)connect()}
 async function load(){ensure();return JSON.parse(db.prepare('SELECT payload FROM workspace WHERE id=1').get().payload)}
 async function save(data){ensure();db.prepare('UPDATE workspace SET payload=? WHERE id=1').run(JSON.stringify(data))}
+function mutate(change){ensure();db.exec('BEGIN IMMEDIATE');try{const data=JSON.parse(db.prepare('SELECT payload FROM workspace WHERE id=1').get().payload);const result=change(data);db.prepare('UPDATE workspace SET payload=? WHERE id=1').run(JSON.stringify(data));db.exec('COMMIT');return result}catch(e){db.exec('ROLLBACK');throw e}}
 function syncNode(note){ensure();db.prepare('INSERT OR IGNORE INTO vector_queue(id) VALUES(?)').run(note.id);db.prepare("INSERT INTO knowledge_nodes(id,title,content) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,content=excluded.content").run(note.id,note.title,note.content||'')}
 function graph(){ensure();return {nodes:db.prepare('SELECT * FROM knowledge_nodes').all(),edges:db.prepare('SELECT * FROM knowledge_edges').all()}}
 function pending(){ensure();return db.prepare('SELECT id,attempts FROM vector_queue ORDER BY attempts,id LIMIT 20').all()}
@@ -20,4 +21,4 @@ function indexed(id){ensure();db.prepare('DELETE FROM vector_queue WHERE id=?').
 function failed(id,error){ensure();db.prepare('UPDATE vector_queue SET attempts=attempts+1,last_error=? WHERE id=?').run(String(error).slice(0,200),id)}
 async function backup(){ensure();const folder=path.join(__dirname,'backups');fs.mkdirSync(folder,{recursive:true});const name='tenmayurika-'+Date.now()+'.sqlite';await require('node:sqlite').backup(db,path.join(folder,name));return {file:name}}
 function close(){if(db){db.close();db=undefined}}
-module.exports={connect,load,save,syncNode,graph,pending,indexed,failed,backup,close};
+module.exports={connect,load,save,mutate,syncNode,graph,pending,indexed,failed,backup,close};
