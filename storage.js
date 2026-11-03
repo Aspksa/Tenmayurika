@@ -1,7 +1,8 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
 const {DatabaseSync}=require('node:sqlite');
-const dir=path.join(__dirname,'data'),file=path.join(dir,'tenmayurika.sqlite');
+// TENMAYURIKA_DATA_DIR позволяет тестам работать с изолированной копией базы.
+const dir=process.env.TENMAYURIKA_DATA_DIR?path.resolve(process.env.TENMAYURIKA_DATA_DIR):path.join(__dirname,'data'),file=path.join(dir,'tenmayurika.sqlite');
 let db;
 let backupInProgress=null;
 function empty(){return {notes:[],tasks:[]}}

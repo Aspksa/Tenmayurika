@@ -2,6 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'tenmayurika-chat-'));
 process.env.TENMAYURIKA_MEMORY_DB=path.join(dir,'facts.sqlite');
+process.env.TENMAYURIKA_DATA_DIR=dir;
 delete process.env.CHAT_URL;
 const {server}=require('../server');
 test('avatar chat answers locally from facts and UI assets are served',async()=>{

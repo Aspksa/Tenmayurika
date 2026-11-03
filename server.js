@@ -49,6 +49,16 @@ async function handleFacts(req,res,p,url){
 }
 // Строки вида «FACT: субъект | связь | объект» в тексте заметки сохраняются как факты.
 function ingestNoteFacts(item){if(!item.content||!item.content.includes('FACT:'))return;try{memory.extractFacts(item.content,'note:'+item.id)}catch(e){console.error('Fact ingestion failed:',e.name)}}
+// Общие операции с записями: используются API и инструментами аватара.
+function addItem(collection,title,content){
+ if(!['notes','tasks'].includes(collection)||typeof title!=='string'||!title.trim()||title.length>200)throw new TypeError('Invalid item');
+ const item={id:require('node:crypto').randomUUID(),title:title.trim(),content:typeof content==='string'?content.slice(0,20000):'',done:false,createdAt:new Date().toISOString()};
+ storage.mutate(data=>{data[collection]??=[];data[collection].unshift(item)});
+ if(collection==='notes'){storage.syncNode(item);ingestNoteFacts(item);syncWorker.run().catch(e=>console.error('LanceDB indexing failed:',e.message))}
+ return item;
+}
+function updateItem(collection,id,done){return storage.mutate(data=>{const found=(data[collection]||[]).find(x=>x.id===id);if(!found)return null;if(typeof done==='boolean'&&collection==='tasks')found.done=done;return {...found}})}
+const chatContext={addItem,setTaskDone:(id,done)=>updateItem('tasks',id,done)};
 const server=http.createServer(async(req,res)=>{try{
 const host=req.headers.host||'';if(host!=='127.0.0.1:'+String(server.address()?.port||PORT)&&host!=='localhost:'+String(server.address()?.port||PORT))return respond(res,403,{error:'Forbidden host'});
 const url=new URL(req.url,'http://localhost');const p=url.pathname;
@@ -62,15 +72,15 @@ if(req.method==='POST'&&p==='/api/sync')return respond(res,200,await syncWorker.
 if(req.method==='GET'&&p==='/api/graph')return respond(res,200,storage.graph());
 if(req.method==='GET'&&p==='/api/search'){const query=url.searchParams.get('q')||'';if(!query.trim())return respond(res,400,{error:'Missing query'});return respond(res,200,await vectorStore.search(query));}
 if(p==='/api/facts'||p.startsWith('/api/facts/'))return handleFacts(req,res,p,url);
-if(req.method==='POST'&&p==='/api/chat'){try{return respond(res,200,await chat.reply(await body(req)))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
+if(req.method==='POST'&&p==='/api/chat'){try{return respond(res,200,await chat.reply(await body(req),chatContext))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
 if(req.method==='GET'&&p==='/api/workspace')return respond(res,200,await storage.load());
 if(req.method==='POST'&&p==='/api/items'){
 const input=await body(req),collection=input.collection;
 if(!['notes','tasks'].includes(collection)||typeof input.title!=='string'||!input.title.trim()||input.title.length>200)return respond(res,400,{error:'Invalid item'});
-const item={id:require('node:crypto').randomUUID(),title:input.title.trim(),content:typeof input.content==='string'?input.content.slice(0,20000):'',done:false,createdAt:new Date().toISOString()};storage.mutate(data=>{data[collection]??=[];data[collection].unshift(item)});if(collection==='notes'){storage.syncNode(item);ingestNoteFacts(item);syncWorker.run().catch(e=>console.error('LanceDB indexing failed:',e.message))}return respond(res,201,item)}
+return respond(res,201,addItem(collection,input.title,input.content))}
 if(req.method==='PATCH'&&p==='/api/items'){
 const input=await body(req);if(!['notes','tasks'].includes(input.collection))return respond(res,400,{error:'Invalid collection'});
-const item=storage.mutate(data=>{const found=(data[input.collection]||[]).find(x=>x.id===input.id);if(!found)return null;if(typeof input.done==='boolean'&&input.collection==='tasks')found.done=input.done;return {...found}});if(!item)return respond(res,404,{error:'Not found'});return respond(res,200,item)}
+const item=updateItem(input.collection,input.id,input.done);if(!item)return respond(res,404,{error:'Not found'});return respond(res,200,item)}
 if(req.method==='GET'&&allowed.has(p)){const name=allowed.get(p);return respond(res,200,fs.readFileSync(path.join(ROOT,name),'utf8'),TYPES[path.extname(name)])}
 if(req.method==='GET'&&AVATAR_PATH.test(p)){const file=path.join(ROOT,p.slice(1));if(!fs.existsSync(file))return respond(res,404,{error:'Not found'});res.writeHead(200,{'Content-Type':'image/webp','X-Content-Type-Options':'nosniff','Cache-Control':'public, max-age=86400'});return res.end(fs.readFileSync(file))}
 return respond(res,404,{error:'Not found'})
