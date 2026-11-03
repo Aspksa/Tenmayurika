@@ -22,6 +22,7 @@ set "NODE=%~dp0runtime\node\node.exe"
 set "NPM=%~dp0runtime\node\npm.cmd"
 set "PATH=%~dp0runtime\node;%PATH%"
 :python_check
+if /i "%~1"=="doctor" goto :dependencies
 if not exist "%~dp0runtime\python\python.exe" (
  echo [INFO] Проверка переносного Python...
  powershell.exe -NoProfile -NonInteractive -File "%~dp0tools\bootstrap-python.ps1"
