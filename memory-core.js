@@ -7,6 +7,8 @@ const DB=process.env.TENMAYURIKA_MEMORY_DB ? path.resolve(process.env.TENMAYURIK
 function open(){
  fs.mkdirSync(path.dirname(DB),{recursive:true});
  const db=new DatabaseSync(DB);
+ // Встроенный lower() SQLite меняет регистр только у ASCII, поэтому для кириллицы нужен свой.
+ db.function('unicode_lower',{deterministic:true},value=>typeof value==='string'?value.toLocaleLowerCase():value);
  db.exec(`PRAGMA busy_timeout=5000;
  CREATE TABLE IF NOT EXISTS memory_facts(
  id TEXT PRIMARY KEY, subject TEXT NOT NULL, predicate TEXT NOT NULL, object TEXT NOT NULL,
@@ -79,11 +81,11 @@ function searchFacts(query,limit=30){
   const escaped=term.replace(/[\\%_]/g,'\\$&');
   const pattern='%'+escaped+'%';
   return db.prepare(`SELECT *, 
-   (CASE WHEN instr(lower(subject),?)>0 THEN 1 ELSE 0 END +
-    CASE WHEN instr(lower(predicate),?)>0 THEN 1 ELSE 0 END +
-    CASE WHEN instr(lower(object),?)>0 THEN 1 ELSE 0 END) AS score
+   (CASE WHEN instr(unicode_lower(subject),?)>0 THEN 1 ELSE 0 END +
+    CASE WHEN instr(unicode_lower(predicate),?)>0 THEN 1 ELSE 0 END +
+    CASE WHEN instr(unicode_lower(object),?)>0 THEN 1 ELSE 0 END) AS score
    FROM memory_facts
-   WHERE lower(subject) LIKE ? ESCAPE '\\' OR lower(predicate) LIKE ? ESCAPE '\\' OR lower(object) LIKE ? ESCAPE '\\'
+   WHERE unicode_lower(subject) LIKE ? ESCAPE '\\' OR unicode_lower(predicate) LIKE ? ESCAPE '\\' OR unicode_lower(object) LIKE ? ESCAPE '\\'
    ORDER BY score DESC,observed_at DESC LIMIT ?`).all(term,term,term,pattern,pattern,pattern,limit);
  }finally{db.close()}
 }
