@@ -49,7 +49,9 @@ if not exist "%~dp0tools\launcher.js" goto :missing
 if not errorlevel 1 goto :deps_ready
 if exist "%~dp0tools\progress.js" "%NODE%" "%~dp0tools\progress.js" 3
 echo [*] 🔧 Восстановление зависимостей...
-call "%NPM%" install --no-audit --no-fund
+set "NPM_MODE=install"
+if exist "%~dp0package-lock.json" set "NPM_MODE=ci"
+call "%NPM%" %NPM_MODE% --no-audit --no-fund
 if errorlevel 1 goto :dependencies
 "%NODE%" -e "require('dotenv');import('@lancedb/lancedb').then(()=>process.exit(0),()=>process.exit(1))" >nul 2>nul
 if errorlevel 1 goto :dependencies
