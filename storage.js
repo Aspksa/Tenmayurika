@@ -42,7 +42,7 @@ async function createBackup(){
   try{const buffer=Buffer.allocUnsafe(1024*1024);let count;while((count=fs.readSync(fd,buffer,0,buffer.length,null))>0)hash.update(buffer.subarray(0,count))}finally{fs.closeSync(fd)}
   const sha256=hash.digest('hex');
   fs.writeFileSync(checksumFile,sha256+'  '+name+'\n',{flag:'wx'});
-  const candidates=fs.readdirSync(folder).filter(x=>/^tenmayurika-\d+-[a-f0-9]{8}\.sqlite$/.test(x)&&x!==name);
+  const candidates=fs.readdirSync(folder).filter(x=>/^tenmayurika-\d+-[a-f0-9]{8}\.sqlite$/.test(x)&&x!==name).sort().reverse().slice(4);
   const errors=[];
   for(const old of candidates){
    try{
