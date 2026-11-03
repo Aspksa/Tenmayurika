@@ -22,6 +22,8 @@ jobs:
           node --check sync-worker.js
           node --check tools/verify-backup.js
           node --check tools/backup-complete.js
+          node --check tools/maintenance.js
+          node --check vector-store.js
           node --check tools/verify-complete.js
       - name: Run tests
         run: npm test
