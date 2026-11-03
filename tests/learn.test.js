@@ -8,6 +8,7 @@ const {byRules,parseLines}=require('../learn');
 test('rules find simple Russian facts without a model',()=>{
  const f=byRules('Кстати, Анна любит зелёный чай. У мамы день рождения 12 марта! Я живу в Казани. Погода хорошая.');
  assert.deepEqual(f,[{subject:'Анна',predicate:'любит',object:'зелёный чай'},{subject:'Мамы',predicate:'день рождения',object:'12 марта'},{subject:'Я',predicate:'живу в',object:'Казани'}]);
+ assert.deepEqual(byRules('Анна живёт в Казани? Пётр живёт в Перми!'),[{subject:'Пётр',predicate:'живёт в',object:'Перми'}]);
  assert.deepEqual(byRules('Меня зовут Анна.'),[{subject:'Я',predicate:'зовут',object:'Анна'}]);
  assert.deepEqual(parseLines('FACT: Анна | любит | чай\n- FACT: | Кот | зовут | Мурзик\nNONE'),[{subject:'Анна',predicate:'любит',object:'чай'},{subject:'Кот',predicate:'зовут',object:'Мурзик'}]);
 });
@@ -22,5 +23,10 @@ test('learn API proposes only unknown facts and never saves them itself',async()
   assert.deepEqual(r.facts,[{subject:'Анна',predicate:'работает в',object:'больнице'}]);
   assert.equal((await (await fetch(base+'/api/facts')).json()).length,1);
   assert.equal((await post('/api/learn',{text:''})).status,400);
+  // Отставленный при разборе факт снова можно предложить.
+  await post('/api/facts',{subject:'Анна',predicate:'живёт в',object:'Казань'});await post('/api/facts',{subject:'Анна',predicate:'живёт в',object:'Пермь'});
+  const c=(await (await fetch(base+'/api/facts/conflicts')).json())[0];
+  await post('/api/facts/conflicts/resolve',{id:c.id,keep:'newer'});
+  assert.deepEqual((await (await post('/api/learn',{text:'Анна живёт в Казань.'})).json()).facts,[{subject:'Анна',predicate:'живёт в',object:'Казань'}]);
  }finally{await new Promise(r=>server.close(r));fs.rmSync(dir,{recursive:true,force:true})}
 });

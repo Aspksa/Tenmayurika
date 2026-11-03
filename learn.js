@@ -18,7 +18,9 @@ const RULES=[
 const clean=s=>String(s||'').replace(/^[«"'\s]+|[»"'\s.,;:!?]+$/g,'').replace(/\s+/g,' ').trim();
 function byRules(text){
  const out=[];
- for(const raw of String(text).split(/[.!?\n;]+/)){
+ // Предложения вместе со знаком конца: вопросы («Анна живёт в Казани?») — не факты.
+ for(const raw of String(text).match(/[^.!?\n;]+[.!?\n;]*/g)||[]){
+  if(/\?/.test(raw))continue;
   const line=clean(raw.replace(/^(кстати|вообще|а ещё|а еще|и|ну)\s*,?\s+/i,''));if(line.length<5)continue;
   for(const [re,pick] of RULES){const m=line.match(re);if(m){const [s,p,o]=pick(m).map(clean);if(s&&p&&o)out.push({subject:s.charAt(0).toUpperCase()+s.slice(1),predicate:p.toLocaleLowerCase(),object:o});break}}
  }
@@ -41,7 +43,7 @@ async function byModel(text){
 }
 // Уже известное не предлагаем повторно.
 function known(f){
- try{const k=x=>String(x).toLocaleLowerCase();return memory.queryFacts({subject:f.subject,limit:500}).some(x=>k(x.predicate)===k(f.predicate)&&k(x.object)===k(f.object))}catch{return false}
+ try{const k=x=>String(x).toLocaleLowerCase();return memory.queryFacts({subject:f.subject,limit:500}).some(x=>!x.valid_to&&k(x.predicate)===k(f.predicate)&&k(x.object)===k(f.object))}catch{return false}
 }
 async function extract(input){
  if(!input||typeof input!=='object'||typeof input.text!=='string'||!input.text.trim())throw new TypeError('Invalid text');
