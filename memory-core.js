@@ -73,7 +73,19 @@ function extractFacts(text,sourceId){
 function searchFacts(query,limit=30){
  const term=normalize(query,'query',300).toLocaleLowerCase();
  if(!Number.isInteger(limit)||limit<1||limit>100)throw new TypeError('Invalid limit');
- return queryFacts({limit:500}).map(f=>({...f,score:[f.subject,f.predicate,f.object].filter(x=>x.toLocaleLowerCase().includes(term)).length})).filter(f=>f.score>0).sort((a,b)=>b.score-a.score||b.observed_at.localeCompare(a.observed_at)).slice(0,limit);
+ const db=open();
+ try{
+  // Search the complete table rather than only the newest 500 facts.
+  const escaped=term.replace(/[\\%_]/g,'\\$&');
+  const pattern='%'+escaped+'%';
+  return db.prepare(`SELECT *, 
+   (CASE WHEN instr(lower(subject),?)>0 THEN 1 ELSE 0 END +
+    CASE WHEN instr(lower(predicate),?)>0 THEN 1 ELSE 0 END +
+    CASE WHEN instr(lower(object),?)>0 THEN 1 ELSE 0 END) AS score
+   FROM memory_facts
+   WHERE lower(subject) LIKE ? ESCAPE '\\' OR lower(predicate) LIKE ? ESCAPE '\\' OR lower(object) LIKE ? ESCAPE '\\'
+   ORDER BY score DESC,observed_at DESC LIMIT ?`).all(term,term,term,pattern,pattern,pattern,limit);
+ }finally{db.close()}
 }
 function queryFacts({subject,limit=50}={}){
  if(!Number.isInteger(limit)||limit<1||limit>500)throw new TypeError('Invalid limit');
