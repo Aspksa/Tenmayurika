@@ -143,3 +143,19 @@ test('review fix: an older indexing completion does not drop a newer edit',()=>{
  storage.indexed(id,again.version);
  assert.ok(!storage.pending().some(j=>j.id===id));
 });
+test('planner quick entry parse and day notes',async()=>{
+ const {server}=require('../server');
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ try{
+  const base='http://127.0.0.1:'+server.address().port;
+  const post=async(p,body,method='POST')=>{const r=await fetch(base+p,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return {status:r.status,data:await r.json()}};
+  const parsed=(await post('/api/parse',{text:'созвон с командой завтра в 10:00 #работа !'})).data;
+  assert.equal(parsed.title,'созвон с командой');assert.equal(parsed.category,'work');assert.equal(parsed.priority,'high');assert.equal(parsed.time,'10:00');assert.ok(parsed.due);
+  assert.deepEqual((await post('/api/parse',{text:'купить хлеб'})).data,{title:'купить хлеб',category:null,priority:null,due:null,time:null});
+  assert.equal((await post('/api/parse',{text:''})).status,400);
+  const note=(await post('/api/items',{collection:'notes',title:'Дневник',content:'день',day:'2026-11-03'})).data;
+  assert.equal(note.day,'2026-11-03');
+  assert.equal((await post('/api/items',{collection:'notes',id:note.id,day:null},'PATCH')).data.day,null);
+  assert.equal((await post('/api/items',{collection:'notes',title:'x',day:'03.11'})).status,400);
+ }finally{await new Promise(r=>server.close(r))}
+});

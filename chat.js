@@ -11,7 +11,7 @@ const planner=require('./planner');
 const crypto=require('node:crypto');
 
 const MAX_MESSAGE=2000,MAX_HISTORY=12,MAX_TOOL_ROUNDS=4;
-const PAGES={home:'Обзор',tasks:'Дела',notes:'Заметки',calendar:'Календарь',facts:'Факты памяти',settings:'Настройки проекта'};
+const PAGES={home:'Обзор',planner:'Планер',tasks:'Дела',notes:'Заметки',calendar:'Календарь',facts:'Факты памяти',settings:'Настройки проекта'};
 
 // Описание инструментов: id совпадает с переключателями в настройках аватара.
 const TOOLS={
@@ -59,6 +59,7 @@ function pageFrom(text){
  if(PAGES[t])return t;
  if(/обзор|главн|домой|начал/.test(t))return 'home';
  // Сначала явные разделы, «дела» — последними и только с начала слова («раздел», «модели» не считаются).
+ if(/планер|планировщ/.test(t))return 'planner';
  if(/календар|расписан|повестк/.test(t))return 'calendar';
  if(/знани|заметк|база/.test(t))return 'notes';
  if(/факт|памят/.test(t))return 'facts';
@@ -408,4 +409,10 @@ async function reply(input,ctx={}){
  }
  return {reply:localReply(name,facts,notes,enabled),source:'local',...pub(result)};
 }
-module.exports={reply,parseCommand,TOOLS};
+// Разбор строки быстрого ввода планера. Префиксы «дело:», «рабочее дело:» и т.п. допускаются.
+function parseTask(text){
+ const t=String(text).trim(),m=t.match(/^(?:добавь\s+|новое\s+|создай\s+|запиши\s+)?((?:(?:рабоч|личн|важн|срочн)\S*\s+){0,2})(?:дело|задач[уа])\s*[:—–-]\s*([\s\S]+)$/i)||t.match(/^()(?:работа|по работе)\s*:\s*([\s\S]+)$/i);
+ const args=m?taskArgs(m[1]+(/^(работа|по работе)/i.test(t)?' рабоч':''),m[2]):taskArgs('',t);
+ return {title:args.title||t,category:args.category||null,priority:args.priority||null,due:args.due||null,time:args.time||null};
+}
+module.exports={reply,parseCommand,parseTask,TOOLS};

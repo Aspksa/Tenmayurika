@@ -67,6 +67,8 @@ function itemFields(collection,input){
   if('priority' in input){if(!PRIORITIES.includes(input.priority))throw new TypeError('Приоритет: low, normal или high');out.priority=input.priority}
  }
  if(collection==='notes'&&'pinned' in input){if(typeof input.pinned!=='boolean')throw new TypeError('Invalid pinned');out.pinned=input.pinned}
+ // day: заметка привязана к дню планера («Заметка дня» и заметки дня).
+ if(collection==='notes'&&'day' in input){if(input.day===null||input.day==='')out.day=null;else if(typeof input.day==='string'&&validDate(input.day))out.day=input.day;else throw new TypeError('Дата: ГГГГ-ММ-ДД')}
  return out;
 }
 function addItem(collection,title,content,extra={}){
@@ -128,6 +130,8 @@ if(req.method==='GET'&&p==='/api/search'){const query=url.searchParams.get('q')|
 if(p==='/api/facts'||p.startsWith('/api/facts/'))return await handleFacts(req,res,p,url);
 if(p==='/api/llm'||p.startsWith('/api/llm/'))return await handleLlm(req,res,p);
 if(req.method==='POST'&&p==='/api/chat'){try{return respond(res,200,await chat.reply(await body(req),chatContext))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
+// Быстрый ввод планера: «созвон завтра в 10 #работа !» → поля дела (тот же разбор, что у аватара).
+if(req.method==='POST'&&p==='/api/parse'){const input=await body(req);if(!input||typeof input.text!=='string'||!input.text.trim()||input.text.length>500)return respond(res,400,{error:'Invalid text'});return respond(res,200,chat.parseTask(input.text))}
 if(req.method==='GET'&&p==='/api/workspace')return respond(res,200,await storage.load());
 if(p==='/api/items'&&['POST','PATCH','DELETE'].includes(req.method)){
 const input=await body(req);
