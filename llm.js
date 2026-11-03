@@ -76,18 +76,28 @@ async function listModels(){
  return list.map(m=>typeof m==='string'?m:m&&m.id).filter(id=>typeof id==='string'&&id).sort((a,b)=>a.localeCompare(b));
 }
 
+// Текст ответа: строка или массив частей; размышления <think>…</think> (Qwen3, DeepSeek-R1) отбрасываются.
+function messageText(msg){
+ const c=msg&&msg.content;
+ const raw=typeof c==='string'?c:Array.isArray(c)?c.map(p=>typeof p==='string'?p:p&&typeof p.text==='string'?p.text:'').join(''):'';
+ return raw.replace(/<think>[\s\S]*?(<\/think>|$)/gi,'').trim();
+}
+// Сколько ждать модель: долгий ответ лучше честной ошибки, чем вечные «три точки».
+const TIMEOUT_MS=60000;
 async function complete({messages,tools}){
  const c=config();if(!c)throw Error('Model not configured');
  const body={model:c.model,messages,...(c.temperature!==undefined?{temperature:c.temperature}:{}),...(c.maxTokens?{max_tokens:c.maxTokens}:{})};
- const send=async withTools=>fetch(c.url,{method:'POST',headers:headers(c.key),body:JSON.stringify({...body,...(withTools&&tools?.length?{tools}:{})}),signal:AbortSignal.timeout(90000)});
+ const send=async withTools=>fetch(c.url,{method:'POST',headers:headers(c.key),body:JSON.stringify({...body,...(withTools&&tools?.length?{tools}:{})}),signal:AbortSignal.timeout(TIMEOUT_MS)});
  const useTools=c.useTools&&tools?.length;
  let r=await send(useTools);
- // Не все модели поддерживают инструменты: при ошибке 400/422 повторяем без них.
- if(useTools&&(r.status===400||r.status===422))r=await send(false);
+ // Не все модели поддерживают инструменты: при ошибке запроса повторяем без них.
+ if(useTools&&[400,404,422,500].includes(r.status))r=await send(false);
  if(!r.ok)throw Error('Chat API HTTP '+r.status);
- const data=await r.json(),msg=data.choices?.[0]?.message;
+ const data=await r.json(),choice=data.choices?.[0],msg=choice?.message;
  if(!msg)throw Error('Empty chat reply');
- return msg;
+ const text=messageText(msg);
+ if(!text&&!(Array.isArray(msg.tool_calls)&&msg.tool_calls.length)){const e=Error(choice.finish_reason==='length'?'Reply cut by token limit':'Empty chat reply');e.code=choice.finish_reason==='length'?'LENGTH':'EMPTY';throw e}
+ return {...msg,content:text};
 }
 
 async function test(){
@@ -97,4 +107,4 @@ async function test(){
  return {ok:true,model:c.model,ms:Date.now()-started,reply:String(msg.content||'').slice(0,300)};
 }
 
-module.exports={PRESETS,save,view,config,listModels,complete,test};
+module.exports={PRESETS,save,view,config,listModels,complete,test,messageText};

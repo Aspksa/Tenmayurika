@@ -215,12 +215,18 @@
   history.push({role:'user',text});bubble('user',text);
   const typing=h('div',{class:'msg assistant typing','aria-label':cfg.name+' думает'},h('span',{text:'•'}),h('span',{text:'•'}),h('span',{text:'•'}));
   log.append(typing);log.scrollTop=log.scrollHeight;state('think');
+  // Секундомер «думает 12 с»: видно, что ответ идёт, а не потерялся. Через 5 минут запрос прерывается.
+  const started=Date.now(),clock=h('span',{class:'typing-sec'});typing.append(clock);
+  const tick=setInterval(()=>{const s=Math.round((Date.now()-started)/1000);clock.textContent=s>=3?' думает '+s+' с':''},1000);
+  const ctrl=new AbortController(),limit=setTimeout(()=>ctrl.abort(),300000);
   let answer,tag,data={};
   try{
-   const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,avatar:cfg.name,history:prior,tools:Object.keys(TOOLS).filter(k=>cfg.tools[k])})});
+   const r=await fetch('/api/chat',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,avatar:cfg.name,history:prior,tools:Object.keys(TOOLS).filter(k=>cfg.tools[k])})});
    data=await r.json();if(!r.ok)throw Error(data.error||'Ошибка');answer=data.reply;
    if(data.tools?.length)tag='⚙ '+[...new Set(data.tools.map(t=>TOOL_TAG[t]||t))].join(', ');
-  }catch(err){answer='Не получилось ответить: '+err.message}
+  }catch(err){answer=err.name==='AbortError'?'Не получилось ответить: сервер не ответил за 5 минут. Проверьте, что окно Tenmayurika открыто.':'Не получилось ответить: '+(err.message==='Failed to fetch'?'нет связи с сервером Tenmayurika (окно сервера закрыто?)':err.message)}
+  clearInterval(tick);clearTimeout(limit);
+  if(!answer||!String(answer).trim())answer='Модель прислала пустой ответ. Нажмите «Проверить связь» в меню «Модель ИИ».';
   typing.remove();busy=false;send.disabled=false;
   if(gen!==conversation)return; // чат очистили, пока шёл ответ
   history.push({role:'assistant',text:answer,tag,...(data&&data.secret?{private:true}:{})});history=history.slice(-100);store(CHAT_KEY,history);

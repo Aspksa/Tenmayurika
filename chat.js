@@ -386,6 +386,19 @@ async function modelReply(name,message,history,facts,notes,enabled,impl,result){
 const pub=({done,outcomes,secrets,...rest})=>secrets.length?{...rest,secret:true}:rest;
 function track(result,fn,out){result.tools.push(fn);result.outcomes.push({ok:out.ok!==false,text:out.text});if(out.ok!==false)result.done.push(out.text);if(out.secret)result.secrets.push(out.text);if(out.changed)result.changed=true;if(out.action)result.actions.push(out.action)}
 
+// Понятная причина, почему модель не ответила (показывается в чате и в окне сервера).
+function modelFailure(e){
+ const m=String(e&&e.message||''),code=(m.match(/HTTP (\d+)/)||[])[1];
+ if(e&&(e.name==='TimeoutError'||e.name==='AbortError'))return 'не ответила за 60 секунд (попробуйте модель побыстрее или повторите позже)';
+ if(code==='401'||code==='403')return 'ключ API не подошёл (HTTP '+code+'). Проверьте ключ в «Модель ИИ»';
+ if(code==='404')return 'модель или адрес API не найдены (HTTP 404). Выберите модель из списка заново';
+ if(code==='429')return 'слишком много запросов или закончился лимит (HTTP 429)';
+ if(code)return 'сервис модели ответил ошибкой HTTP '+code;
+ if(e&&e.code==='LENGTH')return 'ответ не уместился в лимит токенов. Увеличьте «Длину ответа» в «Модель ИИ»';
+ if(e&&e.code==='EMPTY'||/Empty chat reply/.test(m))return 'модель прислала пустой ответ';
+ if(e instanceof TypeError||/fetch failed/.test(m))return 'нет связи с сервисом модели (интернет, адрес API или VPN)';
+ return 'ошибка '+(e&&e.name||'неизвестная');
+}
 async function reply(input,ctx={}){
  if(!input||typeof input!=='object'||typeof input.message!=='string'||!input.message.trim())throw new TypeError('Invalid message');
  const message=input.message.trim();
@@ -406,9 +419,15 @@ async function reply(input,ctx={}){
  const facts=findFacts(message),notes=await findNotes(message);
  if(llm.config()){
   try{return {reply:await modelReply(name,message,cleanHistory(input.history),facts,notes,enabled,impl,result),source:'model',...pub(result)}}
-  catch(e){console.error('Chat model failed:',e.name);const done=result.done.length?'Модель не ответила до конца, но уже сделано:\n'+result.done.map(t=>'• '+t).join('\n'):null;return {reply:done||localReply(name,facts,notes,enabled),source:'local',fallback:true,...pub(result)}}
+  catch(e){
+   const why=modelFailure(e);console.error('Chat model failed:',why);
+   const done=result.done.length?'Модель не ответила до конца, но уже сделано:\n'+result.done.map(t=>'• '+t).join('\n'):null;
+   return {reply:done||'⚠ Модель не ответила: '+why+'\nПока отвечаю без неё.\n\n'+localReply(name,facts,notes,enabled),source:'local',fallback:true,modelError:why,...pub(result)};
+  }
  }
- return {reply:localReply(name,facts,notes,enabled),source:'local',...pub(result)};
+ // Без модели честно говорим, что она не подключена, если ответить по памяти нечего.
+ const local=localReply(name,facts,notes,enabled);
+ return {reply:facts.length||notes.length?local:local+'\n\nЯзыковая модель не подключена, поэтому свободный разговор пока не получится. Правый клик по мне → «Модель ИИ»: ключ, модель, «Сохранить», затем «Проверить связь».',source:'local',...pub(result)};
 }
 // Разбор строки быстрого ввода планера. Префиксы «дело:», «рабочее дело:» и т.п. допускаются.
 function parseTask(text){
@@ -416,4 +435,4 @@ function parseTask(text){
  const args=m?taskArgs(m[1]+(/^(работа|по работе)/i.test(t)?' рабоч':''),m[2]):taskArgs('',t);
  return {title:args.title||t,category:args.category||null,priority:args.priority||null,due:args.due||null,time:args.time||null};
 }
-module.exports={reply,parseCommand,parseTask,TOOLS};
+module.exports={modelFailure,reply,parseCommand,parseTask,TOOLS};
