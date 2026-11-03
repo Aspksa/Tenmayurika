@@ -118,7 +118,7 @@ window.TenmaLearn=TenmaLearn;
 
 /* ---------- Монтирование ---------- */
 function mount(host){
- const cfg=Object.assign({paused:false,mode3d:false},read(CFG_KEY,{}));
+ const cfg=Object.assign({paused:false,mode3d:false,labels:'all'},read(CFG_KEY,{}));
  const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};
  const stage=el('div','brain-stage'),canvas=el('canvas'),tip=el('div','brain-tip');tip.hidden=true;
  const top=el('div','brain-top'),bar=el('div','brain-bar'),ctrl=el('div','brain-ctrl');
@@ -126,8 +126,9 @@ function mount(host){
  const resetBtn=el('button','brain-btn','Пробудить');resetBtn.type='button';resetBtn.title='Заново вырастить мозг из ядра';
  const find=el('input','brain-find');find.type='search';find.placeholder='Найти в мозге…';find.setAttribute('aria-label','Найти в мозге: зона, дело, заметка или факт');
  const btn3d=el('button','brain-btn');btn3d.type='button';btn3d.title='Объёмный режим: тяните мышью или пальцем, колесо или щипок — приблизить';
+ const labelBtn=el('button','brain-btn');labelBtn.type='button';labelBtn.title='Подписи зон: все, только при наведении или скрыть';
  const viewBtn=el('button','brain-btn','⟲ Вид');viewBtn.type='button';viewBtn.title='Вернуть вид по центру';
- ctrl.append(find,btn3d,viewBtn,resetBtn,pauseBtn);top.append(bar,ctrl);
+ ctrl.append(find,btn3d,labelBtn,viewBtn,resetBtn,pauseBtn);top.append(bar,ctrl);
  const empty=el('div','brain-empty');empty.hidden=true;
  stage.append(canvas,top,tip,empty);
  stage.setAttribute('role','img');
@@ -177,6 +178,11 @@ function mount(host){
  resetBtn.onclick=()=>{bloomStart=performance.now();dirty=true};
  function set3d(){btn3d.textContent=cfg.mode3d?'◉ 3D':'○ 3D';btn3d.setAttribute('aria-pressed',String(cfg.mode3d));stage.classList.toggle('mode3d',cfg.mode3d);if(!cfg.mode3d){camT.yaw=0;camT.pitch=0}dirty=true}
  set3d();
+ // Подписи: все → при наведении (видна только зона под курсором или найденная) → скрыты.
+ const LABELS={all:'Аа Подписи',hover:'Аа При наведении',off:'Аа Скрыты'};
+ function setLabels(){labelBtn.textContent=LABELS[cfg.labels]||LABELS.all;labelBtn.setAttribute('aria-label','Подписи: '+(LABELS[cfg.labels]||'').replace('Аа ',''));dirty=true}
+ setLabels();
+ labelBtn.onclick=()=>{cfg.labels=cfg.labels==='all'?'hover':cfg.labels==='hover'?'off':'all';write(CFG_KEY,cfg);setLabels()};
  btn3d.onclick=()=>{cfg.mode3d=!cfg.mode3d;write(CFG_KEY,cfg);if(cfg.mode3d){camT.pitch=-.35;camT.yaw=.5}set3d()};
  viewBtn.onclick=()=>{find.value='';setFocus('');Object.assign(camT,{yaw:cfg.mode3d?.5:0,pitch:cfg.mode3d?-.35:0,zoom:1,px:0,py:0});dirty=true};
  find.addEventListener('input',()=>setFocus(find.value));
@@ -424,6 +430,7 @@ function mount(host){
   const small=W<520,fs1=(small?9.5:10.5)*ui,fs2=(small?8.5:9)*ui;
   for(const l of model.lobes){const s=l.state;if(G.b<.55)continue;
    const dim=dimOf(l);if(dim<.5&&W<640)continue;
+   if(cfg.labels==='off'||cfg.labels==='hover'&&hoverLobe!==l.id&&!focusLobes.has(l.id)&&!(pinned&&(pinned.l===l||pinned.n?.lobe===l)))continue;
    const right=Math.cos(s.a)>=-.15,title=trim(l.label,small?16:26),sub=trim(l.sub,small?20:30);
    ctx.font='600 '+Math.round(fs1*dpr)+'px '+MONO;const w1=ctx.measureText(title).width;ctx.font=Math.round(fs2*dpr)+'px '+MONO;const w2=ctx.measureText(sub).width;
    const pad=5*dpr,bw=Math.max(w1,w2)+pad*2,bh=(fs1+fs2)*dpr+pad*2.4;
@@ -465,7 +472,7 @@ function mount(host){
  }
  const local=e=>{const r=canvas.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top]};
  // Указатель: наведение — подсказка, клик — карточка; в 3D перетаскивание вращает, колесо и щипок приближают.
- const ptrs=new Map();let drag=null,moved=false,pinch=0;
+ const ptrs=new Map();let drag=null,moved=false,pinch=0,hoverLobe=null;
  canvas.addEventListener('pointerdown',e=>{ptrs.set(e.pointerId,local(e));moved=false;idleT=0;
   if(cfg.mode3d){drag={x:e.clientX,y:e.clientY};canvas.setPointerCapture?.(e.pointerId)}
   if(ptrs.size===2){const [a,b]=[...ptrs.values()];pinch=Math.hypot(a[0]-b[0],a[1]-b[1])}});
@@ -474,7 +481,7 @@ function mount(host){
   if(cfg.mode3d&&ptrs.size===2&&pinch){const [a,b]=[...ptrs.values()],d=Math.hypot(a[0]-b[0],a[1]-b[1]);camT.zoom=clamp(camT.zoom*d/pinch,.45,3.2);pinch=d;moved=true;idleT=0;dirty=true;return}
   if(drag&&ptrs.has(e.pointerId)){const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.abs(dx)+Math.abs(dy)>3)moved=true;
    if(moved){camT.yaw+=dx*.008;camT.pitch=clamp(camT.pitch+dy*.006,-1.2,1.2);cam.yaw=camT.yaw;cam.pitch=camT.pitch;drag={x:e.clientX,y:e.clientY};idleT=0;tip.hidden=true;canvas.style.cursor='grabbing';dirty=true;return}}
-  if(e.pointerType!=='mouse'||pinned)return;const [x,y]=local(e),hit=pick(x,y);hover=hit&&hit.type==='neuron'?hit.n.item:null;canvas.style.cursor=hit?'pointer':cfg.mode3d?'grab':'default';showTip(hit,x,y,false);dirty=true});
+  if(e.pointerType!=='mouse'||pinned)return;const [x,y]=local(e),hit=pick(x,y);hover=hit&&hit.type==='neuron'?hit.n.item:null;hoverLobe=hit?(hit.l||hit.n?.lobe)?.id||null:null;canvas.style.cursor=hit?'pointer':cfg.mode3d?'grab':'default';showTip(hit,x,y,false);dirty=true});
  const up=e=>{ptrs.delete(e.pointerId);if(ptrs.size<2)pinch=0;if(!ptrs.size)drag=null};
  canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
  canvas.addEventListener('pointerleave',()=>{if(!pinned){tip.hidden=true;hover=null;dirty=true}});
