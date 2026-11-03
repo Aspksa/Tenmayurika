@@ -19,7 +19,7 @@ async function syncNote(note){
  const existing=await fetch(base+'/collections/'+collection,{headers,signal:AbortSignal.timeout(10000)});
  if(existing.status===404)await request('PUT','/collections/'+collection,{vectors:{size:vector.length,distance:'Cosine'}});
  else if(!existing.ok)throw Error('Qdrant HTTP '+existing.status);
- const id=crypto.createHash('sha256').update(note.id).digest('hex').slice(0,32);
+ const h=crypto.createHash('sha256').update(note.id).digest('hex');const id=[h.slice(0,8),h.slice(8,12),'4'+h.slice(13,16),'8'+h.slice(17,20),h.slice(20,32)].join('-');
  await request('PUT','/collections/'+collection+'/points?wait=true',{points:[{id,vector,payload:{id:note.id,title:note.title,content:note.content}}]});
  return {enabled:true,ok:true};
 }
