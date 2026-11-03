@@ -15,6 +15,7 @@
  <symbol id="i-notes" viewBox="0 0 24 24"><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H19v15H5.5A1.5 1.5 0 0 0 4 19.5z"/><path d="M4 19.5A1.5 1.5 0 0 0 5.5 21H19v-3"/><path d="M8 7.5h7M8 11h5"/></symbol>
  <symbol id="i-tasks" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="m8 12.5 2.7 2.7L16.5 9"/></symbol>
  <symbol id="i-facts" viewBox="0 0 24 24"><circle cx="6" cy="6.5" r="2.5"/><circle cx="18" cy="6.5" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8.3 7.6 10.8 16M15.7 7.6 13.2 16M8.5 6.5h7"/></symbol>
+ <symbol id="i-brain" viewBox="0 0 24 24"><path d="M10.5 4.2A2.7 2.7 0 0 0 6 6.3a3 3 0 0 0-2 4.8 3 3 0 0 0 .9 4.9A3 3 0 0 0 10.5 19.6z"/><path d="M13.5 4.2A2.7 2.7 0 0 1 18 6.3a3 3 0 0 1 2 4.8 3 3 0 0 1-.9 4.9 3 3 0 0 1-5.6 3.6z"/><path d="M10.5 9H8.5M13.5 9h2M10.5 14H8M13.5 14H16M12 4v16"/></symbol>
  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
  <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12 20 4l-6 16-2.5-6.5z"/><path d="M11.5 13.5 20 4"/></symbol>
  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
@@ -37,6 +38,7 @@
   <div class="rail-group">
    <button type="button" data-page="home" class="active" data-tip="Обзор" aria-label="Обзор"><svg class="icon"><use href="#i-home"/></svg></button>
    <button type="button" data-page="planner" data-tip="Планер: дела, календарь, заметки" aria-label="Планер"><svg class="icon"><use href="#i-calendar"/></svg><span class="rail-badge" data-badge="planner" hidden></span></button>
+   <button type="button" data-page="brain" data-tip="Мозг: живая карта памяти" aria-label="Мозг"><svg class="icon"><use href="#i-brain"/></svg></button>
    <button type="button" data-page="facts" data-tip="Факты памяти" aria-label="Факты памяти"><svg class="icon"><use href="#i-facts"/></svg></button>
   </div>
   <div class="rail-group rail-bottom">
@@ -52,6 +54,7 @@
   <section id="content" aria-live="polite"></section>
  </main>
 </div>
+<script src="/brain.js"></script>
 <script src="/app.js"></script>
 <script src="/avatar.js"></script>
 </body>

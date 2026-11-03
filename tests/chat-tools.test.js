@@ -13,6 +13,8 @@ test('chat commands are parsed into tools',()=>{
  assert.deepEqual(parseCommand('запомни Анна | живёт в | Казань').args,{subject:'Анна',predicate:'живёт в',object:'Казань'});
  assert.ok(parseCommand('запомни что-то').error);
  assert.deepEqual(parseCommand('открой дела'),{fn:'open_page',args:{page:'tasks'}});
+ assert.deepEqual(parseCommand('покажи мозг'),{fn:'open_page',args:{page:'brain'}});
+ assert.deepEqual(parseCommand('открой мозг'),{fn:'open_page',args:{page:'brain'}});
  assert.equal(parseCommand('найди Анна').fn,'search_memory');
  assert.equal(parseCommand('сделай резервную копию').fn,'create_backup');
  assert.equal(parseCommand('который час?').fn,'current_time');

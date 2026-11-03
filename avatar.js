@@ -226,6 +226,8 @@
   history.push({role:'assistant',text:answer,tag,...(data&&data.secret?{private:true}:{})});history=history.slice(-100);store(CHAT_KEY,history);
   bubble('assistant',answer,tag);state('answer',2600);
   if(data.changed)window.TenmaApp?.refresh({keepDrafts:true});
+  // Новый факт из чата — «Мозг» сразу показывает вспышку нейрона.
+  if((data.tools||[]).includes('remember_fact'))window.dispatchEvent(new CustomEvent('tenma:memory'));
   for(const a of data.actions||[])runAction(a);
   if(chat.hidden)avatar.classList.add('has-unread');else input.focus();
  });

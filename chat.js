@@ -11,7 +11,7 @@ const planner=require('./planner');
 const crypto=require('node:crypto');
 
 const MAX_MESSAGE=2000,MAX_HISTORY=12,MAX_TOOL_ROUNDS=4;
-const PAGES={home:'Обзор',planner:'Планер',tasks:'Дела',notes:'Заметки',calendar:'Календарь',facts:'Факты памяти',settings:'Настройки проекта'};
+const PAGES={home:'Обзор',planner:'Планер',tasks:'Дела',notes:'Заметки',calendar:'Календарь',facts:'Факты памяти',brain:'Мозг',settings:'Настройки проекта'};
 
 // Описание инструментов: id совпадает с переключателями в настройках аватара.
 const TOOLS={
@@ -62,6 +62,7 @@ function pageFrom(text){
  if(/планер|планировщ/.test(t))return 'planner';
  if(/календар|расписан|повестк/.test(t))return 'calendar';
  if(/знани|заметк|база/.test(t))return 'notes';
+ if(/мозг|нейрон/.test(t))return 'brain';
  if(/факт|памят/.test(t))return 'facts';
  if(/настро/.test(t))return 'settings';
  if(/(^|[^\p{L}])(дел|задач)/u.test(t))return 'tasks';
@@ -222,7 +223,7 @@ const SCHEMAS={
  pick_random:{description:'Случайно выбрать один из вариантов',parameters:{type:'object',properties:{options:{type:'array',items:{type:'string'}}},required:['options']}},
  remember_fact:{description:'Запомнить факт в виде субъект–связь–объект',parameters:{type:'object',properties:{subject:{type:'string'},predicate:{type:'string'},object:{type:'string'}},required:['subject','predicate','object']}},
  search_memory:{description:'Найти факты и заметки пользователя',parameters:{type:'object',properties:{query:{type:'string'}},required:['query']}},
- open_page:{description:'Открыть раздел интерфейса: home, tasks, notes, calendar, facts, settings',parameters:{type:'object',properties:{page:{type:'string',enum:Object.keys(PAGES)}},required:['page']}},
+ open_page:{description:'Открыть раздел интерфейса: home, tasks, notes, calendar, facts, brain (мозг — живая карта памяти), settings',parameters:{type:'object',properties:{page:{type:'string',enum:Object.keys(PAGES)}},required:['page']}},
  create_backup:{description:'Создать резервную копию базы SQLite',parameters:{type:'object',properties:{}}},
  system_status:{description:'Проверить состояние SQLite, LanceDB и памяти',parameters:{type:'object',properties:{}}},
  current_time:{description:'Узнать текущие дату и время',parameters:{type:'object',properties:{}}},
@@ -300,7 +301,7 @@ function parseCommand(text){
   return {fn:'remember_fact',args:{subject:parts[0],predicate:parts[1],object:parts[2]}};
  }
  if((m=t.match(/^(?:найди|поищи|поиск|что ты знаешь о|что ты помнишь о|что известно о)\s*[:—–-]?\s+(.+?)\??$/i)))return {fn:'search_memory',args:{query:m[1]}};
- if((m=t.match(/^(?:открой|перейди\s+(?:в|на|к)|покажи\s+раздел)\s+(.+)$/i))&&pageFrom(m[1]))return {fn:'open_page',args:{page:pageFrom(m[1])}};
+ if((m=t.match(/^(?:открой|перейди\s+(?:в|на|к)|покажи\s+раздел|покажи(?=\s+(?:мой\s+|свой\s+)?мозг))\s+(.+)$/i))&&pageFrom(m[1]))return {fn:'open_page',args:{page:pageFrom(m[1])}};
  if(/(резервн\S*\s+коп|бэкап|бекап|backup)/.test(low)&&/^(сделай|создай|запусти|нужна|сохрани|бэкап|бекап|backup|резерв)/.test(low))return {fn:'create_backup',args:{}};
  if(/^(статус|состояние|проверь систему|проверка системы|диагностика)\??$/.test(low))return {fn:'system_status',args:{}};
  if(/^(который час|сколько времени|какое (сегодня )?число|какая (сегодня )?дата|какой сегодня день|время|дата)\??$/.test(low))return {fn:'current_time',args:{}};
@@ -340,7 +341,7 @@ function taskArgs(adjectives,body){
  return Object.fromEntries(Object.entries({title:(w.rest||text).trim(),category,priority,due:w.due,time:w.time}).filter(([,v])=>v!=null));
 }
 function helpText(enabled){
- const lines={insights:'«итоги дня», «противоречия», «связи Анна»',reminders:'«напомни через 10 минут позвонить», «помодоро»',calc:'«посчитай (2+3)*4»',fun:'«брось кубик», «монетка», «выбери чай, кофе или какао»',avatar:'«поза поклон», «эффект сакура», «цвет синий», «стань больше»',sync:'«переиндексируй»',notes:'«заметка: Заголовок — текст», «рабочая заметка: …», «мои заметки»',tasks:'«дело: купить чай завтра в 18:00», «рабочее дело: отчёт в пятницу», «важное дело: …», «готово: купить чай», «рабочие дела», «дела на завтра», «просроченные»',calendar:'«что на сегодня», «что на неделе», «перенеси отчёт на понедельник», «сколько дней до 31.12»',convert:'«переведи 5 км в мили», «сколько 100 F в C», «2 ГБ в МБ»',password:'«придумай пароль на 20»',facts:'«запомни Анна | живёт в | Казань»',search:'«найди Анна»',navigate:'«открой календарь», «открой дела»',backup:'«сделай резервную копию»',status:'«статус»',clock:'«который час»'};
+ const lines={insights:'«итоги дня», «противоречия», «связи Анна»',reminders:'«напомни через 10 минут позвонить», «помодоро»',calc:'«посчитай (2+3)*4»',fun:'«брось кубик», «монетка», «выбери чай, кофе или какао»',avatar:'«поза поклон», «эффект сакура», «цвет синий», «стань больше»',sync:'«переиндексируй»',notes:'«заметка: Заголовок — текст», «рабочая заметка: …», «мои заметки»',tasks:'«дело: купить чай завтра в 18:00», «рабочее дело: отчёт в пятницу», «важное дело: …», «готово: купить чай», «рабочие дела», «дела на завтра», «просроченные»',calendar:'«что на сегодня», «что на неделе», «перенеси отчёт на понедельник», «сколько дней до 31.12»',convert:'«переведи 5 км в мили», «сколько 100 F в C», «2 ГБ в МБ»',password:'«придумай пароль на 20»',facts:'«запомни Анна | живёт в | Казань»',search:'«найди Анна»',navigate:'«открой календарь», «открой дела», «покажи мозг»',backup:'«сделай резервную копию»',status:'«статус»',clock:'«который час»'};
  const on=TOOL_IDS.filter(id=>enabled.has(id));
  if(!on.length)return 'Все мои инструменты выключены. Включите их в настройках (правый клик по мне → «Инструменты»).';
  return 'Что я умею:\n'+on.map(id=>'• '+TOOLS[id].label+': '+lines[id]).join('\n');
