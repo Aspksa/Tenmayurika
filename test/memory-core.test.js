@@ -10,7 +10,7 @@ test('memory core isolated smoke test',()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'tenmayurika-memory-'));
  try{
   const script=`const m=require(${JSON.stringify(modulePath)});const a=m.addFact({subject:'alpha',predicate:'knows',object:'beta',sourceId:'test'});const b=m.addFact({subject:'alpha',predicate:'knows',object:'beta',sourceId:'test'});const c=m.addFact({subject:'alpha',predicate:'knows',object:'gamma',sourceId:'test'});if(a.duplicate||!b.duplicate||c.conflicts!==1||m.relations('alpha').length!==2||m.conflicts().length!==1||m.searchFacts('beta').length!==1||m.diagnostics().integrity!=='ok')process.exit(2);`;
-  const result=spawnSync(process.execPath,['-e',script],{cwd:dir,encoding:'utf8'});
+  const result=spawnSync(process.execPath,['-e',script],{cwd:dir,encoding:'utf8',env:{...process.env,TENMAYURIKA_MEMORY_DB:path.join(dir,'test.sqlite')}});
   assert.equal(result.status,0,result.stderr);
  }finally{fs.rmSync(dir,{recursive:true,force:true})}
 });
