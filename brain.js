@@ -103,7 +103,8 @@ const TenmaLearn={
   const q=TenmaLearn.queue(),f=q.find(x=>x.id===id);if(!f)return;
   const r=await fetch('/api/facts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subject:f.subject,predicate:f.predicate,object:f.object,sourceId:'learn:'+(f.source||'chat'),confidence:f.via==='model'?.8:.7})});
   if(!r.ok){const d=await r.json().catch(()=>({}));throw Error(d.error||'Не удалось запомнить')}
-  TenmaLearn.save(q.filter(x=>x.id!==id));window.dispatchEvent(new CustomEvent('tenma:memory'));
+  // Берём свежую очередь: пока шёл запрос, её могли изменить другие кнопки.
+  TenmaLearn.save(TenmaLearn.queue().filter(x=>x.id!==id));window.dispatchEvent(new CustomEvent('tenma:memory'));
  },
  reject(id){TenmaLearn.save(TenmaLearn.queue().filter(x=>x.id!==id))},
  // Заметки, изменённые после прошлого разбора; за раз — не больше limit.
@@ -115,6 +116,19 @@ const TenmaLearn={
  }
 };
 window.TenmaLearn=TenmaLearn;
+
+/* ---------- Сила памяти: что и когда вспоминал чат (хранится в этом браузере) ---------- */
+// Слушатель живёт всё время, а не только на странице «Мозг»: чат на любой странице «согревает» записи.
+const RECALL_KEY='tenma.brain.recall.v1';
+function readRecall(){const r=read(RECALL_KEY,{});return r&&typeof r==='object'&&!Array.isArray(r)?r:{}}
+function recordRecall(ids){
+ if(!ids.length)return;const recall=readRecall(),now=Date.now();
+ for(const id of ids){const r=recall[id]||{n:0,t:0};r.n++;r.t=now;recall[id]=r}
+ const keys=Object.keys(recall);if(keys.length>3000)for(const k of keys.sort((a,b)=>recall[a].t-recall[b].t).slice(0,keys.length-3000))delete recall[k];
+ write(RECALL_KEY,recall);
+}
+const recallIds=d=>[...(d?.facts||[]).map(x=>'f:'+x),...(d?.notes||[]).map(x=>'n:'+x)];
+window.addEventListener('tenma:recall',e=>recordRecall(recallIds(e.detail)));
 
 /* ---------- Монтирование ---------- */
 function mount(host){
@@ -173,7 +187,7 @@ function mount(host){
  const cam={yaw:0,pitch:0,zoom:1,px:0,py:0,depth:0},camT={yaw:0,pitch:0,zoom:1,px:0,py:0};
  let idleT=0,focusQ='',focusLobes=new Set(),focusItems=new Set(),thinking=false,thinkT=0,seeds=[];
  // Сила памяти: сколько раз и когда запись вспоминали (хранится в этом браузере).
- const RECALL_KEY='tenma.brain.recall.v1';let recall=read(RECALL_KEY,{});if(!recall||typeof recall!=='object')recall={};
+ let recall=readRecall();
  const still=()=>cfg.paused||reduceQuery.matches;
 
  function setPause(){pauseBtn.textContent=cfg.paused?'▶ Движение':'❚❚ Пауза';pauseBtn.setAttribute('aria-pressed',String(cfg.paused))}
@@ -220,7 +234,6 @@ function mount(host){
   if(it.id.startsWith('t:')&&!it.dim)return clamp(.75+(it.hot?.35:0),.75,1.25); // открытое дело всегда «тёплое»
   return clamp(.12+.88*Math.exp(-age/21)+.12*Math.log2(1+(r?r.n:0)),.12,1.3);
  }
- function remember(ids){const now=Date.now();for(const id of ids){const r=recall[id]||{n:0,t:0};r.n++;r.t=now;recall[id]=r}const keys=Object.keys(recall);if(keys.length>3000)for(const k of keys.sort((a,b)=>recall[a].t-recall[b].t).slice(0,keys.length-3000))delete recall[k];write(RECALL_KEY,recall)}
 
  function resize(){
   const r=stage.getBoundingClientRect();W=Math.max(1,r.width);H=Math.max(1,r.height);
@@ -481,7 +494,7 @@ function mount(host){
   if(hit.type==='seed'){const f=hit.sd.f;tip.append(el('div','brain-tip-k','предлагаю запомнить'),el('div','brain-tip-t',f.subject+' — '+f.predicate+' → '+f.object),el('div','brain-tip-m',(String(f.source||'').startsWith('note:')?'из заметки':'из чата')+(f.via==='model'?' · нашла модель':' · по правилам')));
    if(withButton){const row=el('div','brain-row'),ok=el('button','brain-btn','✓ Запомнить'),no=el('button','brain-btn','✗');ok.type=no.type='button';ok.onclick=()=>acceptSeed(f.id);no.onclick=()=>{TenmaLearn.reject(f.id);tip.hidden=true;pinned=null};row.append(ok,no);tip.append(row)}}
   else if(hit.type==='neuron'){const it=hit.n.item,r=recall[it.id];tip.append(el('div','brain-tip-k',hit.n.lobe.label),el('div','brain-tip-t',trim(it.title,140)),el('div','brain-tip-m',it.meta+' · сила памяти '+Math.round(Math.min(1,it.str??1)*100)+'%'+(r?' · вспоминала '+r.n+' '+plural(r.n,'раз','раза','раз'):'')));
-   if(withButton){const b=el('button','brain-btn','Открыть');b.type='button';b.onclick=()=>{remember([it.id]);it.open()};tip.append(b)}}
+   if(withButton){const b=el('button','brain-btn','Открыть');b.type='button';b.onclick=()=>{recordRecall([it.id]);recall=readRecall();it.open()};tip.append(b)}}
   else{const l=hit.l;tip.append(el('div','brain-tip-k','зона'),el('div','brain-tip-t',l.label),el('div','brain-tip-m',l.items.length+' '+plural(l.items.length,'запись','записи','записей')));
    if(withButton){const b=el('button','brain-btn','Открыть раздел');b.type='button';b.onclick=()=>l.open();tip.append(b)}}
   tip.hidden=false;tip.classList.toggle('pinned',!!withButton);
@@ -527,8 +540,9 @@ function mount(host){
  const onThinking=e=>{thinking=!!e.detail?.on;thinkT=0;if(thinking){chatter=0;idleT=0}dirty=true};
  // Импульс из ядра к каждому вспомненному нейрону; запись становится «теплее».
  const onRecall=e=>{
-  const d=e.detail||{},ids=[...(d.facts||[]).map(x=>'f:'+x),...(d.notes||[]).map(x=>'n:'+x)].filter(id=>neurons.has(id));
-  if(!ids.length)return;remember(ids);
+  // Счётчики уже записал общий слушатель выше — здесь только перечитываем и анимируем.
+  recall=readRecall();const ids=recallIds(e.detail).filter(id=>neurons.has(id));
+  if(!ids.length)return;
   ids.slice(0,12).forEach((id,i)=>{const n=neurons.get(id);setTimeout(()=>{if(n.lobe.state)impulses.push({lobe:n.lobe,item:n.item,u:0,f:Math.floor(Math.random()*n.lobe.state.fil.length),recall:true})},i*140)});
   const first=neurons.get(ids[0]);coreKind='вспоминаю';coreText=first.item.title;coreTextT=3.5;
   for(const l of model.lobes)for(const it of l.items)it.str=strength(it);dirty=true;
