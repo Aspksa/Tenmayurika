@@ -1,12 +1,14 @@
 'use strict';
 const storage=require('./storage'),vectors=require('./vector-store');
 let busy=false;
+const MAX_ATTEMPTS=5;
 async function run(){
  if(busy||!process.env.EMBEDDING_URL)return {processed:0};
  busy=true;let processed=0;
  try{
   const data=await storage.load(),notes=new Map((data.notes||[]).map(n=>[n.id,n]));
   for(const job of storage.pending()){
+   if(job.attempts>=MAX_ATTEMPTS)continue;
    const note=notes.get(job.id);
    if(!note){storage.indexed(job.id);continue}
    try{const result=await vectors.syncNote(note);if(result.enabled){storage.indexed(job.id);processed++}}
