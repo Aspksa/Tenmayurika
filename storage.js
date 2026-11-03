@@ -1,22 +1,19 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path');
-const file=path.join(__dirname,'data','workspace.json');
-let pool;
+const {DatabaseSync}=require('node:sqlite');
+const dir=path.join(__dirname,'data'),file=path.join(dir,'tenmayurika.sqlite');
+let db;
 function empty(){return {notes:[],tasks:[]}}
-async function connect(){
- if(!process.env.DATABASE_URL)return;
- const {Pool}=require('pg');
- pool=new Pool({connectionString:process.env.DATABASE_URL,max:5,connectionTimeoutMillis:5000,ssl:process.env.PG_SSL==='true'?{rejectUnauthorized:true}:undefined});
- await pool.query('SELECT 1');
- await pool.query('CREATE TABLE IF NOT EXISTS workspace (id INTEGER PRIMARY KEY, payload JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now())');
- const existing=await pool.query('SELECT id FROM workspace WHERE id=1');
- if(!existing.rowCount){
-  const initial=readFile();
-  await pool.query('INSERT INTO workspace(id,payload) VALUES(1,$1::jsonb) ON CONFLICT (id) DO NOTHING',[JSON.stringify(initial)]);
- }
+function connect(){
+ fs.mkdirSync(dir,{recursive:true});db=new DatabaseSync(file);
+ db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS workspace(id INTEGER PRIMARY KEY CHECK(id=1),payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS knowledge_nodes(id TEXT PRIMARY KEY,title TEXT NOT NULL,content TEXT NOT NULL DEFAULT ''); CREATE TABLE IF NOT EXISTS knowledge_edges(source TEXT NOT NULL,target TEXT NOT NULL,relation TEXT NOT NULL,PRIMARY KEY(source,target,relation));");
+ const prior=db.prepare('SELECT payload FROM workspace WHERE id=1').get();
+ if(!prior){let data=empty();const old=path.join(dir,'workspace.json');if(fs.existsSync(old))data=JSON.parse(fs.readFileSync(old,'utf8'));db.prepare('INSERT INTO workspace(id,payload) VALUES(1,?)').run(JSON.stringify(data));}
 }
-function readFile(){try{return JSON.parse(fs.readFileSync(file,'utf8'))}catch(e){if(e.code==='ENOENT')return empty();throw e}}
-async function load(){if(!pool)return readFile();const result=await pool.query('SELECT payload FROM workspace WHERE id=1');return result.rows[0]?.payload||empty()}
-async function save(data){if(pool){await pool.query('UPDATE workspace SET payload=$1::jsonb,updated_at=now() WHERE id=1',[JSON.stringify(data)]);return}fs.mkdirSync(path.dirname(file),{recursive:true});const tmp=file+'.tmp';fs.writeFileSync(tmp,JSON.stringify(data,null,2));fs.renameSync(tmp,file)}
-async function close(){if(pool)await pool.end()}
-module.exports={connect,load,save,close};
+function ensure(){if(!db)connect()}
+async function load(){ensure();return JSON.parse(db.prepare('SELECT payload FROM workspace WHERE id=1').get().payload)}
+async function save(data){ensure();db.prepare('UPDATE workspace SET payload=? WHERE id=1').run(JSON.stringify(data))}
+function syncNode(note){ensure();db.prepare("INSERT INTO knowledge_nodes(id,title,content) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,content=excluded.content").run(note.id,note.title,note.content||'')}
+function graph(){ensure();return {nodes:db.prepare('SELECT * FROM knowledge_nodes').all(),edges:db.prepare('SELECT * FROM knowledge_edges').all()}}
+function close(){if(db){db.close();db=undefined}}
+module.exports={connect,load,save,syncNode,graph,close};
