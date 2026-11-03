@@ -19,12 +19,15 @@ if exist "runtime\node\node.exe" (
 "%NODE%" -e "process.exit(Number(process.versions.node.split('.')[0])>=24?0:1)"
 if errorlevel 1 goto :bootstrap_node
 goto :python_check
-if exist "%~dp0tools\progress.js" "%NODE%" "%~dp0tools\progress.js" 1
 :bootstrap_node
 echo [*] 🧩 Подготовка Node.js 24...
 powershell.exe -NoProfile -NonInteractive -File "%~dp0tools\bootstrap-node.ps1"
 if errorlevel 1 goto :node_error
-if not exist "%~dp0runtime\node\node.exe" goto :node_error
+if not exist "%~dp0runtime\node\node.exe" (
+ node.exe -e "process.exit(Number(process.versions.node.split('.')[0])>=24?0:1)" >nul 2>nul
+ if errorlevel 1 goto :node_error
+ goto :python_check
+)
 set "NODE=%~dp0runtime\node\node.exe"
 set "NPM=%~dp0runtime\node\npm.cmd"
 set "PATH=%~dp0runtime\node;%PATH%"
