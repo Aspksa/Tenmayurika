@@ -56,9 +56,11 @@ async function refresh(options={}){
 }
 // Значок на «Делах»: сколько открытых дел на сегодня и просрочено.
 function updateBadge(){const b=document.querySelector('[data-badge="planner"]');if(!b)return;const t=today(),n=workspace.tasks.filter(x=>!x.done&&x.due&&x.due<=t).length;b.hidden=!n;b.textContent=n>99?'99+':String(n)}
-const TITLES={home:'Добро пожаловать',planner:'Планер',settings:'Настройки проекта',facts:'Факты памяти'};
+const TITLES={home:'Добро пожаловать',planner:'Планер',brain:'Мозг',settings:'Настройки проекта',facts:'Факты памяти'};
 function render(){
+ const brainAlive=page==='brain'&&!!brainHost&&brainHost.isConnected;
  root.replaceChildren(element('h2',TITLES[page]));
+ if(page==='brain')return renderBrain(brainAlive);
  ({home:renderHome,planner:renderPlanner,facts:renderFacts,settings:renderSettings}[page]||renderHome)();
 }
 
@@ -485,6 +487,15 @@ document.addEventListener('keydown',e=>{
  else if((k==='arrowleft'||k==='arrowright')&&['day','week','month'].includes(pv.view)){const s=k==='arrowleft'?-1:1;if(pv.view==='month'){const m=pv.month;setPv({month:new Date(m.getFullYear(),m.getMonth()+s,1)})}else shiftDate(pv.view==='week'?7*s:s)}
 });
 
+/* ---------- Мозг (brain.js) ---------- */
+// render() вызывается и при фоновом обновлении: живой холст переносится без пересоздания
+// (brain.js сам слушает tenma:workspace). После ухода со страницы холст останавливается сам.
+let brainHost=null;
+function renderBrain(alive){
+ if(!alive){brainHost=h('div',{class:'brain'});if(window.TenmaBrain)window.TenmaBrain.mount(brainHost);else brainHost.append(element('p','Не удалось загрузить визуализацию.','muted'))}
+ root.append(brainHost);
+}
+
 /* ---------- Настройки ---------- */
 function renderSettings(){
  const btn=(text,fn,cls)=>h('button',{type:'button',class:cls,text,onclick:fn});
@@ -518,4 +529,4 @@ function renderFacts(){
 const ALIASES={tasks:{view:'list'},notes:{view:'notes'},calendar:{view:'month'}};
 function go(next){if(ALIASES[next]){Object.assign(pv,ALIASES[next],{sel:null});savePv();next='planner'}if(!TITLES[next])next='home';page=next;document.querySelectorAll('.rail button[data-page]').forEach(b=>{const on=b.dataset.page===page;b.classList.toggle('active',on);if(on)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});render();window.scrollTo({top:0})}
 document.querySelectorAll('[data-page]').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();go(el.dataset.page)}));
-window.TenmaApp={refresh,go,get workspace(){return workspace}};refresh();
+window.TenmaApp={refresh,go,select:selectItem,get workspace(){return workspace}};refresh();

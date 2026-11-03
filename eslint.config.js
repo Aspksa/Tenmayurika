@@ -21,7 +21,7 @@ module.exports=[
   },
   {
     // Скрипты, которые грузятся в браузере через <script>.
-    files:['app.js','avatar.js'],
+    files:['app.js','avatar.js','brain.js'],
     languageOptions:{sourceType:'script',globals:{...globals.browser}},
     // Верхнеуровневые const/let в скрипте могут затенять свойства window (например, status) — это не ошибка.
     rules:{'no-redeclare':['error',{builtinGlobals:false}]},

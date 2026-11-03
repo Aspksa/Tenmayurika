@@ -21,7 +21,7 @@ let backupTimer;
 async function scheduledBackup(){try{ensureDisk();const result=await storage.backup();console.log('Резервная копия SQLite создана:',result.file);if(result.retentionWarnings?.length)console.warn('Не все старые копии удалось удалить')}catch(e){console.error('Автоматическое резервное копирование не выполнено:',e.code||e.name)}}
 function startBackupSchedule(){backupTimer=setInterval(()=>{void scheduledBackup()},BACKUP_INTERVAL_MS);backupTimer.unref()}
 
-const allowed=new Map([['/', 'index.html'],['/index.html','index.html'],['/styles.css','styles.css'],['/app.js','app.js'],['/avatar.js','avatar.js'],['/favicon.svg','favicon.svg']]);
+const allowed=new Map([['/', 'index.html'],['/index.html','index.html'],['/styles.css','styles.css'],['/app.js','app.js'],['/avatar.js','avatar.js'],['/brain.js','brain.js'],['/favicon.svg','favicon.svg']]);
 // Аватары: только файлы с безопасными именами из assets/avatars.
 const AVATAR_PATH=/^\/assets\/avatars\/[a-z0-9-]{1,40}\.webp$/;
 const TYPES={'.css':'text/css; charset=utf-8','.js':'application/javascript; charset=utf-8','.html':'text/html; charset=utf-8','.svg':'image/svg+xml','.webp':'image/webp'};

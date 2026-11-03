@@ -24,6 +24,10 @@ test('avatar chat answers locally from facts and UI assets are served',async()=>
   assert.equal((await fetch(base+'/assets/avatars/missing.webp')).status,404);
   assert.equal((await fetch(base+'/assets/avatars/..%2F..%2Fserver.js')).status,404);
   assert.equal((await fetch(base+'/avatar.js')).status,200);
+  const brain=await fetch(base+'/brain.js');
+  assert.equal(brain.status,200);
+  assert.match(await brain.text(),/TenmaBrain/);
+  assert.match(await (await fetch(base+'/')).text(),/data-page="brain"/);
   assert.equal((await fetch(base+'/favicon.svg')).headers.get('content-type'),'image/svg+xml');
  }finally{await new Promise(resolve=>server.close(resolve))}
 });
