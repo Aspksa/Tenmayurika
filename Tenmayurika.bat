@@ -2,7 +2,7 @@
 setlocal EnableExtensions DisableDelayedExpansion
 chcp 65001 >nul
 title Tenmayurika - Portable Launcher
-cd /d "%~dp0" || exit /b 1
+pushd "%~dp0" || exit /b 1
 set "NODE=node.exe"
 set "NPM=npm.cmd"
 if exist "runtime\node\node.exe" (
@@ -38,6 +38,7 @@ if not exist "node_modules\@lancedb\lancedb" (
 "%NODE%" "tools\launcher.js" "%~1"
 set "RESULT=%ERRORLEVEL%"
 if not "%RESULT%"=="0" pause
+popd
 exit /b %RESULT%
 :node_error
 echo Node.js 24 or newer required. Put portable Node.js in runtime\node.
