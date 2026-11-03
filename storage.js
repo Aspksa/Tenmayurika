@@ -3,6 +3,7 @@ const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypt
 const {DatabaseSync}=require('node:sqlite');
 const dir=path.join(__dirname,'data'),file=path.join(dir,'tenmayurika.sqlite');
 let db;
+let backupInProgress=null;
 function empty(){return {notes:[],tasks:[]}}
 function connect(){
  if(db)return;
@@ -22,6 +23,39 @@ function graph(){ensure();return {nodes:db.prepare('SELECT * FROM knowledge_node
 function pending(){ensure();return db.prepare('SELECT id,attempts FROM vector_queue ORDER BY attempts,id LIMIT 20').all()}
 function indexed(id){ensure();db.prepare('DELETE FROM vector_queue WHERE id=?').run(id)}
 function failed(id,error){ensure();db.prepare('UPDATE vector_queue SET attempts=attempts+1,last_error=? WHERE id=?').run(String(error).slice(0,200),id)}
-async function backup(){ensure();const folder=path.join(__dirname,'backups');fs.mkdirSync(folder,{recursive:true});const name='tenmayurika-'+Date.now()+'-'+crypto.randomBytes(4).toString('hex')+'.sqlite';const destination=path.join(folder,name);try{await require('node:sqlite').backup(db,destination);const check=new DatabaseSync(destination,{readOnly:true});try{if(check.prepare('PRAGMA quick_check').get().quick_check!=='ok')throw Error('Backup integrity check failed')}finally{check.close()}const sha256=crypto.createHash('sha256').update(fs.readFileSync(destination)).digest('hex');fs.writeFileSync(destination+'.sha256',sha256+'  '+name+'\n',{flag:'wx'});return {file:name,sha256}}catch(e){try{fs.unlinkSync(destination)}catch{}throw e}}
+async function createBackup(){
+ ensure();
+ const folder=path.join(__dirname,'backups','automatic');
+ fs.mkdirSync(folder,{recursive:true});
+ const name='tenmayurika-'+Date.now()+'-'+crypto.randomBytes(4).toString('hex')+'.sqlite';
+ const destination=path.join(folder,name);
+ const checksumFile=destination+'.sha256';
+ try{
+  await require('node:sqlite').backup(db,destination);
+  const check=new DatabaseSync(destination,{readOnly:true});
+  try{
+   if(check.prepare('PRAGMA quick_check').get().quick_check!=='ok')throw Error('Backup integrity check failed');
+  }finally{check.close()}
+  const sha256=crypto.createHash('sha256').update(fs.readFileSync(destination)).digest('hex');
+  fs.writeFileSync(checksumFile,sha256+'  '+name+'\\n',{flag:'wx'});
+  const candidates=fs.readdirSync(folder).filter(x=>/^tenmayurika-\\d+-[a-f0-9]{8}\\.sqlite$/.test(x)&&x!==name);
+  const errors=[];
+  for(const old of candidates){
+   try{
+    fs.unlinkSync(path.join(folder,old));
+    try{fs.unlinkSync(path.join(folder,old+'.sha256'))}catch(e){if(e.code!=='ENOENT')throw e}
+   }catch(e){errors.push(e.code||e.name)}
+  }
+  return {file:name,sha256,retentionWarnings:errors,scope:'sqlite-only'};
+ }catch(e){
+  try{fs.unlinkSync(destination)}catch{}
+  try{fs.unlinkSync(checksumFile)}catch{}
+  throw e;
+ }
+}
+function backup(){
+ if(!backupInProgress)backupInProgress=createBackup().finally(()=>{backupInProgress=null});
+ return backupInProgress;
+}
 function close(){if(db){db.close();db=undefined}}
 module.exports={connect,load,save,mutate,syncNode,graph,pending,indexed,failed,backup,close};
