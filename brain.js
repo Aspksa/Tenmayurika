@@ -218,6 +218,7 @@ function buildModel(ws,facts,conflicts){
 /* ---------- Самообучение: кандидаты в факты из чата и заметок ---------- */
 // Очередь хранится в этом браузере; факт попадает в память только после «✓».
 const LEARN_MAX=60,LEARN_Q='tenma.learn.queue.v1',LEARN_CHAT='tenma.learn.chat',LEARN_SCANNED='tenma.learn.scanned.v1';
+function chunks(text,max){const out=[];let t=String(text);while(t.length>max){let cut=Math.max(t.lastIndexOf('. ',max),t.lastIndexOf('\n',max),t.lastIndexOf('! ',max));if(cut<max*.5)cut=max;else cut++;out.push(t.slice(0,cut));t=t.slice(cut)}if(t.trim())out.push(t);return out}
 const TenmaLearn={
  fromChat:()=>read(LEARN_CHAT,true)!==false,
  setFromChat(v){write(LEARN_CHAT,!!v)},
@@ -246,7 +247,10 @@ const TenmaLearn={
   const notes=(window.TenmaApp?.workspace?.notes||[]),done=read(LEARN_SCANNED,{});let n=0,ok=0,found=0,failed=0,full=false;
   for(const note of notes){const ver=note.updatedAt||note.createdAt||'';if(done[note.id]===ver)continue;if(n>=limit)break;if(TenmaLearn.full()){full=true;break}n++;
    // Неудачный разбор не помечаем — заметка останется в очереди на следующую попытку.
-   const r=await TenmaLearn.learn(note.title+'. '+(note.content||''),'note:'+note.id);if(r===null){failed++;continue}if(r.full){found+=r.added;full=true;break}found+=r;ok++;done[note.id]=ver}
+   // Сервер разбирает до 8000 символов за раз — длинную заметку отправляем кусками по границам предложений.
+   let bad=false,stop=false;
+   for(const part of chunks(note.title+'. '+(note.content||''),7500)){const r=await TenmaLearn.learn(part,'note:'+note.id);if(r===null){bad=true;break}if(r.full){found+=r.added;stop=true;break}found+=r}
+   if(bad){failed++;continue}if(stop){full=true;break}ok++;done[note.id]=ver}
   write(LEARN_SCANNED,done);return {full,scanned:ok,found,failed,left:notes.filter(x=>done[x.id]!==(x.updatedAt||x.createdAt||'')).length};
  }
 };
