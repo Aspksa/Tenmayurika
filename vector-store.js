@@ -17,7 +17,9 @@ async function syncNote(note){
  if(!names.includes('notes')){await db.createTable('notes',[record]);return {enabled:true}}
  const table=await db.openTable('notes');await table.mergeInsert('id').whenMatchedUpdateAll().whenNotMatchedInsertAll().execute([record]);return {enabled:true}
 }
+// Удаляет вектор заметки (если LanceDB уже создана). id — UUID, поэтому подстановка в фильтр безопасна.
+async function removeNote(id){if(!/^[0-9a-f-]{36}$/i.test(id))return {removed:false};if(!require('node:fs').existsSync(path.join(__dirname,'data','vectors')))return {removed:false};const db=await connect();if(!(await db.tableNames()).includes('notes'))return {removed:false};const table=await db.openTable('notes');await table.delete("id = '"+id+"'");return {removed:true}}
 async function search(query,limit=10){const vector=await embed(query);if(!vector)return {results:[],reason:'Embedding provider not configured'};const db=await connect();if(!(await db.tableNames()).includes('notes'))return {results:[]};const table=await db.openTable('notes');return {results:await table.vectorSearch(vector).limit(Math.min(30,Math.max(1,limit))).toArray()}}
 async function indexedIds(){const db=await connect();if(!(await db.tableNames()).includes('notes'))return new Set();const table=await db.openTable('notes');const rows=await table.query().select(['id']).toArray();return new Set(rows.map(row=>String(row.id)))}
 async function hasNotesTable(){const db=await connect();return (await db.tableNames()).includes('notes')}
-module.exports={syncNote,search,hasNotesTable,indexedIds};
+module.exports={syncNote,search,removeNote,hasNotesTable,indexedIds};

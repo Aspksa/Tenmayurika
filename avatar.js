@@ -15,20 +15,23 @@
  const PARTICLES={sparks:['Золотые искры','✨'],petals:['Сакура','🌸'],foxfire:['Кицунэ-би','🔥'],fireflies:['Светлячки','🪲'],stars:['Звёзды','⭐'],snow:['Снег','❄️'],butterflies:['Бабочки','🦋'],runes:['Руны','ᚱ']};
  // Инструменты: id совпадают с сервером (chat.js). Каждый включается в меню → «Инструменты».
  const TOOLS={
-  notes:{label:'Заметки',emoji:'📜',desc:'Создаёт и показывает заметки',example:'заметка: Чай — матча'},
-  tasks:{label:'Дела',emoji:'✅',desc:'Добавляет, отмечает, показывает дела',example:'дело: купить чай'},
+  notes:{label:'Заметки',emoji:'📜',desc:'Личные и рабочие заметки',example:'рабочая заметка: План — пункты'},
+  tasks:{label:'Дела',emoji:'✅',desc:'Личные и рабочие дела со сроком и важностью',example:'рабочее дело: отчёт в пятницу в 10:00'},
+  calendar:{label:'Календарь',emoji:'📅',desc:'Повестка дня и недели, перенос дел, дни до даты',example:'что на сегодня'},
   facts:{label:'Факты',emoji:'🧠',desc:'Запоминает факты о мире и людях',example:'запомни Анна | живёт в | Казань'},
   search:{label:'Поиск',emoji:'🔎',desc:'Ищет в фактах и заметках',example:'найди Анна'},
   insights:{label:'Анализ памяти',emoji:'🪷',desc:'Итоги дня, противоречия, связи',example:'итоги дня'},
   reminders:{label:'Напоминания',emoji:'⏰',desc:'Таймеры, напоминания, помодоро',example:'напомни через 10 минут чай'},
   calc:{label:'Калькулятор',emoji:'🧮',desc:'Считает выражения',example:'посчитай (2+3)*4'},
-  fun:{label:'Кубик и монетка',emoji:'🎲',desc:'Случайный выбор',example:'брось кубик'},
+  fun:{label:'Случайный выбор',emoji:'🎲',desc:'Кубик, монетка, выбор из вариантов',example:'выбери чай, кофе или какао'},
   avatar:{label:'Свой облик',emoji:'🦊',desc:'Меняет позу, эффект, цвет, размер',example:'эффект сакура'},
   navigate:{label:'Разделы',emoji:'🧭',desc:'Открывает страницы интерфейса',example:'открой дела'},
   backup:{label:'Резервная копия',emoji:'💾',desc:'Сохраняет копию SQLite',example:'сделай резервную копию'},
   sync:{label:'Переиндексация',emoji:'🔄',desc:'Обновляет векторную память',example:'переиндексируй'},
   status:{label:'Состояние системы',emoji:'🩺',desc:'Проверяет SQLite, LanceDB, модель',example:'статус'},
-  clock:{label:'Дата и время',emoji:'🕰',desc:'Подскажет время и дату',example:'который час'}
+  clock:{label:'Дата и время',emoji:'🕰',desc:'Подскажет время и дату',example:'который час'},
+  convert:{label:'Конвертер',emoji:'📐',desc:'Длина, вес, объём, время, скорость, °C/°F, ГБ',example:'переведи 5 км в мили'},
+  password:{label:'Пароли',emoji:'🔐',desc:'Надёжный пароль прямо на компьютере',example:'придумай пароль на 20'}
  };
  const DEFAULTS={
   name:'Юрика',pose:'stand',size:200,opacity:100,brightness:100,saturation:100,hue:0,tilt:0,flip:false,
@@ -37,7 +40,7 @@
   particles:true,particleType:'sparks',particleCount:28,particleSpeed:1,particleSize:1,clickBurst:true,
   livePoses:true,idleCycle:false,idleInterval:40,wander:false,wanderInterval:45,faceCursor:false,phrases:true,
   magicCircle:false,circleSpeed:20,shine:false,outline:false,trail:true,hoverReact:true,
-  chatScale:100,chatFont:100,chatHotkey:true,sounds:true,notify:false,
+  chatScale:100,chatFont:100,chatHotkey:true,sounds:true,notify:false,taskAlerts:true,taskLead:10,dailyBrief:true,
   tools:Object.fromEntries(Object.keys(TOOLS).map(k=>[k,true])),
   visible:true,x:.92,y:.9
  };
@@ -171,8 +174,11 @@
  // Быстрые действия: «вставить» ставит заготовку в поле ввода, «send» сразу отправляет.
  const QUICK=[
   {tool:null,label:'Что умеешь?',send:'помощь'},
+  {tool:'calendar',label:'📅 Сегодня',send:'что на сегодня'},
+  {tool:'calendar',label:'Неделя',send:'что на неделе'},
   {tool:'tasks',label:'Мои дела',send:'мои дела'},
   {tool:'tasks',label:'+ Дело',insert:'дело: '},
+  {tool:'tasks',label:'+ 💼 Рабочее',insert:'рабочее дело: '},
   {tool:'notes',label:'+ Заметка',insert:'заметка: '},
   {tool:'facts',label:'Запомнить',insert:'запомни  |  | '},
   {tool:'search',label:'Найти',insert:'найди '},
@@ -182,7 +188,9 @@
   {tool:'reminders',label:'⏰ Напомнить',insert:'напомни через 10 минут '},
   {tool:'insights',label:'Итоги дня',send:'итоги дня'},
   {tool:'calc',label:'Посчитать',insert:'посчитай '},
-  {tool:'fun',label:'🎲',send:'брось кубик'}
+  {tool:'fun',label:'🎲',send:'брось кубик'},
+  {tool:'convert',label:'📐 Перевести',insert:'переведи '},
+  {tool:'password',label:'🔐 Пароль',send:'придумай пароль'}
  ];
  function renderQuick(){
   quick.replaceChildren(...QUICK.filter(q=>!q.tool||cfg.tools[q.tool]).map(q=>h('button',{type:'button',class:'chip',text:q.label,onclick:()=>{
@@ -192,10 +200,10 @@
  function bubble(role,text,tag){const el=h('div',{class:'msg '+role},tag?h('span',{class:'msg-tag',text:tag}):null,document.createTextNode(text));log.append(el);log.scrollTop=log.scrollHeight;return el}
  function renderHistory(){
   log.replaceChildren();
-  if(!history.length)bubble('assistant','Здравствуйте! Я '+cfg.name+'. Могу вести заметки и дела, запоминать факты, искать в памяти, делать резервную копию. Напишите «помощь» или нажмите кнопку ниже.\nПеретащите меня куда удобно; правый клик — мои настройки.');
+  if(!history.length)bubble('assistant','Здравствуйте! Я '+cfg.name+'. Веду личные и рабочие дела с календарём, заметки, запоминаю факты, искать в памяти, делать резервную копию. Напишите «помощь» или нажмите кнопку ниже.\nПеретащите меня куда удобно; правый клик — мои настройки.');
   for(const m of history)bubble(m.role,m.text,m.tag);
  }
- const TOOL_TAG={list_notes:'заметки',day_summary:'итоги',fact_conflicts:'противоречия',fact_relations:'связи',set_reminder:'напоминание',calculate:'калькулятор',roll_dice:'кубик',flip_coin:'монетка',change_look:'облик',reindex_memory:'индекс',add_note:'заметка',add_task:'дело',complete_task:'дело',list_tasks:'дела',remember_fact:'факт',search_memory:'поиск',open_page:'переход',create_backup:'бэкап',system_status:'статус',current_time:'время'};
+ const TOOL_TAG={agenda:'повестка',move_task:'перенос',days_until:'дни',convert_units:'конвертер',generate_password:'пароль',pick_random:'выбор',list_notes:'заметки',day_summary:'итоги',fact_conflicts:'противоречия',fact_relations:'связи',set_reminder:'напоминание',calculate:'калькулятор',roll_dice:'кубик',flip_coin:'монетка',change_look:'облик',reindex_memory:'индекс',add_note:'заметка',add_task:'дело',complete_task:'дело',list_tasks:'дела',remember_fact:'факт',search_memory:'поиск',open_page:'переход',create_backup:'бэкап',system_status:'статус',current_time:'время'};
  let busy=false,conversation=0;
  form.addEventListener('submit',async e=>{
   e.preventDefault();const text=input.value.trim();if(!text||busy)return;
@@ -267,6 +275,40 @@
  }
  reminders.forEach(armReminder);
 
+ /* ---------- Дела со временем и утренняя сводка (данные из раздела «Дела») ---------- */
+ const ALERT_KEY='tenmayurika.avatar.taskalerts',BRIEF_KEY='tenmayurika.avatar.brief';
+ const taskTimers=new Map();
+ const localDay=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+ function scheduleTaskAlerts(tasks){
+  for(const t of taskTimers.values())clearTimeout(t);taskTimers.clear();
+  if(!cfg.taskAlerts||!cfg.tools.tasks)return;
+  const fired=load(ALERT_KEY,{}),now=Date.now(),lead=(Number(cfg.taskLead)||0)*60000;
+  for(const t of tasks){
+   if(t.done||!t.due||!t.time)continue;
+   const [y,m,d]=t.due.split('-').map(Number),[hh,mm]=t.time.split(':').map(Number);
+   const at=new Date(y,m-1,d,hh,mm).getTime()-lead,key=t.id+'@'+t.due+'T'+t.time;
+   // Только ближайшие сутки; уже показанные не повторяем. Пропущенные за последние 30 минут покажем сразу.
+   if(fired[key]||at-now>86400000||now-at>1800000)continue;
+   taskTimers.set(key,setTimeout(()=>{
+    const f=load(ALERT_KEY,{});f[key]=Date.now();for(const k of Object.keys(f))if(Date.now()-f[k]>7*86400000)delete f[k];store(ALERT_KEY,f);
+    fireReminder({id:'task-'+key,text:(lead&&at>now-60000?'Через '+cfg.taskLead+' мин: ':'Пора: ')+t.title+' ('+t.time+(t.category==='work'?', 💼 работа':'')+')'});
+   },Math.max(1000,at-now)));
+  }
+ }
+ function dailyBrief(tasks){
+  if(!cfg.dailyBrief||!cfg.tools.calendar)return;
+  const today=localDay(new Date());if(load(BRIEF_KEY,'')===today)return;
+  const open=tasks.filter(t=>!t.done),due=open.filter(t=>t.due===today),late=open.filter(t=>t.due&&t.due<today);
+  store(BRIEF_KEY,today);
+  if(!due.length&&!late.length)return;
+  const work=due.filter(t=>t.category==='work').length;
+  setTimeout(()=>say('📅 Сегодня '+due.length+' '+(due.length%10===1&&due.length%100!==11?'дело':due.length%10>=2&&due.length%10<=4&&(due.length%100<10||due.length%100>=20)?'дела':'дел')+(work?' (рабочих: '+work+')':'')+(late.length?', просрочено: '+late.length:'')+'. Спросите «что на сегодня».',12000),2500);
+ }
+ window.addEventListener('tenma:workspace',e=>{const tasks=e.detail?.tasks||[];scheduleTaskAlerts(tasks);dailyBrief(tasks)});
+ // Раз в 10 минут пересчитываем таймеры (смена суток, дела из другой вкладки).
+ setInterval(()=>{const w=window.TenmaApp?.workspace;if(w)scheduleTaskAlerts(w.tasks||[])},600000);
+ if(window.TenmaApp?.workspace?.tasks)scheduleTaskAlerts(window.TenmaApp.workspace.tasks);
+
  /* ---------- Реплики (облачко над аватаром) ---------- */
  let speechTimer,phraseTimer;
  function say(text,ms=6000){
@@ -279,7 +321,7 @@
  function phrase(){
   const hr=new Date().getHours();
   const greet=hr<5?'Глубокая ночь… не забудьте отдохнуть.':hr<12?'Доброе утро! Чем займёмся?':hr<18?'Добрый день! Я рядом, если что.':'Добрый вечер. Подвести итоги дня?';
-  const tips=[greet,'Нажмите на меня — открою чат.','Правый клик — мои настройки и эффекты.','Скажите «дело: …», и я запишу.','Могу запомнить факт: «запомни Анна | живёт в | Казань».','Alt+Y — быстро открыть чат.','Можно перетащить меня куда угодно.'];
+  const tips=[greet,'Нажмите на меня — открою чат.','Правый клик — мои настройки и эффекты.','Скажите «дело: … завтра в 10:00», и я запишу.','Спросите «что на сегодня» — расскажу план.','«Рабочее дело: …» попадёт в рабочие дела.','«Перенеси отчёт на пятницу» — и я сдвину срок.','Могу запомнить факт: «запомни Анна | живёт в | Казань».','Alt+Y — быстро открыть чат.','Можно перетащить меня куда угодно.'];
   return tips[Math.floor(Math.random()*tips.length)];
  }
  function schedulePhrases(){clearInterval(phraseTimer);if(cfg.phrases)phraseTimer=setInterval(()=>{if(!document.hidden&&!drag)say(phrase())},55000)}
@@ -434,7 +476,9 @@
   model:{label:'Модель ИИ',icon:'i-cloud',sub:'Cloud.ru и другие — ключ и выбор модели',build:modelSection},
   chat:{label:'Чат и уведомления',icon:'i-chat',sub:'Окно чата, звуки, напоминания',build:()=>[
    grid(card('Окно чата',range('Размер окна','chatScale',70,160,5,pct),range('Размер текста','chatFont',80,150,5,pct),sw('Alt+Y — открыть чат','chatHotkey')),
-    card('Уведомления',sw('Звук напоминаний','sounds'),sw('Системные уведомления','notify',cfg,'Покажет напоминание, даже если вкладка свёрнута'),h('div',{class:'reminder-list'},...reminderItems()))),
+    card('Уведомления',sw('Звук напоминаний','sounds'),sw('Системные уведомления','notify',cfg,'Покажет напоминание, даже если вкладка свёрнута'),
+     sw('Напоминать о делах со временем','taskAlerts',cfg,'Дела с датой и временем из раздела «Дела» и календаря'),range('Заранее','taskLead',0,60,5,v=>v?v+' мин':'в срок'),
+     sw('Утренняя сводка','dailyBrief',cfg,'Раз в день расскажу, что запланировано и что просрочено'),h('div',{class:'reminder-list'},...reminderItems()))),
    card('Данные',h('div',{class:'menu-actions'},
     h('button',{type:'button',text:'Очистить чат',onclick:()=>{conversation++;history=[];store(CHAT_KEY,history);renderHistory()}}),
     h('button',{type:'button',text:'Экспорт настроек',onclick:()=>{const a=h('a',{href:URL.createObjectURL(new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'})),download:'tenmayurika-avatar.json'});a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}}),

@@ -51,14 +51,50 @@ async function handleFacts(req,res,p,url){
 // Строки вида «FACT: субъект | связь | объект» в тексте заметки сохраняются как факты.
 function ingestNoteFacts(item){if(!item.content||!item.content.includes('FACT:'))return;try{memory.extractFacts(item.content,'note:'+item.id)}catch(e){console.error('Fact ingestion failed:',e.name)}}
 // Общие операции с записями: используются API и инструментами аватара.
-function addItem(collection,title,content){
- if(!['notes','tasks'].includes(collection)||typeof title!=='string'||!title.trim()||title.length>200)throw new TypeError('Invalid item');
- const item={id:require('node:crypto').randomUUID(),title:title.trim(),content:typeof content==='string'?content.slice(0,20000):'',done:false,createdAt:new Date().toISOString()};
+// Дела: category (personal|work), due (ГГГГ-ММ-ДД), time (ЧЧ:ММ), priority (low|normal|high). Заметки: category и pinned.
+const CATEGORIES=['personal','work'],PRIORITIES=['low','normal','high'];
+function validDate(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return false;const d=new Date(v+'T00:00:00Z');return !Number.isNaN(d.getTime())&&d.toISOString().slice(0,10)===v}
+// Проверяет и возвращает только разрешённые поля; бросает TypeError с понятным текстом.
+function itemFields(collection,input){
+ const out={};
+ if('title' in input){if(typeof input.title!=='string'||!input.title.trim()||input.title.length>200)throw new TypeError('Название: от 1 до 200 символов');out.title=input.title.trim()}
+ if('content' in input){if(input.content!=null&&typeof input.content!=='string')throw new TypeError('Invalid content');out.content=String(input.content||'').slice(0,20000)}
+ if('category' in input){if(!CATEGORIES.includes(input.category))throw new TypeError('Категория: personal или work');out.category=input.category}
+ if(collection==='tasks'){
+  if('done' in input){if(typeof input.done!=='boolean')throw new TypeError('Invalid done');out.done=input.done}
+  if('due' in input){if(input.due===null||input.due==='')out.due=null;else if(typeof input.due==='string'&&validDate(input.due))out.due=input.due;else throw new TypeError('Дата: ГГГГ-ММ-ДД')}
+  if('time' in input){if(input.time===null||input.time==='')out.time=null;else if(typeof input.time==='string'&&/^([01]\d|2[0-3]):[0-5]\d$/.test(input.time))out.time=input.time;else throw new TypeError('Время: ЧЧ:ММ')}
+  if('priority' in input){if(!PRIORITIES.includes(input.priority))throw new TypeError('Приоритет: low, normal или high');out.priority=input.priority}
+ }
+ if(collection==='notes'&&'pinned' in input){if(typeof input.pinned!=='boolean')throw new TypeError('Invalid pinned');out.pinned=input.pinned}
+ return out;
+}
+function addItem(collection,title,content,extra={}){
+ if(!['notes','tasks'].includes(collection))throw new TypeError('Invalid item');
+ const fields=itemFields(collection,{...extra,title,content:typeof content==='string'?content:''});
+ const base=collection==='tasks'?{category:'personal',due:null,time:null,priority:'normal',done:false}:{category:'personal',pinned:false};
+ const item={id:require('node:crypto').randomUUID(),...base,...fields,createdAt:new Date().toISOString()};
+ if(collection==='tasks'&&item.time&&!item.due)item.due=localDate();
  storage.mutate(data=>{data[collection]??=[];data[collection].unshift(item)});
- if(collection==='notes'){storage.syncNode(item);ingestNoteFacts(item);syncWorker.run().catch(e=>console.error('LanceDB indexing failed:',e.message))}
+ if(collection==='notes')indexNote(item);
  return item;
 }
-function updateItem(collection,id,done){return storage.mutate(data=>{const found=(data[collection]||[]).find(x=>x.id===id);if(!found)return null;if(typeof done==='boolean'&&collection==='tasks')found.done=done;return {...found}})}
+function localDate(d=new Date()){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function indexNote(item){storage.syncNode(item);ingestNoteFacts(item);syncWorker.run().catch(e=>console.error('LanceDB indexing failed:',e.message))}
+// patch: допустимые поля itemFields; boolean вместо объекта — старый вызов «отметить выполненным».
+function updateItem(collection,id,patch){
+ if(typeof patch==='boolean'||patch===undefined)patch=typeof patch==='boolean'?{done:patch}:{};
+ const fields=itemFields(collection,patch);
+ const item=storage.mutate(data=>{const found=(data[collection]||[]).find(x=>x.id===id);if(!found)return null;Object.assign(found,fields);if(collection==='tasks'){if(fields.done===true)found.doneAt=new Date().toISOString();if(fields.done===false)delete found.doneAt}found.updatedAt=new Date().toISOString();return {...found}});
+ if(item&&collection==='notes'&&('title' in fields||'content' in fields))indexNote(item);
+ return item;
+}
+// Удаление доступно только из интерфейса (кнопка с подтверждением), не инструментам аватара.
+function removeItem(collection,id){
+ const removed=storage.mutate(data=>{const list=data[collection]||[],i=list.findIndex(x=>x.id===id);if(i<0)return null;return list.splice(i,1)[0]});
+ if(removed&&collection==='notes'){storage.removeNode(id);vectorStore.removeNote(id).catch(e=>console.error('LanceDB delete failed:',e.message))}
+ return removed;
+}
 // Настройки языковой модели аватара. Ключ API сохраняется только на диске и в ответах не возвращается.
 async function handleLlm(req,res,p){
  try{
@@ -76,7 +112,7 @@ async function handleLlm(req,res,p){
   throw e;
  }
 }
-const chatContext={addItem,setTaskDone:(id,done)=>updateItem('tasks',id,done)};
+const chatContext={addItem,setTaskDone:(id,done)=>updateItem('tasks',id,{done}),updateTask:(id,patch)=>updateItem('tasks',id,patch)};
 const server=http.createServer(async(req,res)=>{try{
 const host=req.headers.host||'';if(host!=='127.0.0.1:'+String(server.address()?.port||PORT)&&host!=='localhost:'+String(server.address()?.port||PORT))return respond(res,403,{error:'Forbidden host'});
 const url=new URL(req.url,'http://localhost');const p=url.pathname;
@@ -93,13 +129,15 @@ if(p==='/api/facts'||p.startsWith('/api/facts/'))return handleFacts(req,res,p,ur
 if(p==='/api/llm'||p.startsWith('/api/llm/'))return handleLlm(req,res,p);
 if(req.method==='POST'&&p==='/api/chat'){try{return respond(res,200,await chat.reply(await body(req),chatContext))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
 if(req.method==='GET'&&p==='/api/workspace')return respond(res,200,await storage.load());
-if(req.method==='POST'&&p==='/api/items'){
-const input=await body(req),collection=input.collection;
-if(!['notes','tasks'].includes(collection)||typeof input.title!=='string'||!input.title.trim()||input.title.length>200)return respond(res,400,{error:'Invalid item'});
-return respond(res,201,addItem(collection,input.title,input.content))}
-if(req.method==='PATCH'&&p==='/api/items'){
-const input=await body(req);if(!['notes','tasks'].includes(input.collection))return respond(res,400,{error:'Invalid collection'});
-const item=updateItem(input.collection,input.id,input.done);if(!item)return respond(res,404,{error:'Not found'});return respond(res,200,item)}
+if(p==='/api/items'&&['POST','PATCH','DELETE'].includes(req.method)){
+const input=await body(req);
+if(!input||typeof input!=='object'||Array.isArray(input)||!['notes','tasks'].includes(input.collection))return respond(res,400,{error:'Invalid collection'});
+try{
+ if(req.method==='POST'){const {collection,title,content,id:_id,createdAt:_c,...extra}=input;if(typeof title!=='string')return respond(res,400,{error:'Invalid item'});return respond(res,201,addItem(collection,title,content,extra))}
+ if(typeof input.id!=='string')return respond(res,400,{error:'Invalid id'});
+ if(req.method==='DELETE'){const removed=removeItem(input.collection,input.id);return removed?respond(res,200,{ok:true,id:input.id}):respond(res,404,{error:'Not found'})}
+ const {collection,id,...patch}=input;const item=updateItem(collection,id,patch);if(!item)return respond(res,404,{error:'Not found'});return respond(res,200,item);
+}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
 if(req.method==='GET'&&allowed.has(p)){const name=allowed.get(p);return respond(res,200,fs.readFileSync(path.join(ROOT,name),'utf8'),TYPES[path.extname(name)])}
 if(req.method==='GET'&&AVATAR_PATH.test(p)){const file=path.join(ROOT,p.slice(1));if(!fs.existsSync(file))return respond(res,404,{error:'Not found'});res.writeHead(200,{'Content-Type':'image/webp','X-Content-Type-Options':'nosniff','Cache-Control':'public, max-age=86400'});return res.end(fs.readFileSync(file))}
 return respond(res,404,{error:'Not found'})
