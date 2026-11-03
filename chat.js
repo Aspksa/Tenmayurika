@@ -254,10 +254,11 @@ async function modelReply(name,message,history,facts,notes,enabled,impl,result){
    messages.push({role:'tool',tool_call_id:call.id,content:out.text});
   }
  }
- return result.tools.length?'Готово.':'Не удалось завершить ответ.';
+ // Модель исчерпала лимит раундов: честно показываем, что вышло у каждого инструмента.
+ return result.outcomes.length?'Не успела закончить ответ. Результаты инструментов:\n'+result.outcomes.map(o=>(o.ok?'• ':'✗ ')+o.text).join('\n'):'Не удалось завершить ответ.';
 }
-const pub=({done,...rest})=>rest;
-function track(result,fn,out){result.tools.push(fn);if(out.ok!==false)result.done.push(out.text);if(out.changed)result.changed=true;if(out.action)result.actions.push(out.action)}
+const pub=({done,outcomes,...rest})=>rest;
+function track(result,fn,out){result.tools.push(fn);result.outcomes.push({ok:out.ok!==false,text:out.text});if(out.ok!==false)result.done.push(out.text);if(out.changed)result.changed=true;if(out.action)result.actions.push(out.action)}
 
 async function reply(input,ctx={}){
  if(!input||typeof input!=='object'||typeof input.message!=='string'||!input.message.trim())throw new TypeError('Invalid message');
@@ -266,7 +267,7 @@ async function reply(input,ctx={}){
  const name=typeof input.avatar==='string'&&input.avatar.trim()?input.avatar.trim().slice(0,40):'Юрика';
  // Без списка — все инструменты включены; с пустым списком — все выключены.
  const enabled=new Set(Array.isArray(input.tools)?input.tools.filter(id=>TOOL_IDS.includes(id)):TOOL_IDS);
- const impl=makeTools(ctx),result={tools:[],actions:[],changed:false,done:[]};
+ const impl=makeTools(ctx),result={tools:[],actions:[],changed:false,done:[],outcomes:[]};
  const command=parseCommand(message);
  if(command){
   if(command.help)return {reply:helpText(enabled),source:'tool',...pub(result)};

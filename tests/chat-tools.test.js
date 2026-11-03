@@ -79,3 +79,13 @@ test('extra tools: calculator, reminders, avatar look, fun',async()=>{
  assert.match((await reply({message:'монетка'})).reply,/Орёл|Решка/);
  assert.match((await reply({message:'эффект сакура',tools:['notes']})).reply,/выключен/);
 });
+test('round limit reports real tool outcomes instead of claiming success',async()=>{
+ const http=require('node:http'),{reply}=require('../chat');
+ const fake=http.createServer((req,res)=>{req.resume();req.on('end',()=>{res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({choices:[{message:{role:'assistant',content:null,tool_calls:[{id:'c'+Math.random(),type:'function',function:{name:'complete_task',arguments:JSON.stringify({title:'нет такого дела'})}}]}}]}))})});
+ await new Promise(r=>fake.listen(0,'127.0.0.1',r));
+ process.env.CHAT_URL='http://127.0.0.1:'+fake.address().port+'/v1/chat/completions';
+ try{
+  const r=await reply({message:'закрой все мои дела пожалуйста'},{addItem(){},setTaskDone(){}});
+  assert.match(r.reply,/Не успела закончить/);assert.match(r.reply,/✗ Не нашла открытого дела/);assert.equal(r.changed,false);
+ }finally{delete process.env.CHAT_URL;await new Promise(r=>fake.close(r))}
+});
