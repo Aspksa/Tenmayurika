@@ -1,11 +1,15 @@
 {
   "name": "tenmayurika",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Local-first personal AI workspace",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
     "test": "node --test"
+  },
+  "dependencies": {
+    "pg": "^8.13.3",
+    "neo4j-driver": "^5.28.1"
   }
 }
