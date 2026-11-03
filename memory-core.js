@@ -1,9 +1,11 @@
 'use strict';
 const crypto=require('node:crypto');
+const fs=require('node:fs');
 const {DatabaseSync}=require('node:sqlite');
 const path=require('node:path');
 const DB=path.join(__dirname,'data','tenmayurika.sqlite');
 function open(){
+ fs.mkdirSync(path.dirname(DB),{recursive:true});
  const db=new DatabaseSync(DB);
  db.exec(`PRAGMA busy_timeout=5000;
  CREATE TABLE IF NOT EXISTS memory_facts(
@@ -68,7 +70,7 @@ function diagnostics(){
    facts:db.prepare('SELECT COUNT(*) AS n FROM memory_facts').get().n,
    conflicts:db.prepare('SELECT COUNT(*) AS n FROM memory_conflicts').get().n,
    events:db.prepare('SELECT COUNT(*) AS n FROM memory_events').get().n,
-   pendingVectors:db.prepare('SELECT COUNT(*) AS n FROM vector_queue').get().n};
+   pendingVectors:db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='vector_queue'").get()?db.prepare('SELECT COUNT(*) AS n FROM vector_queue').get().n:0};
  }finally{db.close()}
 }
 module.exports={addFact,queryFacts,diagnostics};
