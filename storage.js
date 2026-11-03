@@ -60,5 +60,6 @@ function backup(){
  if(!backupInProgress)backupInProgress=createBackup().finally(()=>{backupInProgress=null});
  return backupInProgress;
 }
+function reindexAll(){ensure();db.exec('INSERT OR IGNORE INTO vector_queue(id) SELECT id FROM knowledge_nodes');return db.prepare('SELECT COUNT(*) AS count FROM vector_queue').get().count}
 function close(){if(db){db.close();db=undefined}}
-module.exports={connect,load,save,mutate,syncNode,graph,pending,indexed,failed,backup,close};
+module.exports={connect,load,save,mutate,syncNode,graph,pending,indexed,failed,backup,reindexAll,close};
