@@ -9,22 +9,17 @@ echo ==========================================
 echo Directory: "%CD%"
 set "NODE=node.exe"
 set "NPM=npm.cmd"
-if exist "%~dp0runtime
-ode
+if exist "%~dp0runtime\node
 ode.exe" (
- set "NODE=%~dp0runtime
-ode
+ set "NODE=%~dp0runtime\node
 ode.exe"
- set "NPM=%~dp0runtime
-ode
+ set "NPM=%~dp0runtime\node
 pm.cmd"
- set "PATH=%~dp0runtime
-ode;%PATH%"
+ set "PATH=%~dp0runtime\node;%PATH%"
 )
 "%NODE%" --version >nul 2>&1
 if errorlevel 1 (
- echo [ERROR] Node.js not found. Put portable Node.js 24+ in runtime
-ode.
+ echo [ERROR] Node.js not found. Put portable Node.js 24+ in runtime\node.
  pause
  exit /b 1
 )
@@ -34,8 +29,7 @@ if errorlevel 1 (
  pause
  exit /b 1
 )
-if not exist "%~dp0runtime
-ode
+if not exist "%~dp0runtime\node
 ode.exe" (
  where npm.cmd >nul 2>&1
  if errorlevel 1 goto :no_npm
@@ -44,8 +38,7 @@ ode.exe" (
 )
 goto :npm_ready
 :no_npm
-echo [ERROR] npm.cmd not found. Put full portable Node.js distribution in runtime
-ode.
+echo [ERROR] npm.cmd not found. Put full portable Node.js distribution in runtime\node.
 pause
 exit /b 1
 :npm_ready
