@@ -35,7 +35,7 @@ async function handleFacts(req,res,p,url){
   if(req.method==='GET'&&p==='/api/facts'){
    const q=url.searchParams.get('q'),subject=url.searchParams.get('subject');
    if(q&&q.trim())return respond(res,200,memory.searchFacts(q,limitParam(url,30,100)));
-   return respond(res,200,memory.queryFacts({subject:subject&&subject.trim()?subject:undefined,limit:limitParam(url,50,500)}));
+   return respond(res,200,memory.queryFacts({subject:subject&&subject.trim()?subject:undefined,limit:limitParam(url,50,5000)}));
   }
   if(req.method==='POST'&&p==='/api/facts'){
    const input=await body(req);

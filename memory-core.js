@@ -96,7 +96,7 @@ function searchFacts(query,limit=30){
  }finally{db.close()}
 }
 function queryFacts({subject,limit=50}={}){
- if(!Number.isInteger(limit)||limit<1||limit>500)throw new TypeError('Invalid limit');
+ if(!Number.isInteger(limit)||limit<1||limit>5000)throw new TypeError('Invalid limit');
  const db=open();
  try{
   if(subject)return db.prepare('SELECT * FROM memory_facts WHERE subject=? ORDER BY observed_at DESC LIMIT ?').all(normalize(subject,'subject',300),limit);

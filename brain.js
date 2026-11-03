@@ -171,6 +171,11 @@ void main(){vec2 d=v-.5;vec2 o=d*dot(d,d)*ab;float k=clamp(length(d)*2.5,0.,1.);
 }
 
 /* ---------- Данные: workspace + факты → зоны и нейроны ---------- */
+// Слова для тем и мыслей: без служебных, с грубой основой («работу» и «работа» → «работ»).
+const STOP=new Set('что как где когда это мне меня тебя тебе ты вы про для или если так уже ещё еще есть был была было были мой моя мои моё твой твоя ли же бы на по из от до за не да нет все всё всех кто чем чего почему зачем сколько надо нужно можно какой какая какие каких скажи расскажи знаешь помнишь помни вспомни найди поищи очень тоже только этот эта эти того там тут здесь сейчас сегодня завтра вчера дело дела заметка факт'.split(' '));
+const stem=w=>w.slice(0,Math.max(3,Math.min(6,w.length-1)));
+function words(text,min=3){const out=[];for(const w of String(text||'').toLocaleLowerCase().replace(/ё/g,'е').match(/[a-zа-я0-9]+/g)||[])if(w.length>=min&&!STOP.has(w)&&!/^\d+$/.test(w))out.push(w);return out}
+const stemsOf=it=>it.stems||(it.stems=new Set(words(it.title).map(stem)));
 function ts(v){const t=Date.parse(v||'');return Number.isFinite(t)?t:0}
 function plural(n,a,b,c){const m=n%10,h=n%100;return m===1&&h!==11?a:m>=2&&m<=4&&(h<12||h>14)?b:c}
 function buildModel(ws,facts,conflicts){
@@ -341,7 +346,7 @@ function mount(host){
  let simT=0,last=performance.now(),raf=0,dirty=true,pinned=null,hover=null,stars=[],spikes=[],linkCount=new Map(),coList=[];
  // Камера: поворот (yaw/pitch), приближение и сдвиг. В плоском режиме всё стремится к нулю.
  const cam={yaw:0,pitch:0,zoom:1,px:0,py:0,depth:0},camT={yaw:0,pitch:0,zoom:1,px:0,py:0};
- let view0={cx:0,cy:0},focusZ=0,focusN=null,idleT=0,focusQ='',focusLobes=new Set(),focusItems=new Set(),thinking=false,thinkT=0,seeds=[];
+ let view0={cx:0,cy:0},focusZ=0,focusN=null,idleT=0,focusQ='',focusLobes=new Set(),focusItems=new Set(),thinking=false,thinkT=0,seeds=[],thought=null;
  // Сила памяти: сколько раз и когда запись вспоминали (хранится в этом браузере).
  let recall=readRecall();
  const still=()=>cfg.paused||reduceQuery.matches;
@@ -390,11 +395,16 @@ function mount(host){
   find.classList.toggle('miss',!!focusQ&&!focusLobes.size);dirty=true;
  }
  // Рост: каждое вспоминание добавляет нейрону ветку (до +10). animate — новая ветка прорастает на глазах.
- const GROUP_AT=40;
+ const GROUP_AT=40,NEURON_BUDGET=700;
+ let anyFlash=false,gBoxes=[];
  function grow(n,animate){
   const r=recall[n.item.id],want=n.base+Math.min(10,r?r.n:0);
   while(n.den.length<want){const q=rng(hash(n.item.id)+n.den.length*7919);n.den.push({a:TAU*q(),l:.5+.9*q(),c:(q()-.5)*.9,kids:q()<.5?[{at:.5+.3*q(),a:(q()-.5)*1.4,l:.3+.4*q()}]:[],born:animate?performance.now():0})}
  }
+ // Два ближайших соседа — считаются только для нейронов, которые реально рисуются вблизи.
+ function nearOf(n){if(n.near)return n.near;const pool=n.group?n.group.ids:n.lobe.items.map(it=>it.id);let a=null,b=null,da=1e9,db=1e9;
+  for(const id of pool){const o=neurons.get(id);if(!o||o===n)continue;const d=(o.ox-n.ox)**2+(o.oy-n.oy)**2+(o.oz-n.oz)**2;if(d<da){b=a;db=da;a=o;da=d}else if(d<db){b=o;db=d}}
+  return n.near=[a,b].filter(Boolean)}
  function sprout(n){n.pending=false;n.bornT=performance.now();n.den.forEach((b,i)=>{b.born=n.bornT+200+i*110})}
  function strength(it){
   const r=recall[it.id],t=Math.max(it.ts||0,r?r.t:0),age=t?(Date.now()-t)/DAY:30;
@@ -449,15 +459,28 @@ function mount(host){
   }
   for(const k of [...lobeState.keys()])if(!alive.has(k)){glr?.free(lobeState.get(k).parts);lobeState.delete(k)}
   for(const k of [...neurons.keys()])if(!alive.has(k))neurons.delete(k);
-  // Большие зоны (больше 40 записей) делятся на группы по направлению от центра зоны.
+  // Большие зоны (больше 40 записей) делятся на подзоны по темам — частым словам в названиях.
+  // Записи без общей темы собираются в группы по направлению от центра зоны.
   for(const l of model.lobes){const s=l.state,ns=l.items.map(it=>neurons.get(it.id)).filter(Boolean);
-   if(ns.length>GROUP_AT){const K=clamp(Math.round(Math.sqrt(ns.length)),8,24),dirs=Array.from({length:K},(_,i)=>{const y=1-2*(i+.5)/K,r=Math.sqrt(1-y*y),a=i*2.39996;return [Math.cos(a)*r,y,Math.sin(a)*r]});
-    const gs=dirs.map(()=>({ids:[],ox:0,oy:0,oz:0,kinds:{}}));
-    for(const n of ns){let bi=0,bd=-9;dirs.forEach((d,i)=>{const v=d[0]*n.ox+d[1]*n.oy+d[2]*n.oz;if(v>bd){bd=v;bi=i}});const g=gs[bi];g.ids.push(n.item.id);g.ox+=n.ox;g.oy+=n.oy;g.oz+=n.oz;const k=kindOf(n.item.id);g.kinds[k]=(g.kinds[k]||0)+1;n.group=g}
+   for(const n of ns){n.near=null;n.group=null}
+   if(ns.length>GROUP_AT){
+    const K=clamp(Math.round(Math.sqrt(ns.length)*.8),6,32),freq=new Map(),form=new Map();
+    for(const n of ns){const seenW=new Set();for(const w of words(n.item.title,4)){const k=stem(w);if(seenW.has(k))continue;seenW.add(k);freq.set(k,(freq.get(k)||0)+1);if(!form.has(k))form.set(k,w)}}
+    const min=Math.max(3,ns.length*.02),topics=[...freq].filter(([,c])=>c>=min&&c<ns.length*.9).sort((a,b)=>b[1]-a[1]).slice(0,K).map(([k])=>k);
+    const dirs=Array.from({length:K},(_,i)=>{const y=1-2*(i+.5)/K,r=Math.sqrt(1-y*y),a=i*2.39996;return [Math.cos(a)*r,y,Math.sin(a)*r]});
+    const gs=dirs.map((d,i)=>({ids:[],ox:0,oy:0,oz:0,kinds:{},topic:topics[i]?form.get(topics[i]):'',key:topics[i]||'',d}));
+    const tIdx=new Map(topics.map((k,i)=>[k,i]));
+    for(const n of ns){let bi=-1,bc=0;for(const k of stemsOf(n.item)){const i=tIdx.get(k);if(i!=null&&freq.get(k)>bc){bc=freq.get(k);bi=i}}
+     if(bi<0){let bd=-9;dirs.forEach((d,i)=>{if(gs[i].key)return;const v=d[0]*n.ox+d[1]*n.oy+d[2]*n.oz;if(v>bd){bd=v;bi=i}});if(bi<0)bi=topics.length?dirs.length-1:0}
+     const g=gs[bi];g.ids.push(n.item.id);const k=kindOf(n.item.id);g.kinds[k]=(g.kinds[k]||0)+1;n.group=g}
+    // Записи темы собираются вокруг её направления — подзоны видно и вблизи.
+    for(const g of gs){if(!g.ids.length)continue;const q=rng(hash(l.id+g.key));const R=clamp(.07+.004*Math.sqrt(g.ids.length),.08,.2);
+     for(const id of g.ids){const n=neurons.get(id),u=unit(rng(hash(id))),k=Math.cbrt(q());n.moved=true;n.ox=g.d[0]*.58+u[0]*R*k;n.oy=g.d[1]*.58+u[1]*R*k;n.oz=g.d[2]*.58+u[2]*R*k;g.ox+=n.ox;g.oy+=n.oy;g.oz+=n.oz}}
     s.groups=gs.filter(g=>g.ids.length).map(g=>Object.assign(g,{ox:g.ox/g.ids.length,oy:g.oy/g.ids.length,oz:g.oz/g.ids.length,kind:Object.entries(g.kinds).sort((a,b)=>b[1]-a[1])[0][0]}));
-   }else{s.groups=null;for(const n of ns)n.group=null}
-   // Соседи внутри зоны (или группы — чтобы тысячи записей не считались вечность) — для связей «вблизи».
-   for(const n of ns){const pool=n.group?n.group.ids.map(id=>neurons.get(id)):ns;n.near=pool.filter(o=>o&&o!==n).map(o=>[o,(o.ox-n.ox)**2+(o.oy-n.oy)**2+(o.oz-n.oz)**2]).sort((a,b)=>a[1]-b[1]).slice(0,2).map(x=>x[0])}}
+   }else{s.groups=null;for(const n of ns)if(n.moved){const q=rng(hash(n.item.id)),d=unit(q),k=.15+.6*Math.cbrt(q());n.ox=d[0]*k;n.oy=d[1]*k;n.oz=d[2]*k;n.moved=false}}
+   // Порядок для подписей вблизи: сначала сильные и важные записи (раньше сортировалось каждый кадр).
+   l.ranked=[...l.items].sort((a,b)=>(b.str??1)*b.weight-(a.str??1)*a.weight);
+  }
   linkCount=new Map();for(const [a,b] of model.links){linkCount.set(a,(linkCount.get(a)||0)+1);linkCount.set(b,(linkCount.get(b)||0)+1)}
   if(seen.size>4000)seen=new Set([...neurons.keys()]);
   write(SEEN_KEY,[...seen]);
@@ -587,7 +610,7 @@ function mount(host){
  function draw(dt){
   if(!sprite){sprite=glowSprite(...PAL.glow);spriteBad=glowSprite('rgba(255,255,255,1)','rgba(230,230,240,.7)','rgba(180,180,190,.15)');spriteSeed=glowSprite('rgba(255,255,255,1)','rgba(255,230,190,.6)','rgba(255,200,140,.12)');
    shapes={};for(const k of ['star','drop','crystal'])shapes[k]={warm:shapeSprite(k,PAL.glow,PAL.accent,PAL.hot),cold:shapeSprite(k,PAL.cold,PAL.cold[1],PAL.cold[0])}}
-  now=performance.now();
+  now=performance.now();anyFlash=false;gBoxes=[];
   const G=layout(simT,dt),pal=l=>l.bad?PALE:EMBER,focusing=focusLobes.size>0,dimOf=l=>focusing&&!focusLobes.has(l.id)?.16:1;
   ctx.setTransform(1,0,0,1,0,0);ctx.globalCompositeOperation='source-over';
   if(glr){ctx.clearRect(0,0,canvas.width,canvas.height);glr.begin()}else{ctx.fillStyle='#000';ctx.fillRect(0,0,canvas.width,canvas.height)}
@@ -657,6 +680,7 @@ function mount(host){
   if(glr)glr.end(1);
   details(G,dimOf);
   labels(G,dimOf);
+  drawThought(G);
   levelUi();
   // Подпись внутри ядра — как «тикет → решён» в ролике.
   const txt=coreTextT>0?trim(coreKind,16)+' → '+trim(coreText,W<520?18:30):thinking?'думаю…':'';
@@ -693,14 +717,16 @@ function mount(host){
   const place=o=>{const x1=o.ox*ca+o.oz*sa,z1=-o.ox*sa+o.oz*ca;return [s.x+x1*s.r,s.y+o.oy*s.r,(z1+1.2)/2.4]};
   const margin=60,onScreen=(x,y)=>x>-margin&&x<W+margin&&y>-margin&&y<H+margin;
   // Тысячи записей: пока зона далеко, записи собраны в группы; при приближении группы раскрываются.
-  const grouped=s.groups&&s.det<.55;s.groupHits=[];
+  // Огромная зона раскрывается позже: чем больше записей, тем крупнее она должна быть на экране.
+  const grouped=s.groups&&(s.det<.55||s.r<G.m*.16*Math.sqrt(l.items.length/(GROUP_AT*8)));s.groupHits=[];
   if(grouped){
    for(const g of s.groups){const [gx,gy,d]=place(g);g.sx=gx;g.sy=gy;
-    for(const id of g.ids){const n=neurons.get(id);if(n){n.sx=gx;n.sy=gy;n.vis=0;n.flash=Math.max(0,n.flash-dt*.45)}}
-    const size=ui*dpr*(7+2.2*Math.sqrt(g.ids.length))*(.7+.5*d)*zf*bz,spr=shapes[g.kind].warm;
+    for(const id of g.ids){const n=neurons.get(id);if(n){n.sx=gx;n.sy=gy;n.vis=0;n.flash=Math.max(0,n.flash-dt*.45);if(n.flash>0)anyFlash=true}}
+    const size=ui*dpr*Math.min(7+1.3*Math.sqrt(g.ids.length),34)*(.7+.5*d)*zf*bz*clamp(s.r/G.m*5,.6,2.4),spr=shapes[g.kind].warm;
     ctx.globalAlpha=clamp(.3*d*dim*warm+.12,0,1)*G.b*ba;ctx.drawImage(spr,gx*dpr-size/2,gy*dpr-size/2,size,size);
     ctx.globalAlpha=.25*G.b*dim;ctx.strokeStyle=rgba(l.color,1);ctx.lineWidth=dpr*.8;ctx.setLineDash([2*dpr,3*dpr]);ctx.beginPath();ctx.arc(gx*dpr,gy*dpr,size*.62,0,TAU);ctx.stroke();ctx.setLineDash([]);
-    if(dim>.5&&G.b>.8&&!cfg.clean&&s.det>.12){lctx.globalAlpha=G.b*clamp((s.det-.12)/.15,0,1);lctx.font='600 '+Math.round(9*ui*dpr)+'px '+MONO;lctx.textAlign='center';lctx.textBaseline='middle';lctx.fillStyle='rgba(255,246,230,.85)';lctx.fillText(String(g.ids.length),gx*dpr,gy*dpr+size*.62+7*dpr*ui);lctx.globalAlpha=1}
+    if(dim>.5&&G.b>.8&&!cfg.clean&&s.det>.12){lctx.globalAlpha=G.b*clamp((s.det-.12)/.15,0,1);lctx.font='600 '+Math.round(9*ui*dpr)+'px '+MONO;lctx.textAlign='center';lctx.textBaseline='middle';const tx=(g.topic?trim(g.topic,14)+' · ':'')+g.ids.length,tw2=lctx.measureText(tx).width+6*dpr,th=11*dpr*ui,bx=gx*dpr-tw2/2,by=gy*dpr+size*.62+7*dpr*ui-th/2;
+     if(!gBoxes.some(b=>bx<b[0]+b[2]&&bx+tw2>b[0]&&by<b[1]+b[3]&&by+th>b[1])){gBoxes.push([bx,by,tw2,th]);lctx.fillStyle='rgba(255,246,230,.85)';lctx.fillText(tx,gx*dpr,gy*dpr+size*.62+7*dpr*ui)}lctx.globalAlpha=1}
     if(dim>.5)s.groupHits.push(g)}
    ctx.globalAlpha=1;return;
   }
@@ -711,7 +737,15 @@ function mount(host){
    const bloom=n.bornT?ease((now-n.bornT)/900):1,fade=str<.3?.55+1.5*str:1;
    n.size=ui*dpr*(5+3*it.weight+(it.hot?3:0)+n.flash*22)*(.7+.5*d)*(.65+.45*str)*(hover&&hover.id===it.id?1.6:1)*(lit?1.5:1)*(focusN===n?1.8:1)*zf*bz*bloom*fade;
    if(bloom<1){ctx.strokeStyle=rgba(l.color,.6*(1-bloom));ctx.lineWidth=dpr*1.2;ctx.beginPath();ctx.moveTo(s.x*dpr,s.y*dpr);ctx.lineTo(nx*dpr,ny*dpr);ctx.stroke()}
-   n.alpha=clamp(((it.dim?.3:.65)*d*(.35+.65*str)+n.flash)*(lit?1.6:dim),0,1)*G.b*(lit?1:ba);list.push([n,it,str,lit])}
+   n.alpha=clamp(((it.dim?.3:.65)*d*(.35+.65*str)+n.flash)*(lit?1.6:dim),0,1)*G.b*(lit?1:ba);if(n.flash>0)anyFlash=true;list.push([n,it,str,lit])}
+  // Тысячи записей вблизи: целиком (с отростками) рисуются ближайшие к центру кадра, остальные — светящимися точками.
+  // Бюджет по площади зоны на экране: на нейрон с отростками нужно ~30×30 px, иначе они сливаются в белое пятно.
+  const budget=Math.round(clamp(Math.PI*s.r*s.r/900,60,NEURON_BUDGET));
+  if(list.length>budget){const cx=W/2,cy=H/2,key=e=>(e[3]||e[0]===focusN||hover?.id===e[1].id?-1e9:0)+(e[0].sx-cx)**2+(e[0].sy-cy)**2;for(const e of list)e[4]=key(e);list.sort((a,b)=>a[4]-b[4]);
+   const rest=list.splice(budget),da=clamp(Math.PI*s.r*s.r/(rest.length*60),.12,.9);ctx.fillStyle=rgba(l.bad?[210,210,220]:l.color,1);for(const [n] of rest){const z=Math.max(1.5*dpr,n.size*.18);ctx.globalAlpha=n.alpha*da;ctx.fillRect(n.sx*dpr-z/2,n.sy*dpr-z/2,z,z)}ctx.globalAlpha=1}
+  // Подзоны вблизи: тема подписана у своего скопления.
+  if(s.groups&&dim>.5&&!cfg.clean&&cfg.labels!=='off'){lctx.font='600 '+Math.round(9.5*ui*dpr)+'px '+MONO;lctx.textAlign='center';lctx.textBaseline='middle';
+   for(const g of s.groups){if(!g.topic)continue;const [gx,gy]=place(g);if(!onScreen(gx,gy))continue;const tx='· '+g.topic+' ·',tw2=lctx.measureText(tx).width,th=12*dpr*ui,bx=gx*dpr-tw2/2,by=gy*dpr-th/2;if(gBoxes.some(b=>bx<b[0]+b[2]&&bx+tw2>b[0]&&by<b[1]+b[3]&&by+th>b[1]))continue;gBoxes.push([bx,by,tw2,th]);lctx.globalAlpha=.55*G.b;lctx.fillStyle=rgba(l.color,1);lctx.fillText(tx,gx*dpr,gy*dpr)}lctx.globalAlpha=1;lctx.textBaseline='alphabetic'}
   // Отростки нейронов — одной кистью на зону; на концах синапсы. Новые ветки (от вспоминаний) прорастают.
   // У нейрона под курсором (или выбранного) по отросткам бегут микроимпульсы.
   const col=l.bad?[210,210,220]:l.color,denA=.34*G.b*dim*warm*ba,tw=still()?0:1,tips=[],sparks=[];
@@ -730,11 +764,12 @@ function mount(host){
    for(let i=0;i<tips.length;i+=3)if(tips[i+2]){const z=dpr*ui*10;ctx.globalAlpha=.9;ctx.drawImage(spriteSeed,tips[i]-z/2,tips[i+1]-z/2,z,z)}
    ctx.globalAlpha=1;for(let i=0;i<sparks.length;i+=2){const z=dpr*ui*(7+3*s.det);ctx.drawImage(sprite,sparks[i]-z/2,sparks[i+1]-z/2,z,z)}}
   // Вблизи: синаптические связи с двумя ближайшими соседями.
-  if(s.det>0){ctx.strokeStyle=rgba(col,.3*s.det*G.b);ctx.lineWidth=dpr*.8;ctx.beginPath();for(const [n] of list)for(const o of n.near||[]){if(o.lobe!==l||!o.vis)continue;ctx.moveTo(n.sx*dpr,n.sy*dpr);ctx.lineTo(o.sx*dpr,o.sy*dpr)}ctx.stroke()}
+  if(s.det>0){ctx.strokeStyle=rgba(col,.3*s.det*G.b);ctx.lineWidth=dpr*.8;ctx.beginPath();for(const [n] of list)for(const o of nearOf(n)){if(o.lobe!==l||!o.vis)continue;ctx.moveTo(n.sx*dpr,n.sy*dpr);ctx.lineTo(o.sx*dpr,o.sy*dpr)}ctx.stroke()}
   for(const [n,it,str,lit] of list){
-   const spr=l.bad?spriteBad:shapes[kindOf(it.id)][str<.35?'cold':'warm'],size=n.size;
-   ctx.globalAlpha=n.alpha;ctx.drawImage(spr,n.sx*dpr-size/2,n.sy*dpr-size/2,size,size);
+   const rj=n.rej&&now-n.rej<2200,spr=l.bad||rj?spriteBad:shapes[kindOf(it.id)][str<.35?'cold':'warm'],size=n.size;
+   ctx.globalAlpha=n.alpha*(rj?.55:1);ctx.drawImage(spr,n.sx*dpr-size/2,n.sy*dpr-size/2,size,size);
    if(n.flash>0){ctx.globalAlpha=n.flash*.8;ctx.strokeStyle=rgba(l.color,1);ctx.lineWidth=dpr*1.2;ctx.beginPath();ctx.arc(n.sx*dpr,n.sy*dpr,dpr*(6+(1-n.flash)*40),0,TAU);ctx.stroke()}
+   if(n.rej){const k=1-(now-n.rej)/2200;if(k<=0)n.rej=0;else{ctx.globalAlpha=.7*k;ctx.strokeStyle='rgba(150,150,160,1)';ctx.lineWidth=dpr;ctx.beginPath();ctx.arc(n.sx*dpr,n.sy*dpr,size*(.4+.5*k),0,TAU);ctx.stroke();ctx.beginPath();ctx.moveTo(n.sx*dpr-size*.3,n.sy*dpr);ctx.lineTo(n.sx*dpr+size*.3,n.sy*dpr);ctx.stroke();anyFlash=true}}
    if(lit||focusN===n){ctx.globalAlpha=.6+.3*Math.sin(simT*4);ctx.strokeStyle='#ffe2b8';ctx.lineWidth=dpr;ctx.beginPath();ctx.arc(n.sx*dpr,n.sy*dpr,size*.7,0,TAU);ctx.stroke()}
   }
   ctx.globalAlpha=1;
@@ -769,8 +804,7 @@ function mount(host){
   if(cfg.clean||cfg.labels==='off'||G.b<.9)return;
   c.font=fs+'px '+MONO;c.textBaseline='middle';c.textAlign='left';
   for(const l of model.lobes){const s=l.state;if(!s.det||dimOf(l)<.5)continue;
-   const items=[...l.items].sort((a,b)=>(b.str??1)*b.weight-(a.str??1)*a.weight);
-   for(const it of items){if(n>=48)break;const nn=neurons.get(it.id);if(!nn||!nn.vis)continue;
+   for(const it of l.ranked||l.items){if(n>=48)break;const nn=neurons.get(it.id);if(!nn||!nn.vis)continue;
     const t=trim(it.title,W<640?18:30),w=c.measureText(t).width+8*dpr,h=fs+6*dpr,x=nn.sx*dpr+nn.size*.4+4*dpr,y=nn.sy*dpr-h/2;
     if(x+w>lab.width-2||boxes.some(b=>x<b[0]+b[2]&&x+w>b[0]&&y<b[1]+b[3]&&y+h>b[1]))continue;boxes.push([x,y,w,h]);n++;
     c.globalAlpha=s.det*clamp(nn.alpha*1.4,.35,1);c.fillStyle='rgba(0,0,0,.62)';c.fillRect(x,y,w,h);c.fillStyle=l.bad?'#ff8a7c':'#efe6d6';c.fillText(t,x+4*dpr,y+h/2)}}
@@ -866,13 +900,77 @@ function mount(host){
  };
 
  /* ---------- Данные и цикл ---------- */
+ let factSig='';
  async function loadFacts(){
-  try{const [f,c]=await Promise.all([fetch('/api/facts?limit=500').then(r=>r.ok?r.json():[]),fetch('/api/facts/conflicts?limit=100').then(r=>r.ok?r.json():[])]);facts=Array.isArray(f)?f.filter(x=>!x.valid_to):[];conflicts=Array.isArray(c)?c:[]}catch{}
+  try{const [f,c]=await Promise.all([fetch('/api/facts?limit=2000').then(r=>r.ok?r.json():r.status===400?fetch('/api/facts?limit=500').then(r2=>r2.ok?r2.json():[]):[]),fetch('/api/facts/conflicts?limit=100').then(r=>r.ok?r.json():[])]);facts=Array.isArray(f)?f.filter(x=>!x.valid_to):[];conflicts=Array.isArray(c)?c:[]}catch{}
+  // Опрос раз в 20 с: если факты и противоречия не менялись, мозг не пересобирается (на 10 тыс. записей это заметно).
+  const sig=facts.length+':'+facts.map(f=>f.id).join(',')+'|'+conflicts.map(c=>c.id).join(',');
+  if(sig===factSig&&applied)return;factSig=sig;
   if(host.isConnected)apply();
   firstVisit=false;
  }
  /* ---------- Думает вслух, вспоминает, учится ---------- */
- const onThinking=e=>{thinking=!!e.detail?.on;thinkT=0;if(thinking){chatter=0;idleT=0}dirty=true};
+ const onThinking=e=>{const on=!!e.detail?.on;if(on&&!thinking)startThought(e.detail?.text);if(!on&&thought)thought.end=performance.now();thinking=on;thinkT=0;if(thinking){chatter=0;idleT=0}dirty=true};
+ /* ---------- Видно, как думает ---------- */
+ // 1) вопрос распадается на слова, каждое летит к зоне, где оно встречается чаще всего;
+ // 2) от ядра расходятся волны поиска, задетые кандидаты мерцают; после ответа найденное вспыхивает, отброшенное гаснет серым;
+ // 3) цепочка мысли: ядро → зона → запись → связанные записи, с подписями шагов.
+ function startThought(text){
+  const t0=performance.now(),ws=[...new Set(words(text,3))].slice(0,6),cand=new Set();
+  const list=ws.map((w,i)=>{const k=stem(w);let best=null,bc=0;
+   for(const l of model.lobes){let c=0;for(const it of l.items)if(stemsOf(it).has(k)){c++;if(cand.size<160)cand.add(it.id)}if(c>bc){bc=c;best=l}}
+   return {w,k,lobe:best,n:bc,delay:i*170,a:-Math.PI/2+(i-(ws.length-1)/2)*.55,hit:false}});
+  thought={t0,text:String(text||''),words:list,cand,waveR:0,chain:null,end:0};
+ }
+ function drawThought(G){
+  const T=thought;if(!T)return;const t=now-T.t0,c=lctx;
+  // Волны поиска: кольцо от ядра; когда кольцо проходит зону, она вздрагивает, а её кандидаты мерцают.
+  if(thinking||now-T.end<600){const per=1500,u=(t%per)/per,maxR=Math.hypot(W,H)*.6,R=G.coreR+u*maxR,prev=T.waveR;T.waveR=R;
+   ctx.globalCompositeOperation='lighter';ctx.strokeStyle=rgba(PAL.tones[2],.22*(1-u));ctx.lineWidth=dpr*(1.2+3*(1-u));ctx.beginPath();ctx.arc(G.cx*dpr,G.cy*dpr,R*dpr,0,TAU);ctx.stroke();
+   ctx.strokeStyle=rgba(PAL.tones[1],.08*(1-u));ctx.lineWidth=dpr*14*(1-u);ctx.stroke();ctx.globalCompositeOperation='source-over';
+   for(const l of model.lobes){const s=l.state,d=Math.hypot(s.x-G.cx,s.y-G.cy);if(prev<d&&R>=d||R<prev&&d<=R){s.pulse=Math.max(s.pulse,T.words.some(w=>w.lobe===l)?.7:.25);for(const it of l.items)if(T.cand.has(it.id)){const n=neurons.get(it.id);if(n)n.flash=Math.max(n.flash,.3)}}}}
+  // Слова вопроса летят к своим зонам; слово без совпадений уходит в сторону и гаснет.
+  const fs=Math.round(10*ui*dpr);c.font='600 '+fs+'px '+MONO;c.textAlign='center';c.textBaseline='middle';
+  for(const w of T.words){const tt=t-w.delay;if(tt<0)continue;const u=ease(tt/1200),life=T.chain?clamp(1-(now-T.chain.t0)/1500,0,1):1;if(life<=0)continue;
+   let x,y,a;if(w.lobe){const s=w.lobe.state;x=G.cx+(s.x-G.cx)*u;y=G.cy+(s.y-G.cy)*u;a=life;if(u>=.999&&!w.hit){w.hit=true;s.pulse=1}}
+   else{const r=G.coreR*(1+u*1.6);x=G.cx+Math.cos(w.a)*r;y=G.cy+Math.sin(w.a)*r;a=life*clamp(1.6-tt/1100,0,1)}
+   if(a<=.01)continue;const label=w.lobe?w.w+' · '+w.n:w.w+' ?',bw=c.measureText(label).width+10*dpr,bh=fs+6*dpr;
+   ctx.globalAlpha=a*.9;const z=dpr*ui*22;ctx.drawImage(w.lobe?spriteSeed:spriteBad,x*dpr-z/2,y*dpr-z/2,z,z);ctx.globalAlpha=1;
+   c.globalAlpha=a;c.fillStyle='rgba(0,0,0,.7)';c.fillRect(x*dpr-bw/2,y*dpr-bh/2-14*dpr*ui,bw,bh);c.strokeStyle=w.lobe?rgba(w.lobe.color,.8):'rgba(160,160,170,.6)';c.lineWidth=dpr;c.strokeRect(x*dpr-bw/2+.5,y*dpr-bh/2-14*dpr*ui+.5,bw-1,bh-1);
+   c.fillStyle=w.lobe?'#fff3e0':'#a8a8b0';c.fillText(label,x*dpr,y*dpr-14*dpr*ui)}
+  c.globalAlpha=1;
+  // Цепочка мысли.
+  const C=T.chain;if(C){const ct=now-C.t0,life=clamp((8000-ct)/1000,0,1);if(life<=0){thought=null;return}
+   const pts=C.steps.map(st=>st.at());let shown=Math.min(pts.length,1+ct/650);
+   ctx.globalCompositeOperation='lighter';ctx.lineCap='round';
+   for(let i=1;i<Math.ceil(shown);i++){const k=clamp(shown-i,0,1),[x0,y0]=pts[i-1],[x1,y1]=pts[i],xe=x0+(x1-x0)*k,ye=y0+(y1-y0)*k;
+    ctx.strokeStyle=rgba(PAL.tones[2],.75*life);ctx.lineWidth=dpr*2.2;ctx.setLineDash([6*dpr,4*dpr]);ctx.lineDashOffset=-ct*.02*dpr;ctx.beginPath();ctx.moveTo(x0*dpr,y0*dpr);ctx.lineTo(xe*dpr,ye*dpr);ctx.stroke();ctx.setLineDash([]);
+    const z=dpr*ui*18;ctx.globalAlpha=life;ctx.drawImage(spriteSeed,xe*dpr-z/2,ye*dpr-z/2,z,z);ctx.globalAlpha=1}
+   ctx.globalCompositeOperation='source-over';
+   const f2=Math.round(9.5*ui*dpr);c.font='600 '+f2+'px '+MONO;c.textAlign='left';c.textBaseline='middle';
+   const cb=[];for(let i=0;i<Math.floor(shown);i++){const [x,y]=pts[i],t1=(i+1)+' · '+C.steps[i].label,bw=c.measureText(t1).width+10*dpr,bh=f2+7*dpr;
+    let bx=x*dpr+12*dpr,by=y*dpr+(i%2?10:-10)*dpr-bh/2;if(bx+bw>lab.width-4*dpr)bx=x*dpr-12*dpr-bw;by=clamp(by,4*dpr,lab.height-bh-4*dpr);
+    for(let k=0;k<6&&cb.some(b=>bx<b[0]+b[2]&&bx+bw>b[0]&&by<b[1]+b[3]&&by+bh>b[1]);k++)by+=bh+3*dpr;cb.push([bx,by,bw,bh]);
+    c.globalAlpha=life;c.fillStyle='rgba(8,5,2,.82)';c.fillRect(bx,by,bw,bh);c.fillStyle=PAL.hot;c.fillRect(bx,by,2*dpr,bh);c.fillStyle='#f6eee2';c.fillText(t1,bx+6*dpr,by+bh/2)}
+   c.globalAlpha=1}
+  else if(!thinking&&T.end&&now-T.end>2500)thought=null;
+  c.textBaseline='alphabetic';
+ }
+ // Цепочка после ответа: что вспомнила и через какие связи.
+ function buildChain(ids,text){
+  const T=thought||(thought={t0:performance.now(),text,words:[],cand:new Set(),waveR:0,end:performance.now()});
+  const ns=ids.map(id=>neurons.get(id)).filter(Boolean);if(!ns.length)return;
+  const first=ns[0],L=first.lobe,G0=()=>[view0.cx+cam.px*cam.zoom,view0.cy+cam.py*cam.zoom];
+  const steps=[{label:'вопрос «'+trim(T.text||'…',22)+'»',at:G0},{label:'зона «'+trim(L.label,18)+'»',at:()=>[L.state.x,L.state.y]},{label:'запись «'+trim(first.item.title,24)+'»',at:()=>[first.sx,first.sy]}];
+  const next=new Set([first.item.id]);
+  const linked=model.links.filter(([a,b])=>a===first.item.id||b===first.item.id).map(([a,b])=>a===first.item.id?b:a);
+  const co=coList.filter(([a,b])=>a===first.item.id||b===first.item.id).map(([a,b])=>a===first.item.id?b:a);
+  for(const id of [...linked,...co,...ns.slice(1).map(n=>n.item.id)]){if(steps.length>=5)break;if(next.has(id))continue;const n=neurons.get(id);if(!n)continue;next.add(id);
+   steps.push({label:(linked.includes(id)?'связь':co.includes(id)?'вместе':'ещё')+' «'+trim(n.item.title,22)+'»',at:()=>[n.sx,n.sy]})}
+  // Кандидаты, которые не пригодились, гаснут серым.
+  const found=new Set(ids);for(const id of T.cand)if(!found.has(id)){const n=neurons.get(id);if(n)n.rej=performance.now()}
+  T.chain={t0:performance.now(),steps};
+ }
  // Импульс из ядра к каждому вспомненному нейрону; запись становится «теплее».
  const onRecall=e=>{
   // Счётчики уже записал общий слушатель выше — здесь только перечитываем и анимируем.
@@ -882,6 +980,7 @@ function mount(host){
   coList=Object.entries(readCo()).filter(([,c])=>c>=2).sort((a,b)=>b[1]-a[1]).slice(0,200).map(([k,c])=>[...k.split('|'),c]);
   ids.slice(0,12).forEach((id,i)=>{const n=neurons.get(id);setTimeout(()=>{if(n.lobe.state)impulses.push({lobe:n.lobe,item:n.item,u:0,f:Math.floor(Math.random()*n.lobe.state.fil.length),recall:true})},i*140)});
   const first=neurons.get(ids[0]);coreKind='вспоминаю';coreText=first.item.title;coreTextT=3.5;
+  buildChain(ids,e.detail?.text);
   for(const l of model.lobes)for(const it of l.items)it.str=strength(it);dirty=true;
  };
  function renderLearn(){
@@ -938,24 +1037,30 @@ function mount(host){
  // Сон мозга: ночью (23:00–6:00) дыхание медленное, а импульсы тихо «переигрывают» записи за день.
  // tenma.brain.sleep: 'on' / 'off' — включить или выключить принудительно.
  let asleep=false;
+ let onView=true;const io=typeof IntersectionObserver==='function'?new IntersectionObserver(es=>{onView=es[es.length-1].isIntersecting;if(onView)dirty=true}):null;io?.observe(stage);
  function checkSleep(){const o=read('tenma.brain.sleep','auto'),h=new Date().getHours(),was=asleep;asleep=o==='on'||(o!=='off'&&(h>=23||h<6));if(was!==asleep)renderHud()}
  function frame(now){
   if(!host.isConnected){destroy();return}
   raf=requestAnimationFrame(frame);
-  const dt=Math.min(.05,(now-last)/1000||0);last=now;
-  const blooming=!reduceQuery.matches&&now-bloomStart<2700,busy=impulses.length||blooming||thinking||coreTextT>0||core.pulse>0||Math.abs(camT.zoom-cam.zoom)+Math.abs(camT.yaw-cam.yaw)+Math.abs(camT.px-cam.px)+Math.abs(camT.py-cam.py)+Math.abs((cfg.mode3d?1:0)-cam.depth)>.002||[...neurons.values()].some(n=>n.flash>0);
+  // Мозг не виден (прокручен за край, вкладка скрыта) — не рисуем вовсе.
+  if(!onView||document.hidden){last=now;return}
+  const dt=Math.min(.05,(now-last)/1000||0);
+  const blooming=!reduceQuery.matches&&now-bloomStart<2700,busy=impulses.length||blooming||thinking||coreTextT>0||core.pulse>0||Math.abs(camT.zoom-cam.zoom)+Math.abs(camT.yaw-cam.yaw)+Math.abs(camT.px-cam.px)+Math.abs(camT.py-cam.py)+Math.abs((cfg.mode3d?1:0)-cam.depth)>.002||anyFlash;
+  // В покое (лишь фоновая «болтовня», курсор не трогает) хватает ~30 кадров/с, во сне ~20: меньше нагрева и батареи.
+  const calm=!thought&&!dirty&&!drag&&!hover&&!pinned&&!thinking&&!blooming&&coreTextT<=0&&!anyFlash&&!impulses.some(p=>p.big||p.recall&&!p.soft)&&Math.abs(camT.zoom-cam.zoom)+Math.abs(camT.yaw-cam.yaw)+Math.abs(camT.px-cam.px)+Math.abs(camT.py-cam.py)<.002;
+  if(calm&&now-last<(asleep?48:31))return;
   if(!still()){simT+=dt;chatter-=dt;if(chatter<=0&&model.lobes.length){
    if(asleep&&!thinking){const day=[];for(const l of model.lobes)for(const it of l.items)if(Date.now()-Math.max(it.ts||0,recall[it.id]?.t||0)<DAY)day.push([l,it]);
     const pick=day.length?day[Math.floor(Math.random()*day.length)]:null;if(pick){impulses.push({lobe:pick[0],item:pick[1],u:0,f:Math.floor(Math.random()*pick[0].state.fil.length),recall:true,soft:true});if(Math.random()<.15){coreKind='сон';coreText=trim(pick[1].title,24);coreTextT=2.5}}
     chatter=1.2+Math.random()*1.4}
    else{const l=model.lobes[Math.floor(Math.random()*model.lobes.length)];impulses.push({lobe:l,u:0,f:Math.floor(Math.random()*l.state.fil.length)});chatter=thinking?.08+Math.random()*.15:.4+Math.random()*1.1}}}
-  else if(!busy&&!dirty)return;
-  dirty=false;draw(dt);
+  else if(!busy&&!dirty){last=now;return}
+  last=now;dirty=false;draw(dt);
   // Адаптивное качество: на слабой видеокарте частиц становится меньше, на сильной — возвращаются.
-  fpsT+=dt;fpsN++;if(fpsT>=1.2){const fps=fpsN/fpsT;if(fps<42&&quality>.25)quality*=.8;else if(fps>56&&quality<baseQ)quality=Math.min(baseQ,quality*1.1);
+  fpsT+=dt;fpsN++;if(fpsT>=1.2){const fps=fpsN/fpsT;if(fps<(calm?22:42)&&quality>.25)quality*=.8;else if(fps>(calm?27:56)&&quality<baseQ)quality=Math.min(baseQ,quality*1.1);
    slowN=glr&&glMode!=='force'&&quality<=.26&&fps<20?slowN+1:0;if(slowN>=3){console.warn('Мозг: WebGL слишком медленный, перехожу на 2D');dropGL()}fpsT=0;fpsN=0}
  }
- function destroy(){cancelAnimationFrame(raf);clearInterval(poll);ro.disconnect();hudRo.disconnect();window.removeEventListener('tenma:workspace',onWorkspace);window.removeEventListener('tenma:memory',onMemory);wideQuery.removeEventListener('change',onWide);document.removeEventListener('keydown',onKey);document.removeEventListener('fullscreenchange',onFsChange);document.documentElement.classList.remove('brain-fs-lock');window.removeEventListener('tenma:thinking',onThinking);window.removeEventListener('tenma:recall',onRecall);window.removeEventListener('tenma:learn',onLearn);glr?.destroy()}
+ function destroy(){io?.disconnect();cancelAnimationFrame(raf);clearInterval(poll);ro.disconnect();hudRo.disconnect();window.removeEventListener('tenma:workspace',onWorkspace);window.removeEventListener('tenma:memory',onMemory);wideQuery.removeEventListener('change',onWide);document.removeEventListener('keydown',onKey);document.removeEventListener('fullscreenchange',onFsChange);document.documentElement.classList.remove('brain-fs-lock');window.removeEventListener('tenma:thinking',onThinking);window.removeEventListener('tenma:recall',onRecall);window.removeEventListener('tenma:learn',onLearn);glr?.destroy()}
  checkSleep();setPalette();placeHud();resize();apply();renderLearn();loadFacts();raf=requestAnimationFrame(frame);
  return {destroy};
 }
