@@ -11,10 +11,19 @@ if exist "runtime\node\node.exe" (
  set "PATH=%CD%\runtime\node;%PATH%"
 )
 "%NODE%" -e "process.exit(Number(process.versions.node.split('.')[0])>=24?0:1)"
-if errorlevel 1 goto :node_error
+if errorlevel 1 (
+ echo [INFO] Preparing portable Node.js 24...
+ powershell.exe -NoProfile -NonInteractive -File "tools\bootstrap-node.ps1"
+ if errorlevel 1 goto :node_error
+ if exist "runtime\node\node.exe" (
+  set "NODE=%CD%\runtime\node\node.exe"
+  set "NPM=%CD%\runtime\node\npm.cmd"
+  set "PATH=%CD%\runtime\node;%PATH%"
+ )
+)
+
 if not exist "tools\launcher.js" goto :missing
-if not exist "node_modules\dotenv" (
- if /i not "%~1"=="start" if not "%~1"=="" goto :dependencies
+if not exist "node_modules\@lancedb\lancedb" (
  echo Installing dependencies once...
  call "%NPM%" install --no-audit --no-fund
  if errorlevel 1 goto :dependencies
