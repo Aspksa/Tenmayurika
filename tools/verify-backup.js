@@ -5,7 +5,8 @@ const crypto=require('node:crypto');
 const {DatabaseSync}=require('node:sqlite');
 function verify(file){
  const target=path.resolve(file);
- if(!target.endsWith('.sqlite'))throw Error('Ожидается файл SQLite');
+ if(path.extname(target).toLowerCase()!=='.sqlite')throw Error('Ожидается файл SQLite');
+ if(!fs.statSync(target).isFile())throw Error('Резервная копия не является файлом');
  const checksumFile=target+'.sha256';
  const line=fs.readFileSync(checksumFile,'utf8').trim();
  const match=/^([a-f0-9]{64})  (tenmayurika-\d+-[a-f0-9]{8}\.sqlite)$/.exec(line);
