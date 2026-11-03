@@ -3,7 +3,7 @@ const crypto=require('node:crypto');
 const fs=require('node:fs');
 const {DatabaseSync}=require('node:sqlite');
 const path=require('node:path');
-const DB=path.join(__dirname,'data','tenmayurika.sqlite');
+const DB=process.env.TENMAYURIKA_MEMORY_DB ? path.resolve(process.env.TENMAYURIKA_MEMORY_DB) : path.join(__dirname,'data','tenmayurika.sqlite');
 function open(){
  fs.mkdirSync(path.dirname(DB),{recursive:true});
  const db=new DatabaseSync(DB);
