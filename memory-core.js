@@ -45,16 +45,18 @@ function addFact(input){
  try{
   db.exec('BEGIN IMMEDIATE');
   try{
-   const old=db.prepare('SELECT id FROM memory_facts WHERE fingerprint=?').get(fingerprint);
-   if(old){db.exec('COMMIT');return {id:old.id,duplicate:true,conflicts:0}}
-   const id=crypto.randomUUID();
-   db.prepare('INSERT INTO memory_facts(id,subject,predicate,object,source_id,observed_at,valid_from,confidence,fingerprint) VALUES(?,?,?,?,?,?,?,?,?)').run(id,subject,predicate,object,source,now,now,confidence,fingerprint);
-   const prior=db.prepare('SELECT id FROM memory_facts WHERE subject=? AND predicate=? AND object<>? AND valid_to IS NULL').all(subject,predicate,object);
+   const old=db.prepare('SELECT id,valid_to FROM memory_facts WHERE fingerprint=?').get(fingerprint);
+   if(old&&!old.valid_to){db.exec('COMMIT');return {id:old.id,duplicate:true,conflicts:0}}
+   // Факт был отставлен при разборе противоречия, а теперь добавлен снова — возвращаем его в память.
+   const id=old?old.id:crypto.randomUUID();
+   if(old)db.prepare('UPDATE memory_facts SET valid_to=NULL,observed_at=?,valid_from=?,confidence=? WHERE id=?').run(now,now,confidence,id);
+   else db.prepare('INSERT INTO memory_facts(id,subject,predicate,object,source_id,observed_at,valid_from,confidence,fingerprint) VALUES(?,?,?,?,?,?,?,?,?)').run(id,subject,predicate,object,source,now,now,confidence,fingerprint);
+   const prior=db.prepare('SELECT id FROM memory_facts WHERE subject=? AND predicate=? AND object<>? AND valid_to IS NULL AND id<>?').all(subject,predicate,object,id);
    for(const row of prior){
     db.prepare('INSERT OR IGNORE INTO memory_conflicts(id,earlier_id,newer_id) VALUES(?,?,?)').run(crypto.randomUUID(),row.id,id);
    }
-   db.prepare('INSERT INTO memory_events(fact_id,action) VALUES(?,?)').run(id,'created');
-   db.exec('COMMIT');return {id,duplicate:false,conflicts:prior.length};
+   db.prepare('INSERT INTO memory_events(fact_id,action) VALUES(?,?)').run(id,old?'restored':'created');
+   db.exec('COMMIT');return {id,duplicate:false,...(old?{restored:true}:{}),conflicts:prior.length};
   }catch(e){db.exec('ROLLBACK');throw e}
  }finally{db.close()}
 }
@@ -103,7 +105,7 @@ function relations(subject,limit=100){
  const key=normalize(subject,'subject',300);
  if(!Number.isInteger(limit)||limit<1||limit>500)throw new TypeError('Invalid limit');
  const db=open();
- try{return db.prepare('SELECT id,subject,predicate,object,source_id,confidence,observed_at FROM memory_facts WHERE subject=? OR object=? ORDER BY observed_at DESC LIMIT ?').all(key,key,limit)}finally{db.close()}
+ try{return db.prepare('SELECT id,subject,predicate,object,source_id,confidence,observed_at FROM memory_facts WHERE valid_to IS NULL AND (subject=? OR object=?) ORDER BY observed_at DESC LIMIT ?').all(key,key,limit)}finally{db.close()}
 }
 function conflicts(limit=100){
  if(!Number.isInteger(limit)||limit<1||limit>500)throw new TypeError('Invalid limit');

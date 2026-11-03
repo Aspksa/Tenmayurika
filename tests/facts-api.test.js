@@ -39,6 +39,13 @@ test('facts API stores, searches, relates and reports conflicts',async()=>{
   assert.equal((await (await fetch(base+'/api/facts/conflicts')).json()).length,0);
   assert.equal((await (await fetch(base+'/api/facts?q='+encodeURIComponent('казань'))).json()).length,0);
   assert.equal((await (await fetch(base+'/api/facts?q='+encodeURIComponent('пермь'))).json()).length,1);
+  // Отставленный факт не попадает в «связи», а добавленный снова — возвращается в память.
+  assert.equal((await (await fetch(base+'/api/facts/relations?subject='+encodeURIComponent('Анна'))).json()).some(f=>f.object==='Казань'),false);
+  const back=await (await post({subject:'Анна',predicate:'живёт в',object:'Казань'})).json();
+  assert.equal(back.duplicate,false);assert.equal(back.restored,true);assert.equal(back.conflicts,1);
+  assert.equal((await (await fetch(base+'/api/facts?q='+encodeURIComponent('казань'))).json()).length,1);
+  const again2=(await (await fetch(base+'/api/facts/conflicts')).json()).find(c=>c.predicate==='живёт в');
+  assert.equal((await (await resolve({id:again2.id,keep:'newer'})).json()).retired,again2.earlier_id);
   // «Оба верны» снимает противоречие, ничего не убирая.
   await post({subject:'Анна',predicate:'любит',object:'чай'});await post({subject:'Анна',predicate:'любит',object:'кофе'});
   const both=(await (await fetch(base+'/api/facts/conflicts')).json())[0];
