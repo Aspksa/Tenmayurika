@@ -245,7 +245,8 @@
   window.dispatchEvent(new CustomEvent('tenma:thinking',{detail:{on:false}}));
   if(data&&data.recalled)window.dispatchEvent(new CustomEvent('tenma:recall',{detail:{...data.recalled,text,experience:data.experience}}));
   if(data&&data.experience)window.dispatchEvent(new CustomEvent('tenma:experience',{detail:data.experience}));
-  if(data&&data.source!=='tool'&&!data.secret&&text.length>=12&&window.TenmaLearn?.fromChat())window.TenmaLearn.learn(text,'chat');
+  // Сервер учится фоном сам (data.autoLearn) — тогда очередь кандидатов в браузере не нужна.
+  if(data&&!data.autoLearn&&data.source!=='tool'&&!data.secret&&text.length>=12&&window.TenmaLearn?.fromChat())window.TenmaLearn.learn(text,'chat');
   if(!answer||!String(answer).trim())answer='Модель прислала пустой ответ. Нажмите «Проверить связь» в меню «Модель ИИ».';
   typing.remove();busy=false;send.disabled=false;
   if(gen!==conversation)return; // чат очистили, пока шёл ответ

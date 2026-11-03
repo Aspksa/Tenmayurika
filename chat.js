@@ -9,6 +9,7 @@ const storage=require('./storage');
 const llm=require('./llm');
 const planner=require('./planner');
 const experience=require('./experience');
+const chatlog=require('./chatlog');
 const crypto=require('node:crypto');
 
 const MAX_MESSAGE=2000,MAX_HISTORY=12,MAX_TOOL_ROUNDS=4;
@@ -359,19 +360,20 @@ function cleanHistory(history){
  if(!Array.isArray(history))return [];
  return history.filter(m=>m&&['user','assistant'].includes(m.role)&&typeof m.text==='string').slice(-MAX_HISTORY).map(m=>({role:m.role,content:m.text.slice(0,MAX_MESSAGE)}));
 }
-function localReply(name,facts,notes,enabled,past=[]){
+function localReply(name,facts,notes,enabled,past=[],earlier=[]){
  const lines=[];
  const fix=past.find(e=>e.feedback==='fix'&&e.correction);
  if(fix)lines.push('Помню, на похожий вопрос вы меня поправили: «'+fix.correction.slice(0,200)+'»\n');
  if(facts.length){lines.push('Вот что я помню:');for(const f of facts)lines.push(factLine(f))}
  if(notes.length){lines.push(facts.length?'\nИ в заметках:':'Нашла в заметках:');for(const n of notes)lines.push(noteLine(n))}
+ if(earlier.length){lines.push((lines.length?'\n':'')+'Вы говорили мне раньше:');for(const m of earlier)lines.push('• '+new Date(m.at).toLocaleDateString('ru-RU')+': «'+m.text.slice(0,160)+'»')}
  if(!lines.length)lines.push('Пока ничего об этом не знаю.'+(enabled.has('facts')?' Скажите «запомни субъект | связь | объект», и я запомню.':''));
  lines.push('\n(Отвечаю локально. Напишите «помощь», чтобы увидеть мои инструменты. Языковую модель, например Cloud.ru, можно подключить в моём меню → «Модель ИИ».)');
  return lines.join('\n');
 }
 
-async function modelReply(name,message,history,facts,notes,enabled,impl,result,past=[]){
- const context=[...facts.map(f=>'ФАКТ: '+f.subject+' | '+f.predicate+' | '+f.object),...notes.map(n=>'ЗАМЕТКА: '+n.title+' — '+(n.content||'').slice(0,500))].join('\n');
+async function modelReply(name,message,history,facts,notes,enabled,impl,result,past=[],earlier=[]){
+ const context=[...facts.map(f=>'ФАКТ: '+f.subject+' | '+f.predicate+' | '+f.object),...notes.map(n=>'ЗАМЕТКА: '+n.title+' — '+(n.content||'').slice(0,500)),...earlier.map(m=>'ПОЛЬЗОВАТЕЛЬ ГОВОРИЛ '+new Date(m.at).toLocaleDateString('ru-RU')+': '+m.text.slice(0,400))].join('\n');
  const allowed=Object.keys(SCHEMAS).filter(fn=>enabled.has(OWNER[fn]));
  const tools=allowed.map(fn=>({type:'function',function:{name:fn,...SCHEMAS[fn]}}));
  const persona=(llm.config()?.systemPrompt||'').trim();
@@ -418,7 +420,13 @@ async function reply(input,ctx={}){
  const message=input.message.trim();
  if(message.length>MAX_MESSAGE)throw new TypeError('Сообщение длиннее '+MAX_MESSAGE+' символов. Сократите его или разбейте на части.');
  learnFromFeedback(input,message);
- const out=await answer(input,message,ctx);
+ // Каждое сообщение сохраняется; команды («дело: …») сами по себе не факты и фоном не разбираются.
+ let said=0;try{said=chatlog.save('user',message,!!parseCommand(message))}catch(e){console.error('Chat log failed:',e.name)}
+ const out=await answer(input,message,{...ctx,said});
+ try{if(!out.secret)chatlog.save('assistant',out.reply)}catch(e){console.error('Chat log failed:',e.name)}
+ // Учимся фоном, не задерживая ответ.
+ setImmediate(()=>chatlog.learnPending().catch(e=>console.error('Chat learning failed:',e.name)));
+ try{out.autoLearn=chatlog.autoLearn()}catch{}
  // Каждый ответ — эпизод опыта: как поняла, что нашла, что сделала. Справка и ошибки ввода не в счёт.
  // «Спасибо», «верно» — это отклик на прошлый ответ, а не новый вопрос.
  if(out.understood&&experience.detect(message)!=='ok'){
@@ -460,21 +468,23 @@ async function answer(input,message,ctx){
   const ids=new Set(useful.flatMap(e=>e.recalled.notes)),haveN=new Set(notes.map(n=>n.id));
   if(ids.size)for(const n of (await storage.load()).notes||[])if(ids.has(n.id)&&!haveN.has(n.id)&&notes.length<5){notes.push(n);haveN.add(n.id)}
  }
- const understood=(words(message).join(', ')||'без ключевых слов')+(past.length?' · опыт: '+past.length:'');
+ // Сказанное раньше в чате — тоже память.
+ let earlier=[];try{earlier=chatlog.search(message,3,ctx.said||0)}catch(e){console.error('Chat log search failed:',e.name)}
+ const understood=(words(message).join(', ')||'без ключевых слов')+(past.length?' · опыт: '+past.length:'')+(earlier.length?' · из разговоров: '+earlier.length:'');
  const meta={understood,used:past.map(e=>e.id)};
  // Что аватар вспомнил для ответа — «Мозг» подсвечивает эти нейроны.
  result.recalled={facts:facts.map(f=>f.id),notes:notes.map(n=>n.id)};
  if(llm.config()){
-  try{return {reply:await modelReply(name,message,cleanHistory(input.history),facts,notes,enabled,impl,result,past),source:'model',...meta,...pub(result)}}
+  try{return {reply:await modelReply(name,message,cleanHistory(input.history),facts,notes,enabled,impl,result,past,earlier),source:'model',...meta,...pub(result)}}
   catch(e){
    const why=modelFailure(e);console.error('Chat model failed:',why);
    const done=result.done.length?'Модель не ответила до конца, но уже сделано:\n'+result.done.map(t=>'• '+t).join('\n'):null;
-   return {reply:done||'⚠ Модель не ответила: '+why+'\nПока отвечаю без неё.\n\n'+localReply(name,facts,notes,enabled,past),source:'local',fallback:true,modelError:why,...meta,...pub(result)};
+   return {reply:done||'⚠ Модель не ответила: '+why+'\nПока отвечаю без неё.\n\n'+localReply(name,facts,notes,enabled,past,earlier),source:'local',fallback:true,modelError:why,...meta,...pub(result)};
   }
  }
  // Без модели честно говорим, что она не подключена, если ответить по памяти нечего.
- const local=localReply(name,facts,notes,enabled,past);
- return {reply:facts.length||notes.length?local:local+'\n\nЯзыковая модель не подключена, поэтому свободный разговор пока не получится. Правый клик по мне → «Модель ИИ»: ключ, модель, «Сохранить», затем «Проверить связь».',source:'local',...meta,...pub(result)};
+ const local=localReply(name,facts,notes,enabled,past,earlier);
+ return {reply:facts.length||notes.length||earlier.length?local:local+'\n\nЯзыковая модель не подключена, поэтому свободный разговор пока не получится. Правый клик по мне → «Модель ИИ»: ключ, модель, «Сохранить», затем «Проверить связь».',source:'local',...meta,...pub(result)};
 }
 // Разбор строки быстрого ввода планера. Префиксы «дело:», «рабочее дело:» и т.п. допускаются.
 function parseTask(text){

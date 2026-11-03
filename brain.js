@@ -313,11 +313,17 @@ function mount(host){
  const learnTitle=el('div','brain-k','04 // предлагаю запомнить');
  const chatToggle=el('label','brain-check'),chatCb=el('input');chatCb.type='checkbox';chatCb.checked=TenmaLearn.fromChat();chatToggle.append(chatCb,el('span','','учиться из чата'));
  chatCb.onchange=()=>TenmaLearn.setFromChat(chatCb.checked);
+ // Фоновое обучение на сервере: весь чат хранится, факты из каждого сообщения запоминаются сразу.
+ const autoToggle=el('label','brain-check'),autoCb=el('input');autoCb.type='checkbox';autoCb.checked=true;autoToggle.title='Сохранять весь чат и запоминать факты из него сразу, без подтверждения';autoToggle.append(autoCb,el('span','','учиться фоном'));
+ const chatStat=el('span','brain-hint brain-chatstat');
+ function showChatStat(st){if(!st)return;autoCb.checked=!!st.auto;chatToggle.style.display=st.auto?'none':'';chatStat.textContent='чат: '+st.messages+' сообщ. · выучено фактов: '+st.facts+(st.pending?' · разбираю: '+st.pending:'')}
+ async function loadChatStat(){try{const r=await fetch('/api/chatlog?limit=1');if(r.ok)showChatStat(await r.json())}catch{}}
+ autoCb.onchange=async()=>{try{const r=await fetch('/api/chatlog/auto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({on:autoCb.checked})});if(r.ok)showChatStat(await r.json())}catch{}};
  const scanBtn=el('button','brain-btn','Разобрать заметки');scanBtn.type='button';scanBtn.title='Найти факты в заметках (с моделью — её силами, без неё — по простым правилам)';
  const allBtn=el('button','brain-btn','✓ Запомнить всё');allBtn.type='button';
  const learnMsg=el('span','brain-hint'),learnList=el('ul','brain-learn-list');
  const fixBtn=el('button','brain-btn brain-alarm-btn');fixBtn.type='button';fixBtn.hidden=true;
- learnHead.append(learnTitle,chatToggle,scanBtn,allBtn,fixBtn);learnBox.append(learnHead,learnList,learnMsg);
+ learnHead.append(learnTitle,autoToggle,chatToggle,scanBtn,allBtn,fixBtn);learnBox.append(learnHead,chatStat,learnList,learnMsg);
  const hud=el('div','brain-hud');
  const pLog=el('section','brain-panel'),pAct=el('section','brain-panel'),pTree=el('section','brain-panel');
  const logHead=el('div','brain-k'),logAlert=el('span','brain-alert','сбой узла');logAlert.hidden=true;logHead.append(el('span','','01 // журнал событий'),logAlert);
@@ -911,6 +917,7 @@ function mount(host){
  async function loadFacts(){
   try{const [f,c,x]=await Promise.all([fetch('/api/facts?limit=2000').then(r=>r.ok?r.json():r.status===400?fetch('/api/facts?limit=500').then(r2=>r2.ok?r2.json():[]):[]),fetch('/api/facts/conflicts?limit=100').then(r=>r.ok?r.json():[]),fetch('/api/experience?limit=40').then(r=>r.ok?r.json():{items:[]})]);facts=Array.isArray(f)?f.filter(x=>!x.valid_to):[];conflicts=Array.isArray(c)?c:[];exp=Array.isArray(x?.items)?x.items:[]}catch{}
   // Опрос раз в 20 с: если факты и противоречия не менялись, мозг не пересобирается (на 10 тыс. записей это заметно).
+  void loadChatStat();
   const sig=facts.length+':'+facts.map(f=>f.id).join(',')+'|'+conflicts.map(c=>c.id).join(',')+'|'+exp.map(e=>e.id+(e.feedback||'')).join(',');
   if(sig===factSig&&applied)return;factSig=sig;
   if(host.isConnected)apply();
