@@ -40,3 +40,10 @@ test('avatar tools act through the chat API and respect disabled tools',async()=
   assert.match((await say('помощь',['clock'])).reply,/Дата и время/);
  }finally{await new Promise(resolve=>server.close(resolve))}
 });
+test('fact retrieval ranks the subject above many matches of a common word',async()=>{
+ const memory=require('../memory-core'),{reply}=require('../chat');
+ memory.addFact({subject:'Юрика',predicate:'любит',object:'матча',sourceId:'test'});
+ for(let i=0;i<12;i++)memory.addFact({subject:'Гость'+i,predicate:'любит',object:'кофе',sourceId:'test'});
+ const r=await reply({message:'Что любит Юрика?'});
+ assert.match(r.reply,/Юрика — любит → матча/);
+});

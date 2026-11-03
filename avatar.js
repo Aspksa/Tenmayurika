@@ -171,11 +171,14 @@
   for(const m of history)bubble(m.role,m.text,m.tag);
  }
  const TOOL_TAG={add_note:'заметка',add_task:'дело',complete_task:'дело',list_tasks:'дела',remember_fact:'факт',search_memory:'поиск',open_page:'переход',create_backup:'бэкап',system_status:'статус',current_time:'время'};
- let busy=false;
+ let busy=false,conversation=0;
  form.addEventListener('submit',async e=>{
   e.preventDefault();const text=input.value.trim();if(!text||busy)return;
   busy=true;send.disabled=true;input.value='';autoGrow();
-  const prior=history.slice(-12).map(({role,text})=>({role,text}));
+  // Контекст для модели ограничен по объёму, чтобы запрос не превысил лимит сервера (100 КБ).
+  const prior=[];let budget=20000;
+  for(const m of history.slice(-12).reverse()){const t=m.text.slice(0,1500);if(t.length>budget)break;budget-=t.length;prior.unshift({role:m.role,text:t})}
+  const gen=conversation;
   history.push({role:'user',text});bubble('user',text);
   const typing=h('div',{class:'msg assistant typing','aria-label':cfg.name+' думает'},h('span',{text:'•'}),h('span',{text:'•'}),h('span',{text:'•'}));
   log.append(typing);log.scrollTop=log.scrollHeight;state('think');
@@ -185,8 +188,10 @@
    data=await r.json();if(!r.ok)throw Error(data.error||'Ошибка');answer=data.reply;
    if(data.tools?.length)tag='⚙ '+[...new Set(data.tools.map(t=>TOOL_TAG[t]||t))].join(', ');
   }catch(err){answer='Не получилось ответить: '+err.message}
-  typing.remove();history.push({role:'assistant',text:answer,tag});history=history.slice(-100);store(CHAT_KEY,history);
-  bubble('assistant',answer,tag);state('answer',2600);busy=false;send.disabled=false;
+  typing.remove();busy=false;send.disabled=false;
+  if(gen!==conversation)return; // чат очистили, пока шёл ответ
+  history.push({role:'assistant',text:answer,tag});history=history.slice(-100);store(CHAT_KEY,history);
+  bubble('assistant',answer,tag);state('answer',2600);
   if(data.changed)window.TenmaApp?.refresh();
   for(const a of data.actions||[])if(a.type==='navigate')window.TenmaApp?.go(a.page);
   if(chat.hidden)avatar.classList.add('has-unread');else input.focus();
@@ -305,7 +310,7 @@
   chat:['Чат',()=>[
    h('fieldset',{},h('legend',{text:'Окно чата'}),range('Размер окна','chatScale',70,160,5,pct),range('Размер текста','chatFont',80,150,5,pct),h('div',{class:'toggles'},toggle('Alt+Y — открыть чат','chatHotkey'))),
    h('div',{class:'settings-actions'},
-    h('button',{type:'button',text:'Очистить чат',onclick:()=>{history=[];store(CHAT_KEY,history);renderHistory()}}),
+    h('button',{type:'button',text:'Очистить чат',onclick:()=>{conversation++;history=[];store(CHAT_KEY,history);renderHistory()}}),
     h('button',{type:'button',text:'Экспорт настроек',onclick:()=>{const a=h('a',{href:URL.createObjectURL(new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'})),download:'tenmayurika-avatar.json'});a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}}),
     h('label',{class:'button-like'},h('span',{text:'Импорт…'}),h('input',{type:'file',accept:'application/json',hidden:true,onchange:async e=>{try{const f=e.target.files[0];if(!f)return;cfg=merge(JSON.parse(await f.text()));setPose(cfg.pose);chatName.textContent=cfg.name;chatImg.src=thumbOf(poseOf(cfg.pose));refreshAll();buildSettings()}catch{alert('Не удалось прочитать файл настроек')}}})))
   ]]

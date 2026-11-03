@@ -24,13 +24,15 @@ const TOOLS={
 const TOOL_IDS=Object.keys(TOOLS);
 
 function words(text){return [...new Set(text.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w=>w.length>=3))].slice(0,8)}
+// Ищем по всей фразе и по каждому слову, затем ранжируем по числу совпавших слов, и только потом берём 8 лучших.
 function findFacts(text){
- const seen=new Map();
- for(const term of [text,...words(text)]){
-  try{for(const fact of memory.searchFacts(term.slice(0,300),10))if(!seen.has(fact.id))seen.set(fact.id,fact)}catch(e){if(!(e instanceof TypeError))throw e}
-  if(seen.size>=8)break;
+ const terms=words(text),found=new Map();
+ for(const term of [text,...terms]){
+  try{for(const fact of memory.searchFacts(term.slice(0,300),50))if(!found.has(fact.id))found.set(fact.id,fact)}catch(e){if(!(e instanceof TypeError))throw e}
  }
- return [...seen.values()].slice(0,8);
+ const full=text.trim().toLocaleLowerCase();
+ const score=f=>{const hay=(f.subject+' '+f.predicate+' '+f.object).toLocaleLowerCase();return terms.filter(t=>hay.includes(t)).length+(hay.includes(full)?terms.length+1:0)};
+ return [...found.values()].map(f=>({f,s:score(f)})).sort((a,b)=>b.s-a.s||String(b.f.observed_at).localeCompare(String(a.f.observed_at))).slice(0,8).map(x=>x.f);
 }
 async function findNotes(text){
  const terms=words(text);if(!terms.length)return [];
