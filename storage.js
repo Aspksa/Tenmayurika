@@ -18,6 +18,6 @@ function graph(){ensure();return {nodes:db.prepare('SELECT * FROM knowledge_node
 function pending(){ensure();return db.prepare('SELECT id,attempts FROM vector_queue ORDER BY attempts,id LIMIT 20').all()}
 function indexed(id){ensure();db.prepare('DELETE FROM vector_queue WHERE id=?').run(id)}
 function failed(id,error){ensure();db.prepare('UPDATE vector_queue SET attempts=attempts+1,last_error=? WHERE id=?').run(String(error).slice(0,200),id)}
-async function backup(){ensure();const folder=path.join(__dirname,'backups');fs.mkdirSync(folder,{recursive:true});const name='tenmayurika-'+Date.now()+'.sqlite';await db.backup(path.join(folder,name));return {file:name}}
+async function backup(){ensure();const folder=path.join(__dirname,'backups');fs.mkdirSync(folder,{recursive:true});const name='tenmayurika-'+Date.now()+'.sqlite';await require('node:sqlite').backup(db,path.join(folder,name));return {file:name}}
 function close(){if(db){db.close();db=undefined}}
 module.exports={connect,load,save,syncNode,graph,pending,indexed,failed,backup,close};
