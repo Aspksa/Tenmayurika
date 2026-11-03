@@ -1,0 +1,11 @@
+{
+  "name": "tenmayurika",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first personal AI workspace",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node --test"
+  }
+}
