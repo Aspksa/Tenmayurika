@@ -103,7 +103,10 @@ function listFilter(key){
 }
 function setPv(changes){Object.assign(pv,changes);savePv();render()}
 // На узком экране карточка открывается под списком — прокручиваем к ней.
-function selectItem(type,id){pv.sel=pv.sel&&pv.sel.type===type&&pv.sel.id===id?null:{type,id};render();if(pv.sel&&innerWidth<900)document.querySelector('.pl-detail')?.scrollIntoView({behavior:'smooth',block:'start'})}
+function selectItem(type,id){
+ // С «Обзора» дело открывается в планере на своём дне.
+ if(page!=='planner'){const x=workspace[type==='task'?'tasks':'notes'].find(i=>i.id===id),d=x?.due||x?.day;pv.sel={type,id};if(d){pv.date=d;pv.month=new Date(fromYmd(d).getFullYear(),fromYmd(d).getMonth(),1)}go('planner');return}
+ pv.sel=pv.sel&&pv.sel.type===type&&pv.sel.id===id?null:{type,id};render();if(pv.sel&&innerWidth<900)document.querySelector('.pl-detail')?.scrollIntoView({behavior:'smooth',block:'start'})}
 
 // Перетаскивание: дело можно бросить на день (месяц, неделя, мини-календарь) или на час (вид «День»).
 let dragId=null;
@@ -438,6 +441,20 @@ function dayAgenda(date){
  wrap.append(rail);
  return wrap;
 }
+// Сохранение «Заметки дня» живёт вне панели: перерисовка не теряет черновик и не создаёт вторую запись.
+const journals=new Map();
+function journalFor(date){
+ if(!journals.has(date))journals.set(date,{id:null,draft:null,timer:null,saving:Promise.resolve()});
+ const j=journals.get(date);j.id??=workspace.notes.find(n=>n.day===date&&n.title.startsWith('Дневник'))?.id||null;return j;
+}
+function saveJournal(date,text,onState){
+ const j=journalFor(date);j.draft=text;clearTimeout(j.timer);onState('…');
+ j.timer=setTimeout(()=>{j.saving=j.saving.then(async()=>{
+  const value=j.draft;
+  try{if(j.id)await items('PATCH',{collection:'notes',id:j.id,content:value});else if(value.trim()){const made=await items('POST',{collection:'notes',title:journalTitle(date),content:value,day:date});j.id=made.id}
+   const w=await request('/api/workspace');workspace=w;workspace.notes??=[];workspace.tasks??=[];
+   if(j.draft===value)j.draft=null;onState('Сохранено')}catch(e){onState('Ошибка: '+e.message)}})},900);
+}
 function dayPanel(box){
  const date=pv.date,tasks=workspace.tasks.filter(x=>x.due===date&&inCat(x));
  const journal=workspace.notes.find(n=>n.day===date&&n.title.startsWith('Дневник')),dayNotes=workspace.notes.filter(n=>n.day===date&&n!==journal);
@@ -445,12 +462,10 @@ function dayPanel(box){
  box.append(h('div',{class:'detail-head'},h('h3',{text:'Повестка'}),tasks.length?h('span',{class:'agenda-count',text:done+' / '+tasks.length}):null));
  box.append(dayAgenda(date));
  // «Заметка дня» сохраняется сама через секунду после ввода.
- const area=h('textarea',{class:'journal',rows:4,placeholder:'Мысли, итоги, что получилось сегодня…',value:journal?journal.content||'':'','aria-label':'Заметка дня'});
- const state=h('span',{class:'hint',text:journal?'Сохранено':''});
- let timer,saving=Promise.resolve(),id=journal?.id;
- area.addEventListener('input',()=>{state.textContent='…';clearTimeout(timer);timer=setTimeout(()=>{saving=saving.then(async()=>{
-  try{if(id)await items('PATCH',{collection:'notes',id,content:area.value});else if(area.value.trim()){const made=await items('POST',{collection:'notes',title:journalTitle(date),content:area.value,day:date});id=made.id}
-   state.textContent='Сохранено';const w=await request('/api/workspace');workspace=w;workspace.notes??=[];workspace.tasks??=[]}catch(e){state.textContent='Ошибка: '+e.message}})},900)});
+ const j=journalFor(date);
+ const area=h('textarea',{class:'journal',rows:4,placeholder:'Мысли, итоги, что получилось сегодня…',value:j.draft??(journal?journal.content||'':''),'aria-label':'Заметка дня'});
+ const state=h('span',{class:'hint',text:j.draft!=null?'…':journal?'Сохранено':''});
+ area.addEventListener('input',()=>saveJournal(date,area.value,t=>{if(state.isConnected)state.textContent=t;else if(pv.date===date)document.querySelector('.journal-head .hint')?.replaceChildren(t)}));
  box.append(h('div',{class:'journal-head'},h('h4',{class:'side-sub',text:'Заметка дня'}),state),area);
  if(dayNotes.length)box.append(h('h4',{class:'side-sub',text:'Заметки этого дня'}),...dayNotes.map(n=>h('button',{type:'button',class:'note-link',onclick:()=>selectItem('note',n.id)},'📜 '+n.title)));
  box.append(h('button',{type:'button',class:'chip-btn add-note',text:'+ заметка к этому дню',onclick:()=>{pv.sel={type:'note',id:'new',day:date};render()}}));

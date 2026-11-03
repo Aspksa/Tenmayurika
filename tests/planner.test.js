@@ -177,3 +177,14 @@ test('review fixes: month words and deleting a note during indexing',async()=>{
   assert.ok(removed.includes(id),'vector written after delete is removed again');
  }finally{Object.assign(vectors,saved);delete process.env.EMBEDDING_URL}
 });
+
+test('bare hours and uppercase dayparts',()=>{
+ const p=t=>planner.parseWhen(t,NOW);
+ assert.deepEqual(p('созвон завтра в 10'),{due:'2026-11-04',time:'10:00',rest:'созвон'});
+ assert.deepEqual(p('в 10 завтра созвон'),{due:'2026-11-04',time:'10:00',rest:'созвон'});
+ assert.deepEqual(p('зайти в 3 подъезд'),{due:null,time:null,rest:'зайти в 3 подъезд'});
+ assert.equal(p('встреча В 7 ВЕЧЕРА').time,'19:00');
+ assert.equal(p('В 12 НОЧИ спать').time,'00:00');
+ const {parseTask}=require('../chat');
+ assert.deepEqual(parseTask('созвон завтра в 10 #работа !'),{title:'созвон',category:'work',priority:'high',due:planner.ymd(planner.addDays(new Date(),1)),time:'10:00'});
+});

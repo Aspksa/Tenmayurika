@@ -20,6 +20,10 @@ function validParts(y,m,d){const x=new Date(y,m-1,d);return x.getFullYear()===y&
 const L='(?<![\\p{L}\\p{N}])',R='(?![\\p{L}\\p{N}])';
 const rx=src=>new RegExp(L+src+R,'iu');
 
+// «в 10» без «ч» и «утра» — время, только если дальше ничего нет или идёт дата («в 10 завтра»).
+// Так «в 3 подъезд» не станет временем.
+const DATE_AFTER=new RegExp('^\\s*(?:на\\s+|в\\s+|во\\s+)?(?:сегодня|завтра|послезавтра|понедельник|вторник|сред|четверг|пятниц|суббот|воскресень|\\d{1,2}[./]\\d{1,2})','iu');
+function bareHour(after){return !after.trim()||DATE_AFTER.test(after)}
 // Находит дату и время в тексте. Возвращает {due, time, rest}, где rest — текст без найденных выражений.
 // opts.defaultToday=false: время без даты не подставляет «сегодня» (для переноса дела только по времени).
 function parseWhen(text,now=new Date(),opts={}){
@@ -28,8 +32,9 @@ function parseWhen(text,now=new Date(),opts={}){
  const today=startOfDay(now);
  // Время: «в 15:30», «15:30», «в 9 утра», «в 7 вечера», «в 10 ч».
  if((m=rest.match(rx('(?:в|к|на)?\\s*([01]?\\d|2[0-3]):([0-5]\\d)')))){time=m[1].padStart(2,'0')+':'+m[2];cut(m)}
- else if((m=rest.match(rx('(?:в|к)\\s+([01]?\\d|2[0-3])\\s*(?:ч|час[аов]*)?\\s*(утра|дня|вечера|ночи)?'+'')))&&(m[2]||/ч/.test(m[0]))){
-  let h=Number(m[1]);if((m[2]==='дня'||m[2]==='вечера')&&h<12)h+=12;if(m[2]==='ночи'&&h===12)h=0;
+ else if((m=rest.match(rx('(?:в|к)\\s+([01]?\\d|2[0-3])\\s*(?:ч|час[аов]*)?\\s*(утра|дня|вечера|ночи)?'+'')))&&(m[2]||/ч/.test(m[0])||bareHour(rest.slice(m.index+m[0].length)))){
+  const part=(m[2]||'').toLocaleLowerCase();
+  let h=Number(m[1]);if((part==='дня'||part==='вечера')&&h<12)h+=12;if(part==='ночи'&&h===12)h=0;
   time=String(h).padStart(2,'0')+':00';cut(m);
  }
  // Относительные дни.
