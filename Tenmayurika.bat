@@ -36,6 +36,8 @@ if not exist "node_modules\" (
 )
 node.exe -e "const s=require('./package.json').scripts||{};process.exit(s.start?0:s.dev?1:2)"
 if errorlevel 1 goto :check_dev
+echo [INFO] Open http://127.0.0.1:5173 in your browser.
+start "" "http://127.0.0.1:5173"
 echo [INFO] Starting application with npm start...
 call npm.cmd start
 goto :finished
@@ -46,6 +48,8 @@ if errorlevel 1 (
  pause
  exit /b 3
 )
+echo [INFO] Open http://127.0.0.1:5173 in your browser.
+start "" "http://127.0.0.1:5173"
 echo [INFO] Starting application with npm run dev...
 call npm.cmd run dev
 goto :finished
