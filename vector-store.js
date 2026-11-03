@@ -18,5 +18,6 @@ async function syncNote(note){
  const table=await db.openTable('notes');await table.mergeInsert('id').whenMatchedUpdateAll().whenNotMatchedInsertAll().execute([record]);return {enabled:true}
 }
 async function search(query,limit=10){const vector=await embed(query);if(!vector)return {results:[],reason:'Embedding provider not configured'};const db=await connect();if(!(await db.tableNames()).includes('notes'))return {results:[]};const table=await db.openTable('notes');return {results:await table.vectorSearch(vector).limit(Math.min(30,Math.max(1,limit))).toArray()}}
+async function indexedIds(){const db=await connect();if(!(await db.tableNames()).includes('notes'))return new Set();const table=await db.openTable('notes');const rows=await table.query().select(['id']).toArray();return new Set(rows.map(row=>String(row.id)))}
 async function hasNotesTable(){const db=await connect();return (await db.tableNames()).includes('notes')}
-module.exports={syncNote,search,hasNotesTable};
+module.exports={syncNote,search,hasNotesTable,indexedIds};
