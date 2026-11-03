@@ -7,33 +7,52 @@ echo ==========================================
 echo        TENMAYURIKA - START
 echo ==========================================
 echo Directory: "%CD%"
-where node.exe >nul 2>&1
+set "NODE=node.exe"
+set "NPM=npm.cmd"
+if exist "%~dp0runtime\node\node.exe" (
+ set "NODE=%~dp0runtime\node\node.exe"
+ set "NPM=%~dp0runtime\node\npm.cmd"
+ set "PATH=%~dp0runtime\node;%PATH%"
+)
+"%NODE%" --version >nul 2>&1
 if errorlevel 1 (
- echo [ERROR] Node.js not found. Install Node.js LTS from https://nodejs.org/
+ echo [ERROR] Node.js not found. Put portable Node.js 24+ in runtime\node.
  pause
  exit /b 1
 )
-where npm.cmd >nul 2>&1
+"%NODE%" -e "process.exit(Number(process.versions.node.split('.')[0])>=24?0:1)"
 if errorlevel 1 (
- echo [ERROR] npm.cmd not found. Reinstall Node.js LTS.
+ echo [ERROR] Node.js 24 or newer is required for built-in SQLite.
  pause
  exit /b 1
 )
+if not exist "%~dp0runtime\node\node.exe" (
+ where npm.cmd >nul 2>&1
+ if errorlevel 1 goto :no_npm
+) else (
+ if not exist "%NPM%" goto :no_npm
+)
+goto :npm_ready
+:no_npm
+echo [ERROR] npm.cmd not found. Put full portable Node.js distribution in runtime\node.
+pause
+exit /b 1
+:npm_ready
 if not exist "package.json" (
  echo [INFO] This repository has no application yet.
  echo [INFO] Add package.json with a start or dev script, then run this BAT again.
  pause
  exit /b 2
 )
-echo [INFO] Installing or updating Node.js dependencies...\ncall npm.cmd install --no-audit --no-fund\nif errorlevel 1 goto :failed\nnode.exe -e "const s=require('./package.json').scripts||{};process.exit(s.start?0:s.dev?1:2)"
+echo [INFO] Installing or updating Node.js dependencies...\ncall "%NPM%" install --no-audit --no-fund\nif errorlevel 1 goto :failed\n"%NODE%" -e "const s=require('./package.json').scripts||{};process.exit(s.start?0:s.dev?1:2)"
 if errorlevel 1 goto :check_dev
 echo [INFO] Open http://127.0.0.1:5173 in your browser.
 start "" "http://127.0.0.1:5173"
 echo [INFO] Starting application with npm start...
-call npm.cmd start
+call "%NPM%" start
 goto :finished
 :check_dev
-node.exe -e "const s=require('./package.json').scripts||{};process.exit(s.dev?0:1)"
+"%NODE%" -e "const s=require('./package.json').scripts||{};process.exit(s.dev?0:1)"
 if errorlevel 1 (
  echo [ERROR] package.json needs scripts.start or scripts.dev
  pause
@@ -42,7 +61,7 @@ if errorlevel 1 (
 echo [INFO] Open http://127.0.0.1:5173 in your browser.
 start "" "http://127.0.0.1:5173"
 echo [INFO] Starting application with npm run dev...
-call npm.cmd run dev
+call "%NPM%" run dev
 goto :finished
 :failed
 echo [ERROR] Dependency installation failed.
