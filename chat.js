@@ -417,6 +417,8 @@ async function reply(input,ctx={}){
   return {reply:out.text,source:'tool',...pub(result)};
  }
  const facts=findFacts(message),notes=await findNotes(message);
+ // Что аватар вспомнил для ответа — «Мозг» подсвечивает эти нейроны.
+ result.recalled={facts:facts.map(f=>f.id),notes:notes.map(n=>n.id)};
  if(llm.config()){
   try{return {reply:await modelReply(name,message,cleanHistory(input.history),facts,notes,enabled,impl,result),source:'model',...pub(result)}}
   catch(e){

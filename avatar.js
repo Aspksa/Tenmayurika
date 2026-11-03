@@ -215,6 +215,7 @@
   history.push({role:'user',text});bubble('user',text);
   const typing=h('div',{class:'msg assistant typing','aria-label':cfg.name+' думает'},h('span',{text:'•'}),h('span',{text:'•'}),h('span',{text:'•'}));
   log.append(typing);log.scrollTop=log.scrollHeight;state('think');
+  window.dispatchEvent(new CustomEvent('tenma:thinking',{detail:{on:true,text}}));
   // Секундомер «думает 12 с»: видно, что ответ идёт, а не потерялся. Через 5 минут запрос прерывается.
   const started=Date.now(),clock=h('span',{class:'typing-sec'});typing.append(clock);
   const tick=setInterval(()=>{const s=Math.round((Date.now()-started)/1000);clock.textContent=s>=3?' думает '+s+' с':''},1000);
@@ -226,6 +227,10 @@
    if(data.tools?.length)tag='⚙ '+[...new Set(data.tools.map(t=>TOOL_TAG[t]||t))].join(', ');
   }catch(err){answer=err.name==='AbortError'?'Не получилось ответить: сервер не ответил за 5 минут. Проверьте, что окно Tenmayurika открыто.':'Не получилось ответить: '+(err.message==='Failed to fetch'?'нет связи с сервером Tenmayurika (окно сервера закрыто?)':err.message)}
   clearInterval(tick);clearTimeout(limit);
+  // «Мозг» показывает, что она вспомнила, и учится из сообщения (кандидаты подтверждаются в «Мозге»).
+  window.dispatchEvent(new CustomEvent('tenma:thinking',{detail:{on:false}}));
+  if(data&&data.recalled)window.dispatchEvent(new CustomEvent('tenma:recall',{detail:{...data.recalled,text}}));
+  if(data&&data.source!=='tool'&&!data.secret&&text.length>=12&&window.TenmaLearn?.fromChat())window.TenmaLearn.learn(text,'chat');
   if(!answer||!String(answer).trim())answer='Модель прислала пустой ответ. Нажмите «Проверить связь» в меню «Модель ИИ».';
   typing.remove();busy=false;send.disabled=false;
   if(gen!==conversation)return; // чат очистили, пока шёл ответ

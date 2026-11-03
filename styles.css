@@ -699,3 +699,20 @@ input[type=date],input[type=time]{color-scheme:dark}
 .brain-count{color:var(--muted)}
 @media (max-width:900px){.brain-hud{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:640px){.brain-top{flex-direction:column;align-items:stretch}.brain-ctrl{justify-content:flex-end}.brain-bar{white-space:normal}}
+/* Мозг: поиск, 3D, самообучение. */
+.brain-find{pointer-events:auto;width:clamp(9rem,14vw,18rem);font:500 .72rem/1.2 var(--mono);padding:.45em .8em;border-radius:3px;background:rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.14);color:#efe6d6}
+.brain-find:focus{border-color:var(--ember);box-shadow:0 0 0 2px rgba(238,138,60,.2)}
+.brain-find.miss{border-color:var(--alarm)}
+.brain-stage.mode3d>canvas{touch-action:none;cursor:grab}
+.brain-row{display:flex;gap:.4rem;margin-top:.35em}
+.brain-learn{position:relative;border:1px solid rgba(255,255,255,.07);border-radius:2px;background:#030201;padding:.7rem .85rem;font-family:var(--mono)}
+.brain-learn-head{display:flex;flex-wrap:wrap;align-items:center;gap:.6rem}
+.brain-learn-head .brain-k{margin:0;flex:1 1 auto}
+.brain-check{display:inline-flex;align-items:center;gap:.4em;font-size:.72rem;color:#cfc6b6;cursor:pointer}
+.brain-check input{width:auto;accent-color:var(--ember)}
+.brain-learn-list{list-style:none;margin:.6em 0 0;padding:0;display:grid;gap:.35em;font-size:.76rem}
+.brain-learn-list li{display:grid;grid-template-columns:4.5em minmax(0,1fr) auto auto;gap:.5em;align-items:center;color:#e3dacb}
+.brain-learn-list li.brain-muted{display:block}
+.brain-learn-list .brain-btn{padding:.3em .65em}
+.brain-learn-src{font-size:.66rem;color:var(--ember);text-transform:uppercase;letter-spacing:.06em}
+@media (max-width:640px){.brain-ctrl{flex-wrap:wrap}.brain-find{flex:1 1 100%;width:auto}}
