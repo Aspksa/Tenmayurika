@@ -94,3 +94,18 @@ test('avatar plans tasks with dates and reschedules them',async()=>{
   assert.match(blocked.reply,/выключен/);
  }finally{await new Promise(r=>server.close(r))}
 });
+test('review fixes: calculator precedence, navigation words, server survives bad JSON',async()=>{
+ const {reply}=require('../chat');
+ assert.match((await reply({message:'посчитай -2^2'})).reply,/= -4$/);
+ assert.match((await reply({message:'посчитай 3-2^2'})).reply,/= -1$/);
+ assert.match((await reply({message:'посчитай 2^-1'})).reply,/= 0\.5$/);
+ assert.equal(parseCommand('открой раздел фактов').args.page,'facts');
+ assert.equal(parseCommand('открой настройки модели').args.page,'settings');
+ const {server}=require('../server');
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ try{
+  const base='http://127.0.0.1:'+server.address().port;
+  for(const p of ['/api/llm','/api/facts']){const r=await fetch(base+p,{method:'POST',headers:{'Content-Type':'application/json'},body:'{oops'});assert.equal(r.status,400)}
+  assert.equal((await fetch(base+'/api/health')).status,200);
+ }finally{await new Promise(r=>server.close(r))}
+});

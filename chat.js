@@ -58,11 +58,12 @@ function pageFrom(text){
  const t=String(text||'').toLocaleLowerCase();
  if(PAGES[t])return t;
  if(/обзор|главн|домой|начал/.test(t))return 'home';
+ // Сначала явные разделы, «дела» — последними и только с начала слова («раздел», «модели» не считаются).
  if(/календар|расписан|повестк/.test(t))return 'calendar';
  if(/знани|заметк|база/.test(t))return 'notes';
- if(/дел|задач/.test(t))return 'tasks';
  if(/факт|памят/.test(t))return 'facts';
  if(/настро/.test(t))return 'settings';
+ if(/(^|[^\p{L}])(дел|задач)/u.test(t))return 'tasks';
  return null;
 }
 function splitTitle(text){
@@ -182,7 +183,7 @@ function makeTools(ctx){
    if(!Object.keys(look).length)return {ok:false,text:'Не поняла, что изменить. Например: «поза поклон», «эффект сакура», «цвет синий», «стань больше».'};
    return {ok:true,text:'Готово, меняюсь ✨',action:{type:'avatar',look}};
   },
-  async reindex_memory(){const r=await require('./sync-worker').run();return {ok:true,text:'Переиндексация запущена'+(r&&typeof r==='object'&&'processed' in r?': обработано '+r.processed+'.':'.')+(process.env.EMBEDDING_URL?'':' (Эмбеддинги не настроены — векторный поиск выключен.)')}},
+  async reindex_memory(){storage.reindexAll();const r=await require('./sync-worker').run();return {ok:true,text:'Переиндексация запущена'+(r&&typeof r==='object'&&'processed' in r?': обработано '+r.processed+'.':'.')+(process.env.EMBEDDING_URL?'':' (Эмбеддинги не настроены — векторный поиск выключен.)')}},
   async convert_units({value,from,to}){
    const v=Number(String(value).replace(',','.'));if(!Number.isFinite(v))throw new TypeError('Нужно число');
    const r=convert(v,String(from||''),String(to||''));
@@ -241,9 +242,10 @@ function calc(src){
  let i=0;
  const peek=()=>s[i],eat=c=>{if(s[i]===c){i++;return true}return false};
  function num(){const m=/^\d+(\.\d+)?|^\.\d+/.exec(s.slice(i));if(!m)throw new TypeError('Ошибка в выражении');i+=m[0].length;return Number(m[0])}
- function atom(){if(eat('-'))return -atom();if(eat('+'))return atom();if(eat('(')){const v=expr();if(!eat(')'))throw new TypeError('Не хватает скобки');return v}return num()}
+ // Унарный знак слабее степени: -2^2 = -(2^2) = -4, при этом 2^-1 = 0.5.
+ function atom(){if(eat('(')){const v=expr();if(!eat(')'))throw new TypeError('Не хватает скобки');return v}return num()}
  function power(){const b=atom();if(eat('^'))return b**unary();return b}
- function unary(){return power()}
+ function unary(){if(eat('-'))return -unary();if(eat('+'))return unary();return power()}
  function term(){let v=unary();for(;;){if(eat('*'))v*=unary();else if(eat('/')){const d=unary();if(d===0)throw new TypeError('Делить на ноль нельзя');v/=d}else if(eat('%'))v%=unary();else return v}}
  function expr(){let v=term();for(;;){if(eat('+'))v+=term();else if(eat('-'))v-=term();else return v}}
  const v=expr();if(i!==s.length||!Number.isFinite(v))throw new TypeError('Ошибка в выражении');void peek;return v;

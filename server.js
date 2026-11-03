@@ -125,8 +125,8 @@ if(req.method==='POST'&&p==='/api/backup')return respond(res,200,await storage.b
 if(req.method==='POST'&&p==='/api/sync')return respond(res,200,await syncWorker.run());
 if(req.method==='GET'&&p==='/api/graph')return respond(res,200,storage.graph());
 if(req.method==='GET'&&p==='/api/search'){const query=url.searchParams.get('q')||'';if(!query.trim())return respond(res,400,{error:'Missing query'});return respond(res,200,await vectorStore.search(query));}
-if(p==='/api/facts'||p.startsWith('/api/facts/'))return handleFacts(req,res,p,url);
-if(p==='/api/llm'||p.startsWith('/api/llm/'))return handleLlm(req,res,p);
+if(p==='/api/facts'||p.startsWith('/api/facts/'))return await handleFacts(req,res,p,url);
+if(p==='/api/llm'||p.startsWith('/api/llm/'))return await handleLlm(req,res,p);
 if(req.method==='POST'&&p==='/api/chat'){try{return respond(res,200,await chat.reply(await body(req),chatContext))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
 if(req.method==='GET'&&p==='/api/workspace')return respond(res,200,await storage.load());
 if(p==='/api/items'&&['POST','PATCH','DELETE'].includes(req.method)){
