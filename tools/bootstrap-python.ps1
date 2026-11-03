@@ -20,8 +20,9 @@ New-Item -ItemType Directory -Path $temp -Force | Out-Null
 try {
   $archive = Join-Path $temp $filename
   Write-Host 'Downloading official Python embeddable runtime...'
-  Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
+  & (Join-Path $PSScriptRoot "download-monitor.ps1") -Url $url -Destination $archive -Label $filename -HistoryPath (Join-Path $root "logs\download-history.jsonl")
   $extract = Join-Path $temp 'python'
+  Write-Host '[EXTRACT] Extracting archive...'
   Expand-Archive -Path $archive -DestinationPath $extract -Force
   $testExe = Join-Path $extract 'python.exe'
   if (-not (Test-Path $testExe)) { throw 'Python archive is incomplete' }
