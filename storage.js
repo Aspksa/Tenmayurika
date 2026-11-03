@@ -37,8 +37,8 @@ async function createBackup(){
    if(check.prepare('PRAGMA quick_check').get().quick_check!=='ok')throw Error('Backup integrity check failed');
   }finally{check.close()}
   const sha256=crypto.createHash('sha256').update(fs.readFileSync(destination)).digest('hex');
-  fs.writeFileSync(checksumFile,sha256+'  '+name+'\\n',{flag:'wx'});
-  const candidates=fs.readdirSync(folder).filter(x=>/^tenmayurika-\\d+-[a-f0-9]{8}\\.sqlite$/.test(x)&&x!==name);
+  fs.writeFileSync(checksumFile,sha256+'  '+name+'\n',{flag:'wx'});
+  const candidates=fs.readdirSync(folder).filter(x=>/^tenmayurika-\d+-[a-f0-9]{8}\.sqlite$/.test(x)&&x!==name);
   const errors=[];
   for(const old of candidates){
    try{
