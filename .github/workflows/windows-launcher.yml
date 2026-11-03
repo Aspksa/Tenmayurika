@@ -1,0 +1,28 @@
+name: Windows launcher checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  launcher:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run tests
+        run: npm test
+      - name: Test Windows BAT doctor in Cyrillic path
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:RUNNER_TEMP 'Тест (путь) & проверка'
+          New-Item -ItemType Directory -Path $target -Force | Out-Null
+          Copy-Item -Path '.\*' -Destination $target -Recurse -Force
+          Push-Location $target
+          try {
+            & cmd.exe /d /c 'call Tenmayurika.bat doctor'
+            if ($LASTEXITCODE -ne 0) { throw "BAT doctor failed: $LASTEXITCODE" }
+          } finally { Pop-Location }
