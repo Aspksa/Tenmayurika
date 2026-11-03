@@ -13,6 +13,7 @@ if ($ExpectedSha256 -and $ExpectedSha256 -notmatch '^[a-fA-F0-9]{64}$') { throw 
 $dir=[IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Destination))
 [IO.Directory]::CreateDirectory($dir)|Out-Null
 if (-not $HistoryPath) { $HistoryPath=Join-Path $dir 'download-history.jsonl' }
+[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($HistoryPath)))|Out-Null
 $name=if($Label){$Label}else{[IO.Path]::GetFileName($Destination)}
 $partial=$Destination+'.part'
 $started=[DateTimeOffset]::UtcNow
@@ -56,7 +57,6 @@ try {
      $output.Write($buffer,0,$count);$bytesThisRun+=$count;$windowBytes+=$count
      if($lastReport.Elapsed.TotalMilliseconds -ge 500){
       $speed=$windowBytes/$lastReport.Elapsed.TotalSeconds/1MB
-      $current=$offset+$output.Length-$(if($append){$offset}else{0})
       $totalLabel=if($null -ne $expected){" / $([math]::Round($expected/1MB,1)) MB"}else{''}
       Write-Host ("  ↓ {0}: {1:N1}{2} MB | {3:N2} MB/s | {4}" -f $name,($output.Length/1MB),$totalLabel,$speed,([uri]$Url).Host)
       $windowBytes=0;$lastReport.Restart()
