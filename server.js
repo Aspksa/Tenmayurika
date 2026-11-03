@@ -9,6 +9,8 @@ const vectorStore=require('./vector-store');
 const syncWorker=require('./sync-worker');
 const maintenance=require('./tools/maintenance');
 const memory=require('./memory-core');
+const chat=require('./chat');
+const llm=require('./llm');
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
 const HOST='127.0.0.1',PORT=Number(process.env.PORT)||5173;
@@ -19,8 +21,11 @@ let backupTimer;
 async function scheduledBackup(){try{ensureDisk();const result=await storage.backup();console.log('Резервная копия SQLite создана:',result.file);if(result.retentionWarnings?.length)console.warn('Не все старые копии удалось удалить')}catch(e){console.error('Автоматическое резервное копирование не выполнено:',e.code||e.name)}}
 function startBackupSchedule(){backupTimer=setInterval(()=>{void scheduledBackup()},BACKUP_INTERVAL_MS);backupTimer.unref()}
 
-const allowed=new Map([['/', 'index.html'],['/index.html','index.html'],['/styles.css','styles.css'],['/app.js','app.js']]);
-function respond(res,status,body,type='application/json; charset=utf-8'){res.writeHead(status,{'Content-Type':type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});res.end(typeof body==='string'?body:JSON.stringify(body))}
+const allowed=new Map([['/', 'index.html'],['/index.html','index.html'],['/styles.css','styles.css'],['/app.js','app.js'],['/avatar.js','avatar.js'],['/favicon.svg','favicon.svg']]);
+// Аватары: только файлы с безопасными именами из assets/avatars.
+const AVATAR_PATH=/^\/assets\/avatars\/[a-z0-9-]{1,40}\.webp$/;
+const TYPES={'.css':'text/css; charset=utf-8','.js':'application/javascript; charset=utf-8','.html':'text/html; charset=utf-8','.svg':'image/svg+xml','.webp':'image/webp'};
+function respond(res,status,body,type='application/json; charset=utf-8'){res.writeHead(status,{'Content-Type':type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});res.end(typeof body==='string'||Buffer.isBuffer(body)?body:JSON.stringify(body))}
 async function body(req){const chunks=[];let bytes=0;for await(const part of req){bytes+=part.length;if(bytes>100000)throw Error('Request too large');chunks.push(part)}return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}')}
 // Факты памяти (memory-core.js). Ошибки валидации memory-core — TypeError, отдаются как 400.
 function limitParam(url,fallback,max){const raw=url.searchParams.get('limit');if(raw===null)return fallback;const n=Number(raw);if(!Number.isInteger(n)||n<1||n>max)throw new TypeError('Invalid limit');return n}
@@ -45,6 +50,71 @@ async function handleFacts(req,res,p,url){
 }
 // Строки вида «FACT: субъект | связь | объект» в тексте заметки сохраняются как факты.
 function ingestNoteFacts(item){if(!item.content||!item.content.includes('FACT:'))return;try{memory.extractFacts(item.content,'note:'+item.id)}catch(e){console.error('Fact ingestion failed:',e.name)}}
+// Общие операции с записями: используются API и инструментами аватара.
+// Дела: category (personal|work), due (ГГГГ-ММ-ДД), time (ЧЧ:ММ), priority (low|normal|high). Заметки: category и pinned.
+const CATEGORIES=['personal','work'],PRIORITIES=['low','normal','high'];
+function validDate(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return false;const d=new Date(v+'T00:00:00Z');return !Number.isNaN(d.getTime())&&d.toISOString().slice(0,10)===v}
+// Проверяет и возвращает только разрешённые поля; бросает TypeError с понятным текстом.
+function itemFields(collection,input){
+ const out={};
+ if('title' in input){if(typeof input.title!=='string'||!input.title.trim()||input.title.length>200)throw new TypeError('Название: от 1 до 200 символов');out.title=input.title.trim()}
+ if('content' in input){if(input.content!=null&&typeof input.content!=='string')throw new TypeError('Invalid content');out.content=String(input.content||'').slice(0,20000)}
+ if('category' in input){if(!CATEGORIES.includes(input.category))throw new TypeError('Категория: personal или work');out.category=input.category}
+ if(collection==='tasks'){
+  if('done' in input){if(typeof input.done!=='boolean')throw new TypeError('Invalid done');out.done=input.done}
+  if('due' in input){if(input.due===null||input.due==='')out.due=null;else if(typeof input.due==='string'&&validDate(input.due))out.due=input.due;else throw new TypeError('Дата: ГГГГ-ММ-ДД')}
+  if('time' in input){if(input.time===null||input.time==='')out.time=null;else if(typeof input.time==='string'&&/^([01]\d|2[0-3]):[0-5]\d$/.test(input.time))out.time=input.time;else throw new TypeError('Время: ЧЧ:ММ')}
+  if('priority' in input){if(!PRIORITIES.includes(input.priority))throw new TypeError('Приоритет: low, normal или high');out.priority=input.priority}
+ }
+ if(collection==='notes'&&'pinned' in input){if(typeof input.pinned!=='boolean')throw new TypeError('Invalid pinned');out.pinned=input.pinned}
+ // day: заметка привязана к дню планера («Заметка дня» и заметки дня).
+ if(collection==='notes'&&'day' in input){if(input.day===null||input.day==='')out.day=null;else if(typeof input.day==='string'&&validDate(input.day))out.day=input.day;else throw new TypeError('Дата: ГГГГ-ММ-ДД')}
+ return out;
+}
+function addItem(collection,title,content,extra={}){
+ if(!['notes','tasks'].includes(collection))throw new TypeError('Invalid item');
+ const fields=itemFields(collection,{...extra,title,content:typeof content==='string'?content:''});
+ const base=collection==='tasks'?{category:'personal',due:null,time:null,priority:'normal',done:false}:{category:'personal',pinned:false};
+ const item={id:require('node:crypto').randomUUID(),...base,...fields,createdAt:new Date().toISOString()};
+ if(collection==='tasks'&&item.time&&!item.due)item.due=localDate();
+ storage.mutate(data=>{data[collection]??=[];data[collection].unshift(item)});
+ if(collection==='notes')indexNote(item);
+ return item;
+}
+function localDate(d=new Date()){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function indexNote(item){storage.syncNode(item);ingestNoteFacts(item);syncWorker.run().catch(e=>console.error('LanceDB indexing failed:',e.message))}
+// patch: допустимые поля itemFields; boolean вместо объекта — старый вызов «отметить выполненным».
+function updateItem(collection,id,patch){
+ if(typeof patch==='boolean'||patch===undefined)patch=typeof patch==='boolean'?{done:patch}:{};
+ const fields=itemFields(collection,patch);
+ const item=storage.mutate(data=>{const found=(data[collection]||[]).find(x=>x.id===id);if(!found)return null;Object.assign(found,fields);if(collection==='tasks'){if(fields.done===true)found.doneAt=new Date().toISOString();if(fields.done===false)delete found.doneAt}found.updatedAt=new Date().toISOString();return {...found}});
+ if(item&&collection==='notes'&&('title' in fields||'content' in fields))indexNote(item);
+ return item;
+}
+// Удаление доступно только из интерфейса (кнопка с подтверждением), не инструментам аватара.
+function removeItem(collection,id){
+ const removed=storage.mutate(data=>{const list=data[collection]||[],i=list.findIndex(x=>x.id===id);if(i<0)return null;return list.splice(i,1)[0]});
+ if(removed&&collection==='notes'){storage.removeNode(id);vectorStore.removeNote(id).catch(e=>console.error('LanceDB delete failed:',e.message))}
+ return removed;
+}
+// Настройки языковой модели аватара. Ключ API сохраняется только на диске и в ответах не возвращается.
+async function handleLlm(req,res,p){
+ try{
+  if(req.method==='GET'&&p==='/api/llm')return respond(res,200,llm.view());
+  if(req.method==='POST'&&p==='/api/llm')return respond(res,200,llm.save(await body(req)));
+  if(req.method==='POST'&&p==='/api/llm/models')return respond(res,200,{models:await llm.listModels()});
+  if(req.method==='POST'&&p==='/api/llm/test')return respond(res,200,await llm.test());
+  return respond(res,404,{error:'Not found'});
+ }catch(e){
+  if(e instanceof SyntaxError)throw e;
+  if(e.name==='TimeoutError'||e.name==='AbortError')return respond(res,504,{error:'Сервис модели не ответил вовремя'});
+  if(e instanceof TypeError&&e.message!=='fetch failed')return respond(res,400,{error:e.message});
+  if(e instanceof TypeError)return respond(res,502,{error:'Не удалось подключиться к сервису модели'});
+  if(/^Chat API HTTP (\d+)/.test(e.message))return respond(res,502,{error:'Сервис модели ответил ошибкой: '+e.message.replace('Chat API ','')});
+  throw e;
+ }
+}
+const chatContext={addItem,setTaskDone:(id,done)=>updateItem('tasks',id,{done}),updateTask:(id,patch)=>updateItem('tasks',id,patch)};
 const server=http.createServer(async(req,res)=>{try{
 const host=req.headers.host||'';if(host!=='127.0.0.1:'+String(server.address()?.port||PORT)&&host!=='localhost:'+String(server.address()?.port||PORT))return respond(res,403,{error:'Forbidden host'});
 const url=new URL(req.url,'http://localhost');const p=url.pathname;
@@ -57,16 +127,23 @@ if(req.method==='POST'&&p==='/api/backup')return respond(res,200,await storage.b
 if(req.method==='POST'&&p==='/api/sync')return respond(res,200,await syncWorker.run());
 if(req.method==='GET'&&p==='/api/graph')return respond(res,200,storage.graph());
 if(req.method==='GET'&&p==='/api/search'){const query=url.searchParams.get('q')||'';if(!query.trim())return respond(res,400,{error:'Missing query'});return respond(res,200,await vectorStore.search(query));}
-if(p==='/api/facts'||p.startsWith('/api/facts/'))return handleFacts(req,res,p,url);
+if(p==='/api/facts'||p.startsWith('/api/facts/'))return await handleFacts(req,res,p,url);
+if(p==='/api/llm'||p.startsWith('/api/llm/'))return await handleLlm(req,res,p);
+if(req.method==='POST'&&p==='/api/chat'){try{return respond(res,200,await chat.reply(await body(req),chatContext))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
+// Быстрый ввод планера: «созвон завтра в 10 #работа !» → поля дела (тот же разбор, что у аватара).
+if(req.method==='POST'&&p==='/api/parse'){const input=await body(req);if(!input||typeof input.text!=='string'||!input.text.trim()||input.text.length>500)return respond(res,400,{error:'Invalid text'});return respond(res,200,chat.parseTask(input.text))}
 if(req.method==='GET'&&p==='/api/workspace')return respond(res,200,await storage.load());
-if(req.method==='POST'&&p==='/api/items'){
-const input=await body(req),collection=input.collection;
-if(!['notes','tasks'].includes(collection)||typeof input.title!=='string'||!input.title.trim()||input.title.length>200)return respond(res,400,{error:'Invalid item'});
-const item={id:require('node:crypto').randomUUID(),title:input.title.trim(),content:typeof input.content==='string'?input.content.slice(0,20000):'',done:false,createdAt:new Date().toISOString()};storage.mutate(data=>{data[collection]??=[];data[collection].unshift(item)});if(collection==='notes'){storage.syncNode(item);ingestNoteFacts(item);syncWorker.run().catch(e=>console.error('LanceDB indexing failed:',e.message))}return respond(res,201,item)}
-if(req.method==='PATCH'&&p==='/api/items'){
-const input=await body(req);if(!['notes','tasks'].includes(input.collection))return respond(res,400,{error:'Invalid collection'});
-const item=storage.mutate(data=>{const found=(data[input.collection]||[]).find(x=>x.id===input.id);if(!found)return null;if(typeof input.done==='boolean'&&input.collection==='tasks')found.done=input.done;return {...found}});if(!item)return respond(res,404,{error:'Not found'});return respond(res,200,item)}
-if(req.method==='GET'&&allowed.has(p)){const name=allowed.get(p),type=name.endsWith('.css')?'text/css; charset=utf-8':name.endsWith('.js')?'application/javascript; charset=utf-8':'text/html; charset=utf-8';return respond(res,200,fs.readFileSync(path.join(ROOT,name),'utf8'),type)}
+if(p==='/api/items'&&['POST','PATCH','DELETE'].includes(req.method)){
+const input=await body(req);
+if(!input||typeof input!=='object'||Array.isArray(input)||!['notes','tasks'].includes(input.collection))return respond(res,400,{error:'Invalid collection'});
+try{
+ if(req.method==='POST'){const {collection,title,content,id:_id,createdAt:_c,...extra}=input;if(typeof title!=='string')return respond(res,400,{error:'Invalid item'});return respond(res,201,addItem(collection,title,content,extra))}
+ if(typeof input.id!=='string')return respond(res,400,{error:'Invalid id'});
+ if(req.method==='DELETE'){const removed=removeItem(input.collection,input.id);return removed?respond(res,200,{ok:true,id:input.id}):respond(res,404,{error:'Not found'})}
+ const {collection,id,...patch}=input;const item=updateItem(collection,id,patch);if(!item)return respond(res,404,{error:'Not found'});return respond(res,200,item);
+}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
+if(req.method==='GET'&&allowed.has(p)){const name=allowed.get(p);return respond(res,200,fs.readFileSync(path.join(ROOT,name),'utf8'),TYPES[path.extname(name)])}
+if(req.method==='GET'&&AVATAR_PATH.test(p)){const file=path.join(ROOT,p.slice(1));if(!fs.existsSync(file))return respond(res,404,{error:'Not found'});res.writeHead(200,{'Content-Type':'image/webp','X-Content-Type-Options':'nosniff','Cache-Control':'public, max-age=86400'});return res.end(fs.readFileSync(file))}
 return respond(res,404,{error:'Not found'})
 }catch(e){console.error('Request failed:',e.name,e.code||'',e instanceof SyntaxError?'invalid JSON':'request processing error');respond(res,e.message==='Request too large'?413:e instanceof SyntaxError?400:500,{error:e.message==='Request too large'?'Request too large':e instanceof SyntaxError?'Invalid JSON':'Internal server error'})}});
 server.on('error',e=>{console.error('Server error:',e.code||e.name);process.exitCode=1});

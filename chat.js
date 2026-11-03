@@ -1,0 +1,418 @@
+'use strict';
+// Чат аватара с инструментами.
+// Явные команды («заметка: …», «дело: …», «запомни …», «найди …» и т.д.) выполняются локально всегда.
+// Остальные сообщения: если подключена модель (меню аватара → «Модель ИИ», например Cloud.ru, или CHAT_URL в .env), отвечает модель
+// и может сама вызывать включённые инструменты; иначе аватар ищет ответ в фактах и заметках.
+// Какие инструменты разрешены, решает пользователь в настройках аватара (список приходит в запросе).
+const memory=require('./memory-core');
+const storage=require('./storage');
+const llm=require('./llm');
+const planner=require('./planner');
+const crypto=require('node:crypto');
+
+const MAX_MESSAGE=2000,MAX_HISTORY=12,MAX_TOOL_ROUNDS=4;
+const PAGES={home:'Обзор',planner:'Планер',tasks:'Дела',notes:'Заметки',calendar:'Календарь',facts:'Факты памяти',settings:'Настройки проекта'};
+
+// Описание инструментов: id совпадает с переключателями в настройках аватара.
+const TOOLS={
+ notes:{label:'Создавать заметки'},
+ tasks:{label:'Вести дела'},
+ calendar:{label:'Календарь и повестка'},
+ facts:{label:'Запоминать факты'},
+ search:{label:'Искать в памяти'},
+ insights:{label:'Анализ памяти'},
+ navigate:{label:'Открывать разделы'},
+ reminders:{label:'Напоминания и таймеры'},
+ calc:{label:'Калькулятор'},
+ fun:{label:'Кубик и монетка'},
+ avatar:{label:'Менять свой облик'},
+ backup:{label:'Делать резервную копию'},
+ sync:{label:'Переиндексация памяти'},
+ status:{label:'Проверять систему'},
+ clock:{label:'Дата и время'},
+ convert:{label:'Конвертер единиц'},
+ password:{label:'Генератор паролей'}
+};
+const TOOL_IDS=Object.keys(TOOLS);
+
+function words(text){return [...new Set(text.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w=>w.length>=3))].slice(0,8)}
+// Ищем по всей фразе и по каждому слову, затем ранжируем по числу совпавших слов, и только потом берём 8 лучших.
+function findFacts(text){
+ const terms=words(text),found=new Map();
+ for(const term of [text,...terms]){
+  try{for(const fact of memory.searchFacts(term.slice(0,300),50))if(!found.has(fact.id))found.set(fact.id,fact)}catch(e){if(!(e instanceof TypeError))throw e}
+ }
+ const full=text.trim().toLocaleLowerCase();
+ const score=f=>{const hay=(f.subject+' '+f.predicate+' '+f.object).toLocaleLowerCase();return terms.filter(t=>hay.includes(t)).length+(hay.includes(full)?terms.length+1:0)};
+ return [...found.values()].map(f=>({f,s:score(f)})).sort((a,b)=>b.s-a.s||String(b.f.observed_at).localeCompare(String(a.f.observed_at))).slice(0,8).map(x=>x.f);
+}
+async function findNotes(text){
+ const terms=words(text);if(!terms.length)return [];
+ const data=await storage.load();
+ return (data.notes||[]).map(note=>{const hay=(note.title+' '+(note.content||'')).toLocaleLowerCase();return {note,score:terms.filter(t=>hay.includes(t)).length}})
+  .filter(x=>x.score>0).sort((a,b)=>b.score-a.score).slice(0,5).map(x=>x.note);
+}
+const factLine=f=>'• '+f.subject+' — '+f.predicate+' → '+f.object;
+const noteLine=n=>'• '+n.title+(n.content?': '+n.content.slice(0,140):'');
+function pageFrom(text){
+ const t=String(text||'').toLocaleLowerCase();
+ if(PAGES[t])return t;
+ if(/обзор|главн|домой|начал/.test(t))return 'home';
+ // Сначала явные разделы, «дела» — последними и только с начала слова («раздел», «модели» не считаются).
+ if(/планер|планировщ/.test(t))return 'planner';
+ if(/календар|расписан|повестк/.test(t))return 'calendar';
+ if(/знани|заметк|база/.test(t))return 'notes';
+ if(/факт|памят/.test(t))return 'facts';
+ if(/настро/.test(t))return 'settings';
+ if(/(^|[^\p{L}])(дел|задач)/u.test(t))return 'tasks';
+ return null;
+}
+function splitTitle(text){
+ const m=text.match(/^(.+?)(?:\s+[—–-]\s+|\n|:\s+)([\s\S]+)$/);
+ return m?{title:m[1].trim(),content:m[2].trim()}:{title:text.trim(),content:''};
+}
+
+/* ---------- Реализация инструментов ---------- */
+// ctx предоставляет server.js: addItem(collection,title,content) и setTaskDone(id,done).
+const cat=c=>c==='work'||/рабоч|работ/i.test(String(c||''))?'work':'personal';
+const validDue=d=>typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&planner.ymd(planner.fromYmd(d))===d?d:null;
+const validTime=t=>typeof t==='string'&&/^([01]\d|2[0-3]):[0-5]\d$/.test(t)?t:null;
+function plural(n,one,few,many){const a=Math.abs(n)%100,b=a%10;return a>10&&a<20?many:b===1?one:b>=2&&b<=4?few:many}
+function taskMeta(t){return [(t.category==='work'?'💼 рабочее':'🏠 личное'),t.due?planner.describe(t.due)+(t.time?' в '+t.time:''):'без срока',t.priority==='high'?'❗ важное':t.priority==='low'?'не срочно':''].filter(Boolean).join(', ')}
+function taskLine(t){const today=planner.ymd(new Date());return '• '+(t.category==='work'?'💼 ':'🏠 ')+(t.priority==='high'?'❗':'')+t.title+(t.due?' — '+(t.due<today?'⚠ ':'')+planner.describe(t.due)+(t.time?' '+t.time:''):'')}
+async function findTask(title,done){
+ const q=String(title||'').trim().toLocaleLowerCase();if(!q)return null;
+ const tasks=((await storage.load()).tasks||[]).filter(t=>t.done===done);
+ return tasks.find(t=>t.title.toLocaleLowerCase()===q)||tasks.find(t=>t.title.toLocaleLowerCase().includes(q))||tasks.find(t=>q.includes(t.title.toLocaleLowerCase()));
+}
+function makeTools(ctx){
+ return {
+  async add_note({title,content='',category}){const item=await ctx.addItem('notes',String(title||'').slice(0,200),String(content||''),{category:cat(category)});return {ok:true,text:(item.category==='work'?'Рабочая заметка':'Заметка')+' «'+item.title+'» сохранена.',changed:true}},
+  async add_task(args){
+   let title=String(args.title||'').trim(),due=validDue(args.due),time=validTime(args.time);
+   // Дата словами: из поля when или прямо из названия («купить чай завтра в 15:00»).
+   const spoken=typeof args.when==='string'&&args.when.trim()?planner.parseWhen(args.when):(!due?planner.parseWhen(title):null);
+   if(spoken&&(spoken.due||spoken.time)){due=due||spoken.due;time=time||spoken.time;if(!args.when&&spoken.rest)title=spoken.rest}
+   if(!title)return {ok:false,text:'Как назвать дело?'};
+   const priority=['low','normal','high'].includes(args.priority)?args.priority:'normal';
+   const item=await ctx.addItem('tasks',title.slice(0,200),'',{category:cat(args.category),due,time,priority});
+   return {ok:true,text:'Дело «'+item.title+'» добавлено: '+taskMeta(item)+'.',changed:true};
+  },
+  async complete_task({title}){
+   const found=await findTask(title,false);
+   if(!found)return {ok:false,text:'Не нашла открытого дела «'+(title||'')+'».'};
+   ctx.setTaskDone(found.id,true);return {ok:true,text:'Отметила «'+found.title+'» выполненным ✓',changed:true};
+  },
+  async list_tasks({category,when}={}){
+   const tasks=(await storage.load()).tasks||[],c=['personal','work'].includes(category)?category:null,period=planner.periodFrom(when);
+   if(!tasks.length)return {ok:true,text:'Дел пока нет.'};
+   const scope=tasks.filter(t=>(!c||(t.category||'personal')===c));
+   const open=scope.filter(t=>!t.done&&(!period||planner.inPeriod(t,period))).sort(planner.byAgenda);
+   const head=(c?(c==='work'?'Рабочие дела':'Личные дела'):'Дела')+(period?' '+planner.periodLabel(period):'');
+   if(!open.length)return {ok:true,text:head+': ничего не запланировано ✓'};
+   const overdue=period?0:open.filter(t=>planner.inPeriod(t,'overdue')).length;
+   return {ok:true,text:head+' ('+open.length+'):\n'+open.slice(0,20).map(taskLine).join('\n')+(open.length>20?'\n…и ещё '+(open.length-20)+'.':'')+(overdue?'\n⚠ Просрочено: '+overdue+'.':'')+(period||c?'':'\nВсего: '+tasks.length+', выполнено: '+tasks.filter(t=>t.done).length+'.')};
+  },
+  async agenda({when}={}){
+   const period=planner.periodFrom(when)||'today',tasks=((await storage.load()).tasks||[]).filter(t=>!t.done);
+   const list=tasks.filter(t=>planner.inPeriod(t,period)).sort(planner.byAgenda),overdue=period==='overdue'?[]:tasks.filter(t=>planner.inPeriod(t,'overdue')).sort(planner.byAgenda);
+   const lines=['📅 План '+planner.periodLabel(period)+':'];
+   if(list.length)lines.push(...list.slice(0,20).map(taskLine));else lines.push('• свободно ✨');
+   if(overdue.length)lines.push('\n⚠ Просрочено ('+overdue.length+'):',...overdue.slice(0,10).map(taskLine));
+   if(period==='today'){const next=tasks.filter(t=>planner.inPeriod(t,'tomorrow'));if(next.length)lines.push('\nЗавтра: '+next.length+' '+plural(next.length,'дело','дела','дел')+'.')}
+   return {ok:true,text:lines.join('\n')};
+  },
+  async move_task({title,when,due,time}){
+   const found=await findTask(title,false);
+   if(!found)return {ok:false,text:'Не нашла открытого дела «'+(title||'')+'».'};
+   let d=validDue(due),t=validTime(time);
+   if(typeof when==='string'&&when.trim()){const w=planner.parseWhen(when,new Date(),{defaultToday:false});d=d||w.due;t=t||w.time}
+   if(!d&&!t)return {ok:false,text:'На когда перенести? Например: «перенеси '+found.title+' на завтра».'};
+   const patch={};if(d)patch.due=d;if(t){patch.time=t;if(!d&&!found.due)patch.due=planner.ymd(new Date())}
+   const item=ctx.updateTask(found.id,patch);
+   return {ok:true,text:'Перенесла «'+found.title+'» → '+taskMeta(item)+'.',changed:true};
+  },
+  async days_until({date}){
+   const raw=String(date||'').trim(),low=raw.toLocaleLowerCase();
+   let due=validDue(raw);
+   if(!due&&/нов\S*\s+год/.test(low))due=(new Date().getFullYear()+1)+'-01-01';
+   if(!due)due=planner.parseWhen(raw).due;
+   if(!due)return {ok:false,text:'Не поняла дату. Например: «сколько дней до 31.12» или «до нового года».'};
+   const n=planner.daysBetween(new Date(),planner.fromYmd(due));
+   const label=planner.describe(due);
+   return {ok:true,text:n===0?'Это сегодня! 🎉':n>0?'До '+label+' — '+n+' '+plural(n,'день','дня','дней')+'.':'Это было '+(-n)+' '+plural(-n,'день','дня','дней')+' назад ('+label+').'};
+  },
+  async remember_fact({subject,predicate,object}){
+   const r=memory.addFact({subject,predicate,object,sourceId:'avatar-chat'});
+   return {ok:true,changed:true,text:r.duplicate?'Это я уже помню.':'Запомнила: '+subject+' — '+predicate+' → '+object+(r.conflicts?'\n⚠ Противоречит прежним фактам: '+r.conflicts+'.':'')};
+  },
+  async search_memory({query}){
+   const q=String(query||'').trim();if(!q)return {ok:false,text:'Что поискать?'};
+   const facts=findFacts(q),notes=await findNotes(q);
+   if(!facts.length&&!notes.length)return {ok:true,text:'По запросу «'+q+'» ничего не нашла.'};
+   return {ok:true,text:[facts.length?'Факты:\n'+facts.map(factLine).join('\n'):'',notes.length?'Заметки:\n'+notes.map(noteLine).join('\n'):''].filter(Boolean).join('\n\n')};
+  },
+  async open_page({page}){const id=pageFrom(page);if(!id)return {ok:false,text:'Не знаю такого раздела. Есть: '+Object.values(PAGES).join(', ')+'.'};return {ok:true,text:'Открываю «'+PAGES[id]+'».',action:{type:'navigate',page:id}}},
+  async create_backup(){const r=await storage.backup();return {ok:true,text:'Резервная копия SQLite создана: '+require('node:path').basename(r.file||'')+'. Векторы LanceDB в неё не входят.'}},
+  async system_status(){
+   const s=await require('./services').status(),d=memory.diagnostics();
+   const mark=v=>v?'✓':'✗';
+   return {ok:true,text:'SQLite '+mark(s.sqlite.ok)+' · LanceDB '+mark(s.lancedb.ok)+(s.lancedb.configured?' (эмбеддинги настроены)':' (эмбеддинги не настроены)')+' · граф '+mark(s.graph.ok)+'\nФактов в памяти: '+(d.facts??d.count??'—')+', целостность: '+(d.integrity||'—')+'.'+(llm.config()?'\nМодель: '+llm.config().model+'.':'\nЯзыковая модель не подключена.')};
+  },
+  async list_notes(){const notes=(await storage.load()).notes||[];if(!notes.length)return {ok:true,text:'Заметок пока нет.'};return {ok:true,text:'Последние заметки ('+notes.length+' всего):\n'+notes.slice(0,10).map(noteLine).join('\n')}},
+  async day_summary(){
+   const data=await storage.load(),today=planner.ymd(new Date());
+   const local=iso=>iso?planner.ymd(new Date(iso)):'';const notes=(data.notes||[]).filter(n=>local(n.createdAt)===today),tasks=data.tasks||[],newTasks=tasks.filter(t=>local(t.createdAt)===today),open=tasks.filter(t=>!t.done),closed=tasks.filter(t=>t.done&&local(t.doneAt)===today),dueToday=open.filter(t=>t.due===today),overdue=open.filter(t=>t.due&&t.due<today);
+   return {ok:true,text:'Итоги дня:\n• новых заметок: '+notes.length+'\n• новых дел: '+newTasks.length+'\n• выполнено сегодня: '+closed.length+'\n• на сегодня осталось: '+dueToday.length+(overdue.length?'\n• ⚠ просрочено: '+overdue.length:'')+'\n• открытых дел всего: '+open.length+(open.length?'\nБлижайшие: '+open.sort(planner.byAgenda).slice(0,3).map(t=>t.title).join(', '):'')}
+  },
+  async fact_conflicts(){const rows=memory.conflicts(10);if(!rows.length)return {ok:true,text:'Противоречий в памяти нет ✓'};return {ok:true,text:'Противоречия:\n'+rows.map(c=>'• '+c.subject+' — '+c.predicate+': «'+c.earlier+'» или «'+c.newer+'»').join('\n')}},
+  async fact_relations({subject}){const rows=memory.relations(String(subject||''),20);if(!rows.length)return {ok:true,text:'О «'+subject+'» связей не знаю.'};return {ok:true,text:'Связи «'+subject+'»:\n'+rows.map(factLine).join('\n')}},
+  async set_reminder({minutes,text}){
+   const m=Number(minutes);if(!Number.isFinite(m)||m<=0||m>7*24*60)throw new TypeError('Укажите время от 1 минуты до недели');
+   const t=String(text||'Время пришло!').trim().slice(0,200)||'Время пришло!',at=Date.now()+Math.round(m*60000);
+   return {ok:true,text:'Напомню через '+fmtMinutes(m)+': «'+t+'» ⏰',action:{type:'reminder',at,text:t}};
+  },
+  async calculate({expression}){const v=calc(String(expression||''));return {ok:true,text:String(expression).trim()+' = '+(Number.isInteger(v)?v:Number(v.toFixed(10)))}},
+  async roll_dice({sides=6}){const n=Math.max(2,Math.min(1000,Math.floor(Number(sides)||6)));return {ok:true,text:'🎲 Выпало '+(1+Math.floor(Math.random()*n))+(n!==6?' (d'+n+')':'')+'.'}},
+  async flip_coin(){return {ok:true,text:'🪙 '+(Math.random()<.5?'Орёл':'Решка')+'!'}},
+  async change_look(args){
+   const look={};
+   if(args.pose&&POSE_WORDS[args.pose])look.pose=args.pose;
+   if(args.particles&&PARTICLE_WORDS[args.particles])look.particleType=args.particles;
+   if(args.color&&/^#[0-9a-f]{6}$/i.test(args.color))look.glowColor=args.color;
+   if(args.size)look.sizeDelta=Math.max(-200,Math.min(200,Number(args.size)||0));
+   if(!Object.keys(look).length)return {ok:false,text:'Не поняла, что изменить. Например: «поза поклон», «эффект сакура», «цвет синий», «стань больше».'};
+   return {ok:true,text:'Готово, меняюсь ✨',action:{type:'avatar',look}};
+  },
+  async reindex_memory(){storage.reindexAll();const r=await require('./sync-worker').run();return {ok:true,text:'Переиндексация запущена'+(r&&typeof r==='object'&&'processed' in r?': обработано '+r.processed+'.':'.')+(process.env.EMBEDDING_URL?'':' (Эмбеддинги не настроены — векторный поиск выключен.)')}},
+  async convert_units({value,from,to}){
+   const v=Number(String(value).replace(',','.'));if(!Number.isFinite(v))throw new TypeError('Нужно число');
+   const r=convert(v,String(from||''),String(to||''));
+   return {ok:true,text:fmtNum(v)+' '+r.from+' = '+fmtNum(r.value)+' '+r.to};
+  },
+  async generate_password({length=16}){
+   const n=Math.max(8,Math.min(64,Math.floor(Number(length)||16)));
+   const sets=['abcdefghijkmnopqrstuvwxyz','ABCDEFGHJKLMNPQRSTUVWXYZ','23456789','!@#$%^&*-_=+?'],all=sets.join('');
+   const chars=sets.map(set=>set[crypto.randomInt(set.length)]);
+   while(chars.length<n)chars.push(all[crypto.randomInt(all.length)]);
+   for(let i=chars.length-1;i>0;i--){const j=crypto.randomInt(i+1);[chars[i],chars[j]]=[chars[j],chars[i]]}
+   // secret: пароль не уходит в модель — ей достаётся только modelText, а сам пароль добавляется к ответу локально.
+   return {ok:true,secret:true,text:'🔐 '+chars.join('')+'\n('+n+' символов. Пароль создан на этом компьютере и в языковую модель не отправлялся; сохраните его в менеджер паролей и очистите чат.)',modelText:'Пароль из '+n+' символов создан и будет показан пользователю отдельно. Не повторяй и не придумывай его.'};
+  },
+  async pick_random({options}){
+   const list=(Array.isArray(options)?options:String(options||'').split(/\s*(?:,|;|\s+или\s+)\s*/)).map(x=>String(x).trim()).filter(Boolean).slice(0,30);
+   if(list.length<2)return {ok:false,text:'Дайте хотя бы два варианта: «выбери чай, кофе или какао».'};
+   return {ok:true,text:'🦊 Выбираю: '+list[crypto.randomInt(list.length)]+'!'};
+  },
+  async current_time(){const now=new Date();return {ok:true,text:'Сейчас '+now.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+', '+now.toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long',year:'numeric'})+'.'}}
+ };
+}
+// Какому переключателю принадлежит функция.
+const OWNER={agenda:'calendar',move_task:'calendar',days_until:'calendar',convert_units:'convert',generate_password:'password',pick_random:'fun',list_notes:'notes',day_summary:'insights',fact_conflicts:'insights',fact_relations:'insights',set_reminder:'reminders',calculate:'calc',roll_dice:'fun',flip_coin:'fun',change_look:'avatar',reindex_memory:'sync',add_note:'notes',add_task:'tasks',complete_task:'tasks',list_tasks:'tasks',remember_fact:'facts',search_memory:'search',open_page:'navigate',create_backup:'backup',system_status:'status',current_time:'clock'};
+const SCHEMAS={
+ add_note:{description:'Создать заметку. category: personal (личная) или work (рабочая)',parameters:{type:'object',properties:{title:{type:'string'},content:{type:'string'},category:{type:'string',enum:['personal','work']}},required:['title']}},
+ add_task:{description:'Добавить дело. category: personal (личное) или work (рабочее). Срок: due (ГГГГ-ММ-ДД) и time (ЧЧ:ММ) или when словами («завтра в 15:00», «в пятницу»). priority: low, normal, high',parameters:{type:'object',properties:{title:{type:'string'},category:{type:'string',enum:['personal','work']},due:{type:'string'},time:{type:'string'},when:{type:'string'},priority:{type:'string',enum:['low','normal','high']}},required:['title']}},
+ complete_task:{description:'Отметить дело выполненным по названию',parameters:{type:'object',properties:{title:{type:'string'}},required:['title']}},
+ list_tasks:{description:'Показать открытые дела, можно отфильтровать по категории (personal/work) и периоду when: today, tomorrow, week, overdue или ГГГГ-ММ-ДД',parameters:{type:'object',properties:{category:{type:'string',enum:['personal','work']},when:{type:'string'}}}},
+ agenda:{description:'Повестка: план на день или неделю с просроченными делами. when: today, tomorrow, week или ГГГГ-ММ-ДД',parameters:{type:'object',properties:{when:{type:'string'}}}},
+ move_task:{description:'Перенести дело на другую дату или время. when словами («на завтра», «в пятницу в 10:00») или due/time',parameters:{type:'object',properties:{title:{type:'string'},when:{type:'string'},due:{type:'string'},time:{type:'string'}},required:['title']}},
+ days_until:{description:'Сколько дней осталось до даты (ГГГГ-ММ-ДД, «31.12», «нового года»)',parameters:{type:'object',properties:{date:{type:'string'}},required:['date']}},
+ convert_units:{description:'Перевести величину между единицами: длина, масса, объём, время, скорость, температура, данные',parameters:{type:'object',properties:{value:{type:'number'},from:{type:'string'},to:{type:'string'}},required:['value','from','to']}},
+ generate_password:{description:'Сгенерировать надёжный пароль (8–64 символа)',parameters:{type:'object',properties:{length:{type:'integer'}}}},
+ pick_random:{description:'Случайно выбрать один из вариантов',parameters:{type:'object',properties:{options:{type:'array',items:{type:'string'}}},required:['options']}},
+ remember_fact:{description:'Запомнить факт в виде субъект–связь–объект',parameters:{type:'object',properties:{subject:{type:'string'},predicate:{type:'string'},object:{type:'string'}},required:['subject','predicate','object']}},
+ search_memory:{description:'Найти факты и заметки пользователя',parameters:{type:'object',properties:{query:{type:'string'}},required:['query']}},
+ open_page:{description:'Открыть раздел интерфейса: home, tasks, notes, calendar, facts, settings',parameters:{type:'object',properties:{page:{type:'string',enum:Object.keys(PAGES)}},required:['page']}},
+ create_backup:{description:'Создать резервную копию базы SQLite',parameters:{type:'object',properties:{}}},
+ system_status:{description:'Проверить состояние SQLite, LanceDB и памяти',parameters:{type:'object',properties:{}}},
+ current_time:{description:'Узнать текущие дату и время',parameters:{type:'object',properties:{}}},
+ list_notes:{description:'Показать последние заметки',parameters:{type:'object',properties:{}}},
+ day_summary:{description:'Итоги дня: новые заметки и дела',parameters:{type:'object',properties:{}}},
+ fact_conflicts:{description:'Показать противоречия в фактах памяти',parameters:{type:'object',properties:{}}},
+ fact_relations:{description:'Показать все факты о субъекте',parameters:{type:'object',properties:{subject:{type:'string'}},required:['subject']}},
+ set_reminder:{description:'Поставить напоминание или таймер через указанное число минут',parameters:{type:'object',properties:{minutes:{type:'number'},text:{type:'string'}},required:['minutes']}},
+ calculate:{description:'Посчитать арифметическое выражение (+ - * / ^ % и скобки)',parameters:{type:'object',properties:{expression:{type:'string'}},required:['expression']}},
+ roll_dice:{description:'Бросить кубик',parameters:{type:'object',properties:{sides:{type:'integer'}}}},
+ flip_coin:{description:'Подбросить монетку',parameters:{type:'object',properties:{}}},
+ change_look:{description:'Изменить свой облик: позу (stand, sit-greet, seiza, sit-dream, bow), частицы (sparks, petals, foxfire, fireflies, stars, snow, butterflies, runes), цвет свечения (#rrggbb) или размер (+/- пикселей)',parameters:{type:'object',properties:{pose:{type:'string'},particles:{type:'string'},color:{type:'string'},size:{type:'number'}}}},
+ reindex_memory:{description:'Запустить переиндексацию векторной памяти',parameters:{type:'object',properties:{}}}
+};
+// Безопасный калькулятор без eval: числа, + - * / % ^ и скобки.
+function calc(src){
+ const s=src.replace(/,/g,'.').replace(/[×х]/g,'*').replace(/[÷:]/g,'/').replace(/\s+/g,'');
+ if(!s||s.length>200||!/^[\d.+\-*/%^()]+$/.test(s))throw new TypeError('Могу посчитать только числа и + - * / % ^ ( )');
+ let i=0;
+ const peek=()=>s[i],eat=c=>{if(s[i]===c){i++;return true}return false};
+ function num(){const m=/^\d+(\.\d+)?|^\.\d+/.exec(s.slice(i));if(!m)throw new TypeError('Ошибка в выражении');i+=m[0].length;return Number(m[0])}
+ // Унарный знак слабее степени: -2^2 = -(2^2) = -4, при этом 2^-1 = 0.5.
+ function atom(){if(eat('(')){const v=expr();if(!eat(')'))throw new TypeError('Не хватает скобки');return v}return num()}
+ function power(){const b=atom();if(eat('^'))return b**unary();return b}
+ function unary(){if(eat('-'))return -unary();if(eat('+'))return unary();return power()}
+ function term(){let v=unary();for(;;){if(eat('*'))v*=unary();else if(eat('/')){const d=unary();if(d===0)throw new TypeError('Делить на ноль нельзя');v/=d}else if(eat('%'))v%=unary();else return v}}
+ function expr(){let v=term();for(;;){if(eat('+'))v+=term();else if(eat('-'))v-=term();else return v}}
+ const v=expr();if(i!==s.length||!Number.isFinite(v))throw new TypeError('Ошибка в выражении');void peek;return v;
+}
+// Конвертер единиц: [название, группа, множитель к базовой единице, шаблон].
+const UNITS=[
+ ['км/ч','speed',1/3.6,/^(км\/ч|кмч|km\/h|kmh)$/],['м/с','speed',1,/^(м\/с|m\/s)$/],['миль/ч','speed',0.44704,/^(миль\/ч|mph)$/],['узлов','speed',0.514444,/^(узл\p{L}*|узел|kn|knots?)$/u],
+ ['км','length',1000,/^(км|километр\p{L}*|km)$/u],['м','length',1,/^(м|метр\p{L}*|m)$/u],['см','length',0.01,/^(см|сантиметр\p{L}*|cm)$/u],['мм','length',0.001,/^(мм|миллиметр\p{L}*|mm)$/u],
+ ['миль','length',1609.344,/^(мил[ьяию]\p{L}*|mi|miles?)$/u],['футов','length',0.3048,/^(фут\p{L}*|ft|feet|foot)$/u],['дюймов','length',0.0254,/^(дюйм\p{L}*|in|inch(es)?)$/u],['ярдов','length',0.9144,/^(ярд\p{L}*|yd|yards?)$/u],
+ ['кг','mass',1,/^(кг|килограмм\p{L}*|kg)$/u],['г','mass',0.001,/^(г|гр|грамм\p{L}*|g)$/u],['т','mass',1000,/^(т|тонн\p{L}*|t)$/u],['фунтов','mass',0.45359237,/^(фунт\p{L}*|lbs?)$/u],['унций','mass',0.028349523125,/^(унци\p{L}*|oz)$/u],
+ ['л','volume',1,/^(л|литр\p{L}*|l)$/u],['мл','volume',0.001,/^(мл|миллилитр\p{L}*|ml)$/u],['галлонов','volume',3.785411784,/^(галлон\p{L}*|gal)$/u],['м³','volume',1000,/^(м3|м³|кубометр\p{L}*)$/u],
+ ['с','time',1,/^(с|сек\p{L}*|s|sec)$/u],['мин','time',60,/^(мин\p{L}*|min)$/u],['ч','time',3600,/^(ч|час\p{L}*|h|hours?)$/u],['дн.','time',86400,/^(д|дн\p{L}*|ден\p{L}*|сут\p{L}*|days?)$/u],['нед.','time',604800,/^(нед\p{L}*|weeks?)$/u],
+ ['°C','temp','C',/^(°?c|°?с|цельси\p{L}*|градус\p{L}*)$/u],['°F','temp','F',/^(°?f|фаренгейт\p{L}*)$/u],['K','temp','K',/^(k|кельвин\p{L}*)$/u],
+ ['Б','data',1,/^(б|байт\p{L}*|b|bytes?)$/u],['КБ','data',1024,/^(кб|килобайт\p{L}*|kb)$/u],['МБ','data',1024**2,/^(мб|мегабайт\p{L}*|mb)$/u],['ГБ','data',1024**3,/^(гб|гигабайт\p{L}*|gb)$/u],['ТБ','data',1024**4,/^(тб|терабайт\p{L}*|tb)$/u]
+];
+function convert(value,from,to){
+ const norm=u=>u.trim().toLocaleLowerCase().replace(/[.?!]+$/,'');
+ const a=UNITS.filter(u=>u[3].test(norm(from))),b=UNITS.filter(u=>u[3].test(norm(to)));
+ let pair=null;for(const x of a){const y=b.find(y=>y[1]===x[1]);if(y){pair=[x,y];break}}
+ if(!pair)throw new TypeError(a.length&&b.length?'Эти единицы нельзя перевести друг в друга':'Не знаю таких единиц. Умею: км, м, мили, футы, кг, фунты, литры, часы, км/ч, °C/°F, ГБ…');
+ const [x,y]=pair;
+ if(x[1]==='temp'){const c=x[2]==='C'?value:x[2]==='F'?(value-32)*5/9:value-273.15;return {from:x[0],to:y[0],value:y[2]==='C'?c:y[2]==='F'?c*9/5+32:c+273.15}}
+ return {from:x[0],to:y[0],value:value*x[2]/y[2]};
+}
+const fmtNum=v=>Number.isInteger(v)?v.toLocaleString('ru-RU'):Number(v.toPrecision(10)).toLocaleString('ru-RU',{maximumFractionDigits:6});
+function fmtMinutes(m){if(m<1)return Math.round(m*60)+' с';if(m<60)return Math.round(m)+' мин';const h=Math.floor(m/60),r=Math.round(m%60);return h+' ч'+(r?' '+r+' мин':'')}
+const POSE_WORDS={stand:'стоит|стой|встань',bow:'поклон|поклонись',seiza:'сэйдза|сейдза|сядь',['sit-dream']:'мечта|задумайся|мечтай',['sit-greet']:'улыбка|улыбнись'};
+const PARTICLE_WORDS={sparks:'искр',petals:'сакур|лепест',foxfire:'огоньк|кицунэ-би|пламя|огонь',fireflies:'светлячк',stars:'звёзд|звезд',snow:'снег',butterflies:'бабоч',runes:'рун'};
+const COLOR_WORDS={'#e8c25a':'золот|жёлт|желт','#f4f1ff':'бел|лунн|серебр','#ff9ec7':'розов','#6fd6ff':'син|голуб','#b58cff':'фиолет|аметист|сирен','#ff5a5a':'красн|багр','#6fe3a8':'зелён|зелен|нефрит'};
+const pick=(map,text)=>Object.keys(map).find(k=>new RegExp(map[k]).test(text));
+
+/* ---------- Разбор явных команд ---------- */
+function parseCommand(text){
+ const t=text.trim(),low=t.toLocaleLowerCase();
+ let m;
+ if(/^(помощь|справка|команды|что (ты )?умеешь|инструменты)\??!?$/.test(low))return {help:true};
+ if((m=t.match(/^(?:создай\s+|новая\s+|добавь\s+|запиши\s+)?(?:(рабоч\S*|личн\S*)\s+)?заметк[уаи]\s*[:—–-]?\s+([\s\S]+)$/i)))return {fn:'add_note',args:{...splitTitle(m[2]),...(m[1]?{category:/^рабоч/i.test(m[1])?'work':'personal'}:{})}};
+ if((m=t.match(/^(?:добавь\s+|новое\s+|создай\s+|новая\s+|запиши\s+)?((?:(?:рабоч|личн|важн|срочн)\S*\s+){0,2})(?:дело|задач[уа])\s*[:—–-]?\s+([\s\S]+)$/i))||(m=t.match(/^()(?:работа|по работе)\s*:\s*([\s\S]+)$/i)))return {fn:'add_task',args:taskArgs(m[1]+(/^(работа|по работе)/i.test(t)?' рабоч':''),m[2])};
+ if((m=t.match(/^(?:выполнено|готово|сделано|выполнила?|сделала?)\s*[:—–-]?\s+(.+)$/i))||(m=t.match(/^отметь\s+(.+?)(?:\s+(?:как\s+)?(?:выполненн\S*|сделанн\S*|готов\S*))?$/i)))return {fn:'complete_task',args:{title:m[1].trim()}};
+ if(/^(список дел|что (мне )?(нужно|надо) сделать)\??$/.test(low))return {fn:'list_tasks',args:{}};
+ if(/^(что\s+)?(просрочен\S*|просрочк\S*)(\s+дела)?\??$/.test(low))return {fn:'list_tasks',args:{when:'overdue'}};
+ if((m=low.match(/^(?:покажи\s+|мои\s+|какие\s+(?:у меня\s+)?)?(рабочие|личные)?\s*(?:дела|задачи|планы)(?:\s+(?:на|в|за)\s+(.+?))?\??$/))&&(!m[2]||planner.periodFrom(m[2])))return {fn:'list_tasks',args:{category:m[1]?(m[1].startsWith('раб')?'work':'personal'):undefined,when:m[2]?planner.periodFrom(m[2]):undefined}};
+ if((m=low.match(/^(?:что\s+(?:у меня\s+)?(?:на|в)|план\s+на|повестка(?:\s+на)?|расписание(?:\s+на)?|планы\s+на)\s*(сегодня|завтра|послезавтра|неделю|неделе|этой неделе|\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?|\S+\s+\S+)?\??$/))&&(!m[1]||planner.periodFrom(m[1])))return {fn:'agenda',args:{when:m[1]?planner.periodFrom(m[1]):'today'}};
+ if((m=t.match(/^(?:перенеси|сдвинь|передвинь|отложи)\s+(?:дело\s+)?(.+?)\s+((?:на|в|во|к)\s+.+)$/i)))return {fn:'move_task',args:{title:m[1].replace(/^[«"]|[»"]$/g,''),when:m[2]}};
+ if((m=t.match(/^(?:сколько\s+(?:дней\s+)?(?:осталось\s+)?до|дней\s+до)\s+(.+?)\??$/i)))return {fn:'days_until',args:{date:m[1]}};
+ if((m=t.match(/^запомни\s*(?:,?\s*что)?\s*[:—–-]?\s*([\s\S]+)$/i))){
+  let parts=m[1].split('|').map(s=>s.trim()).filter(Boolean);
+  if(parts.length!==3)parts=m[1].split(/\s+[—–-]\s+|\s*→\s*/).map(s=>s.trim()).filter(Boolean);
+  if(parts.length!==3)return {error:'Чтобы запомнить факт, напишите так: «запомни Анна | живёт в | Казань».'};
+  return {fn:'remember_fact',args:{subject:parts[0],predicate:parts[1],object:parts[2]}};
+ }
+ if((m=t.match(/^(?:найди|поищи|поиск|что ты знаешь о|что ты помнишь о|что известно о)\s*[:—–-]?\s+(.+?)\??$/i)))return {fn:'search_memory',args:{query:m[1]}};
+ if((m=t.match(/^(?:открой|перейди\s+(?:в|на|к)|покажи\s+раздел)\s+(.+)$/i))&&pageFrom(m[1]))return {fn:'open_page',args:{page:pageFrom(m[1])}};
+ if(/(резервн\S*\s+коп|бэкап|бекап|backup)/.test(low)&&/^(сделай|создай|запусти|нужна|сохрани|бэкап|бекап|backup|резерв)/.test(low))return {fn:'create_backup',args:{}};
+ if(/^(статус|состояние|проверь систему|проверка системы|диагностика)\??$/.test(low))return {fn:'system_status',args:{}};
+ if(/^(который час|сколько времени|какое (сегодня )?число|какая (сегодня )?дата|какой сегодня день|время|дата)\??$/.test(low))return {fn:'current_time',args:{}};
+ if(/^(мои заметки|список заметок|покажи заметки|последние заметки)\??$/.test(low))return {fn:'list_notes',args:{}};
+ if(/^(итоги( дня)?|сводка|отчёт|отчет|как прош(ёл|ел) день)\??$/.test(low))return {fn:'day_summary',args:{}};
+ if(/^(противоречия|покажи противоречия|конфликты)\??$/.test(low))return {fn:'fact_conflicts',args:{}};
+ if((m=t.match(/^(?:связи|всё о|все о|что связано с)\s+(.+?)\??$/i)))return {fn:'fact_relations',args:{subject:m[1]}};
+ if((m=t.match(/^(?:напомни|таймер|поставь таймер|разбуди)\s+(?:мне\s+)?(?:через\s+)?(\d+(?:[.,]\d+)?)\s*(сек\S*|мин\S*|час\S*|с|м|ч)?(?=[\s:,—–-]|$)\s*[:,—–-]?\s*(.*)$/i))){
+  const n=Number(m[1].replace(',','.')),u=(m[2]||'мин').toLocaleLowerCase();
+  const minutes=u.startsWith('с')?n/60:u.startsWith('ч')?n*60:n;
+  return {fn:'set_reminder',args:{minutes,text:m[3]||'Время пришло!'}};
+ }
+ if((m=t.match(/^(?:помодоро|фокус)\s*(\d+)?$/i)))return {fn:'set_reminder',args:{minutes:Number(m[1]||25),text:'Помодоро завершён — пора отдохнуть 🍵'}};
+ if((m=t.match(/^(?:переведи|конвертируй|сконвертируй|сколько)\s+(-?\d+(?:[.,]\d+)?)\s*([^\s\d][^\s]*)\s+(?:в|во)\s+([^\s?]+)\??$/i)))return {fn:'convert_units',args:{value:m[1],from:m[2],to:m[3]}};
+ if((m=low.match(/^(?:придумай|сгенерируй|создай|сделай|нужен|дай)?\s*(?:мне\s+)?(?:новый\s+|надёжный\s+|надежный\s+|сложный\s+)?пароль(?:\s+(?:на|из|длиной|в)?\s*(\d{1,2}))?(?:\s*символ\S*)?$/)))return {fn:'generate_password',args:{length:m[1]?Number(m[1]):16}};
+ if((m=t.match(/^(?:выбери|реши за меня|что выбрать)\s*(?:из|между)?\s*[:—–-]?\s*(.+?)\??$/i)))return {fn:'pick_random',args:{options:m[1]}};
+ if((m=t.match(/^(?:посчитай|сколько будет|вычисли|калькулятор|=)\s*(.+?)\??$/i)))return {fn:'calculate',args:{expression:m[1]}};
+ if(/^(брось|кинь)\s+(кубик|кость)/.test(low)||low==='кубик'){const n=(low.match(/d(\d+)/)||[])[1];return {fn:'roll_dice',args:{sides:n?Number(n):6}}}
+ if(/^(подбрось|брось|кинь)\s+монет/.test(low)||low==='монетка'||/орёл или решка|орел или решка/.test(low))return {fn:'flip_coin',args:{}};
+ if((m=low.match(/^(?:поза|прими позу|стань в позу)\s+(.+)$/))){const p=pick(POSE_WORDS,m[1]);return p?{fn:'change_look',args:{pose:p}}:{error:'Позы: стоит, улыбка, сэйдза, мечтает, поклон.'}}
+ if(/^(поклонись|улыбнись|задумайся|встань|сядь)$/.test(low))return {fn:'change_look',args:{pose:pick(POSE_WORDS,low)}};
+ if((m=low.match(/^(?:эффект|частицы|включи эффект|включи частицы)\s+(.+)$/))){const p=pick(PARTICLE_WORDS,m[1]);return p?{fn:'change_look',args:{particles:p}}:{error:'Эффекты: искры, сакура, огоньки, светлячки, звёзды, снег, бабочки, руны.'}}
+ if((m=low.match(/^(?:цвет|свечение|сияй|светись)\s+(.+)$/))){const c=pick(COLOR_WORDS,m[1]);return c?{fn:'change_look',args:{color:c}}:{error:'Цвета: золотой, белый, розовый, синий, фиолетовый, красный, зелёный.'}}
+ if(/^(стань |будь )?(больше|побольше|крупнее)$/.test(low))return {fn:'change_look',args:{size:40}};
+ if(/^(стань |будь )?(меньше|поменьше)$/.test(low))return {fn:'change_look',args:{size:-40}};
+ if(/^(переиндексируй|переиндексация|обнови индекс|синхронизируй память)\??$/.test(low))return {fn:'reindex_memory',args:{}};
+ return null;
+}
+// «рабочее важное дело: отчёт завтра в 10:00 #работа !» → категория, приоритет, дата, время.
+function taskArgs(adjectives,body){
+ let text=body.trim(),category=/рабоч/i.test(adjectives)?'work':/личн/i.test(adjectives)?'personal':undefined,priority=/важн|срочн/i.test(adjectives)?'high':undefined;
+ if(/(^|\s)#(работа|рабоч\S*|work)(?=\s|$)/i.test(text)){category='work';text=text.replace(/(^|\s)#(работа|рабоч\S*|work)(?=\s|$)/ig,' ')}
+ if(/(^|\s)#(личн\S*|дом|personal)(?=\s|$)/i.test(text)){category='personal';text=text.replace(/(^|\s)#(личн\S*|дом|personal)(?=\s|$)/ig,' ')}
+ if(/\s+по работе(?=\s|$)/i.test(text)){category=category||'work';text=text.replace(/\s+по работе(?=\s|$)/i,' ')}
+ if(/\s!+$/.test(text)||/(^|\s)(важно|срочно)(?=\s|$)/i.test(text)){priority='high';text=text.replace(/\s!+$/,'').replace(/(^|\s)(важно|срочно)(?=\s|$)/ig,' ')}
+ const w=planner.parseWhen(text);
+ return Object.fromEntries(Object.entries({title:(w.rest||text).trim(),category,priority,due:w.due,time:w.time}).filter(([,v])=>v!=null));
+}
+function helpText(enabled){
+ const lines={insights:'«итоги дня», «противоречия», «связи Анна»',reminders:'«напомни через 10 минут позвонить», «помодоро»',calc:'«посчитай (2+3)*4»',fun:'«брось кубик», «монетка», «выбери чай, кофе или какао»',avatar:'«поза поклон», «эффект сакура», «цвет синий», «стань больше»',sync:'«переиндексируй»',notes:'«заметка: Заголовок — текст», «рабочая заметка: …», «мои заметки»',tasks:'«дело: купить чай завтра в 18:00», «рабочее дело: отчёт в пятницу», «важное дело: …», «готово: купить чай», «рабочие дела», «дела на завтра», «просроченные»',calendar:'«что на сегодня», «что на неделе», «перенеси отчёт на понедельник», «сколько дней до 31.12»',convert:'«переведи 5 км в мили», «сколько 100 F в C», «2 ГБ в МБ»',password:'«придумай пароль на 20»',facts:'«запомни Анна | живёт в | Казань»',search:'«найди Анна»',navigate:'«открой календарь», «открой дела»',backup:'«сделай резервную копию»',status:'«статус»',clock:'«который час»'};
+ const on=TOOL_IDS.filter(id=>enabled.has(id));
+ if(!on.length)return 'Все мои инструменты выключены. Включите их в настройках (правый клик по мне → «Инструменты»).';
+ return 'Что я умею:\n'+on.map(id=>'• '+TOOLS[id].label+': '+lines[id]).join('\n');
+}
+
+function cleanHistory(history){
+ if(!Array.isArray(history))return [];
+ return history.filter(m=>m&&['user','assistant'].includes(m.role)&&typeof m.text==='string').slice(-MAX_HISTORY).map(m=>({role:m.role,content:m.text.slice(0,MAX_MESSAGE)}));
+}
+function localReply(name,facts,notes,enabled){
+ const lines=[];
+ if(facts.length){lines.push('Вот что я помню:');for(const f of facts)lines.push(factLine(f))}
+ if(notes.length){lines.push(facts.length?'\nИ в заметках:':'Нашла в заметках:');for(const n of notes)lines.push(noteLine(n))}
+ if(!lines.length)lines.push('Пока ничего об этом не знаю.'+(enabled.has('facts')?' Скажите «запомни субъект | связь | объект», и я запомню.':''));
+ lines.push('\n(Отвечаю локально. Напишите «помощь», чтобы увидеть мои инструменты. Языковую модель, например Cloud.ru, можно подключить в моём меню → «Модель ИИ».)');
+ return lines.join('\n');
+}
+
+async function modelReply(name,message,history,facts,notes,enabled,impl,result){
+ const context=[...facts.map(f=>'ФАКТ: '+f.subject+' | '+f.predicate+' | '+f.object),...notes.map(n=>'ЗАМЕТКА: '+n.title+' — '+(n.content||'').slice(0,500))].join('\n');
+ const allowed=Object.keys(SCHEMAS).filter(fn=>enabled.has(OWNER[fn]));
+ const tools=allowed.map(fn=>({type:'function',function:{name:fn,...SCHEMAS[fn]}}));
+ const persona=(llm.config()?.systemPrompt||'').trim();
+ const system=(persona||'Ты '+name+' — девятихвостая лиса-кицунэ, хранительница личной памяти Tenmayurika. Отвечай по-русски, тепло и кратко.')+' Твоё имя: '+name+'. Сегодня '+new Date().toLocaleDateString('ru-RU')+'.'+(allowed.length?' Используй инструменты, когда пользователь просит что-то сделать.':'')+(context?'\nИзвестно из памяти пользователя:\n'+context:'');
+ const messages=[{role:'system',content:system},...history,{role:'user',content:message}];
+ for(let round=0;round<MAX_TOOL_ROUNDS;round++){
+  const msg=await llm.complete({messages,tools});
+  const calls=Array.isArray(msg.tool_calls)?msg.tool_calls:[];
+  if(!calls.length){if(typeof msg.content!=='string'||!msg.content.trim())throw Error('Empty chat reply');return msg.content.trim()+(result.secrets.length?'\n\n'+result.secrets.join('\n\n'):'')}
+  messages.push({role:'assistant',content:msg.content||null,tool_calls:calls});
+  for(const call of calls){
+   const fn=call.function?.name;let out;
+   if(!allowed.includes(fn))out={ok:false,text:'Инструмент недоступен'};
+   else{let args={};try{args=JSON.parse(call.function.arguments||'{}')}catch{}try{out=await impl[fn](args)}catch(e){out={ok:false,text:e instanceof TypeError?e.message:'Ошибка инструмента'}}}
+   track(result,fn,out);
+   messages.push({role:'tool',tool_call_id:call.id,content:out.secret?out.modelText:out.text});
+  }
+ }
+ // Модель исчерпала лимит раундов: честно показываем, что вышло у каждого инструмента.
+ return result.outcomes.length?'Не успела закончить ответ. Результаты инструментов:\n'+result.outcomes.map(o=>(o.ok?'• ':'✗ ')+o.text).join('\n'):'Не удалось завершить ответ.';
+}
+const pub=({done,outcomes,secrets,...rest})=>secrets.length?{...rest,secret:true}:rest;
+function track(result,fn,out){result.tools.push(fn);result.outcomes.push({ok:out.ok!==false,text:out.text});if(out.ok!==false)result.done.push(out.text);if(out.secret)result.secrets.push(out.text);if(out.changed)result.changed=true;if(out.action)result.actions.push(out.action)}
+
+async function reply(input,ctx={}){
+ if(!input||typeof input!=='object'||typeof input.message!=='string'||!input.message.trim())throw new TypeError('Invalid message');
+ const message=input.message.trim();
+ if(message.length>MAX_MESSAGE)throw new TypeError('Сообщение длиннее '+MAX_MESSAGE+' символов. Сократите его или разбейте на части.');
+ const name=typeof input.avatar==='string'&&input.avatar.trim()?input.avatar.trim().slice(0,40):'Юрика';
+ // Без списка — все инструменты включены; с пустым списком — все выключены.
+ const enabled=new Set(Array.isArray(input.tools)?input.tools.filter(id=>TOOL_IDS.includes(id)):TOOL_IDS);
+ const impl=makeTools(ctx),result={tools:[],actions:[],changed:false,done:[],outcomes:[],secrets:[]};
+ const command=parseCommand(message);
+ if(command){
+  if(command.help)return {reply:helpText(enabled),source:'tool',...pub(result)};
+  if(command.error)return {reply:command.error,source:'tool',...pub(result)};
+  if(!enabled.has(OWNER[command.fn]))return {reply:'Инструмент «'+TOOLS[OWNER[command.fn]].label+'» выключен в моих настройках (правый клик по мне → «Инструменты»).',source:'tool',...pub(result)};
+  let out;try{out=await impl[command.fn](command.args)}catch(e){if(e instanceof TypeError)out={ok:false,text:'Не получилось: '+e.message};else throw e}
+  track(result,command.fn,out);
+  return {reply:out.text,source:'tool',...pub(result)};
+ }
+ const facts=findFacts(message),notes=await findNotes(message);
+ if(llm.config()){
+  try{return {reply:await modelReply(name,message,cleanHistory(input.history),facts,notes,enabled,impl,result),source:'model',...pub(result)}}
+  catch(e){console.error('Chat model failed:',e.name);const done=result.done.length?'Модель не ответила до конца, но уже сделано:\n'+result.done.map(t=>'• '+t).join('\n'):null;return {reply:done||localReply(name,facts,notes,enabled),source:'local',fallback:true,...pub(result)}}
+ }
+ return {reply:localReply(name,facts,notes,enabled),source:'local',...pub(result)};
+}
+// Разбор строки быстрого ввода планера. Префиксы «дело:», «рабочее дело:» и т.п. допускаются.
+function parseTask(text){
+ const t=String(text).trim(),m=t.match(/^(?:добавь\s+|новое\s+|создай\s+|запиши\s+)?((?:(?:рабоч|личн|важн|срочн)\S*\s+){0,2})(?:дело|задач[уа])\s*[:—–-]\s*([\s\S]+)$/i)||t.match(/^()(?:работа|по работе)\s*:\s*([\s\S]+)$/i);
+ const args=m?taskArgs(m[1]+(/^(работа|по работе)/i.test(t)?' рабоч':''),m[2]):taskArgs('',t);
+ return {title:args.title||t,category:args.category||null,priority:args.priority||null,due:args.due||null,time:args.time||null};
+}
+module.exports={reply,parseCommand,parseTask,TOOLS};
