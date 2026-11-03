@@ -103,6 +103,12 @@ function queryFacts({subject,limit=50}={}){
   return db.prepare('SELECT * FROM memory_facts ORDER BY observed_at DESC LIMIT ?').all(limit);
  }finally{db.close()}
 }
+// Действующие факты по id (опыт аватара вспоминает то, что нашлось на похожий вопрос раньше).
+function factsById(ids){
+ const list=[...new Set((ids||[]).filter(x=>typeof x==='string'&&x&&x.length<=100))].slice(0,50);if(!list.length)return [];
+ const db=open();
+ try{return db.prepare('SELECT * FROM memory_facts WHERE valid_to IS NULL AND id IN ('+list.map(()=>'?').join(',')+')').all(...list)}finally{db.close()}
+}
 function relations(subject,limit=100){
  const key=normalize(subject,'subject',300);
  if(!Number.isInteger(limit)||limit<1||limit>500)throw new TypeError('Invalid limit');
@@ -147,7 +153,7 @@ function diagnostics(){
    pendingVectors:db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='vector_queue'").get()?db.prepare('SELECT COUNT(*) AS n FROM vector_queue').get().n:0};
  }finally{db.close()}
 }
-module.exports={addFact,extractFacts,queryFacts,searchFacts,relations,conflicts,resolveConflict,diagnostics};
+module.exports={addFact,extractFacts,queryFacts,searchFacts,factsById,relations,conflicts,resolveConflict,diagnostics};
 if(require.main===module){
  try{
   const command=process.argv[2];

@@ -8,6 +8,7 @@ const memory=require('./memory-core');
 const storage=require('./storage');
 const llm=require('./llm');
 const planner=require('./planner');
+const experience=require('./experience');
 const crypto=require('node:crypto');
 
 const MAX_MESSAGE=2000,MAX_HISTORY=12,MAX_TOOL_ROUNDS=4;
@@ -167,6 +168,11 @@ function makeTools(ctx){
    return {ok:true,text:'Итоги дня:\n• новых заметок: '+notes.length+'\n• новых дел: '+newTasks.length+'\n• выполнено сегодня: '+closed.length+'\n• на сегодня осталось: '+dueToday.length+(overdue.length?'\n• ⚠ просрочено: '+overdue.length:'')+'\n• открытых дел всего: '+open.length+(open.length?'\nБлижайшие: '+open.sort(planner.byAgenda).slice(0,3).map(t=>t.title).join(', '):'')}
   },
   async fact_conflicts(){const rows=memory.conflicts(10);if(!rows.length)return {ok:true,text:'Противоречий в памяти нет ✓'};return {ok:true,text:'Противоречия:\n'+rows.map(c=>'• '+c.subject+' — '+c.predicate+': «'+c.earlier+'» или «'+c.newer+'»').join('\n')}},
+  async experience_log(){
+   const st=experience.stats(),fixes=experience.list(200).filter(e=>e.feedback==='fix').slice(0,5);
+   if(!st.total)return {ok:true,text:'Опыта пока нет: я записываю, как поняла каждый вопрос и что сделала, начиная с этого разговора.'};
+   return {ok:true,text:'Мой опыт: '+st.total+' '+plural(st.total,'ответ','ответа','ответов')+', подтверждено '+(st.confirmed||0)+', поправлено '+(st.corrected||0)+'.'+(fixes.length?'\nЧему вы меня научили:\n'+fixes.map(e=>'• на «'+e.question.slice(0,60)+'» — '+(e.correction?'«'+e.correction.slice(0,120)+'»':'ответ был не тот')).join('\n'):'')};
+  },
   async fact_relations({subject}){const rows=memory.relations(String(subject||''),20);if(!rows.length)return {ok:true,text:'О «'+subject+'» связей не знаю.'};return {ok:true,text:'Связи «'+subject+'»:\n'+rows.map(factLine).join('\n')}},
   async set_reminder({minutes,text}){
    const m=Number(minutes);if(!Number.isFinite(m)||m<=0||m>7*24*60)throw new TypeError('Укажите время от 1 минуты до недели');
@@ -209,7 +215,7 @@ function makeTools(ctx){
  };
 }
 // Какому переключателю принадлежит функция.
-const OWNER={agenda:'calendar',move_task:'calendar',days_until:'calendar',convert_units:'convert',generate_password:'password',pick_random:'fun',list_notes:'notes',day_summary:'insights',fact_conflicts:'insights',fact_relations:'insights',set_reminder:'reminders',calculate:'calc',roll_dice:'fun',flip_coin:'fun',change_look:'avatar',reindex_memory:'sync',add_note:'notes',add_task:'tasks',complete_task:'tasks',list_tasks:'tasks',remember_fact:'facts',search_memory:'search',open_page:'navigate',create_backup:'backup',system_status:'status',current_time:'clock'};
+const OWNER={agenda:'calendar',move_task:'calendar',days_until:'calendar',convert_units:'convert',generate_password:'password',pick_random:'fun',list_notes:'notes',day_summary:'insights',fact_conflicts:'insights',fact_relations:'insights',experience_log:'insights',set_reminder:'reminders',calculate:'calc',roll_dice:'fun',flip_coin:'fun',change_look:'avatar',reindex_memory:'sync',add_note:'notes',add_task:'tasks',complete_task:'tasks',list_tasks:'tasks',remember_fact:'facts',search_memory:'search',open_page:'navigate',create_backup:'backup',system_status:'status',current_time:'clock'};
 const SCHEMAS={
  add_note:{description:'Создать заметку. category: personal (личная) или work (рабочая)',parameters:{type:'object',properties:{title:{type:'string'},content:{type:'string'},category:{type:'string',enum:['personal','work']}},required:['title']}},
  add_task:{description:'Добавить дело. category: personal (личное) или work (рабочее). Срок: due (ГГГГ-ММ-ДД) и time (ЧЧ:ММ) или when словами («завтра в 15:00», «в пятницу»). priority: low, normal, high',parameters:{type:'object',properties:{title:{type:'string'},category:{type:'string',enum:['personal','work']},due:{type:'string'},time:{type:'string'},when:{type:'string'},priority:{type:'string',enum:['low','normal','high']}},required:['title']}},
@@ -230,6 +236,7 @@ const SCHEMAS={
  list_notes:{description:'Показать последние заметки',parameters:{type:'object',properties:{}}},
  day_summary:{description:'Итоги дня: новые заметки и дела',parameters:{type:'object',properties:{}}},
  fact_conflicts:{description:'Показать противоречия в фактах памяти',parameters:{type:'object',properties:{}}},
+ experience_log:{description:'Рассказать о своём опыте: сколько ответов подтверждено и какие поправки дал пользователь',parameters:{type:'object',properties:{}}},
  fact_relations:{description:'Показать все факты о субъекте',parameters:{type:'object',properties:{subject:{type:'string'}},required:['subject']}},
  set_reminder:{description:'Поставить напоминание или таймер через указанное число минут',parameters:{type:'object',properties:{minutes:{type:'number'},text:{type:'string'}},required:['minutes']}},
  calculate:{description:'Посчитать арифметическое выражение (+ - * / ^ % и скобки)',parameters:{type:'object',properties:{expression:{type:'string'}},required:['expression']}},
@@ -308,6 +315,7 @@ function parseCommand(text){
  if(/^(мои заметки|список заметок|покажи заметки|последние заметки)\??$/.test(low))return {fn:'list_notes',args:{}};
  if(/^(итоги( дня)?|сводка|отчёт|отчет|как прош(ёл|ел) день)\??$/.test(low))return {fn:'day_summary',args:{}};
  if(/^(противоречия|покажи противоречия|конфликты)\??$/.test(low))return {fn:'fact_conflicts',args:{}};
+ if(/^(?:твой опыт|мой опыт|что ты (?:поняла|усвоила)|чему ты (?:научилась|научилась у меня)|твои ошибки)\??$/.test(low))return {fn:'experience_log',args:{}};
  if((m=t.match(/^(?:связи|всё о|все о|что связано с)\s+(.+?)\??$/i)))return {fn:'fact_relations',args:{subject:m[1]}};
  if((m=t.match(/^(?:напомни|таймер|поставь таймер|разбуди)\s+(?:мне\s+)?(?:через\s+)?(\d+(?:[.,]\d+)?)\s*(сек\S*|мин\S*|час\S*|с|м|ч)?(?=[\s:,—–-]|$)\s*[:,—–-]?\s*(.*)$/i))){
   const n=Number(m[1].replace(',','.')),u=(m[2]||'мин').toLocaleLowerCase();
@@ -341,7 +349,7 @@ function taskArgs(adjectives,body){
  return Object.fromEntries(Object.entries({title:(w.rest||text).trim(),category,priority,due:w.due,time:w.time}).filter(([,v])=>v!=null));
 }
 function helpText(enabled){
- const lines={insights:'«итоги дня», «противоречия», «связи Анна»',reminders:'«напомни через 10 минут позвонить», «помодоро»',calc:'«посчитай (2+3)*4»',fun:'«брось кубик», «монетка», «выбери чай, кофе или какао»',avatar:'«поза поклон», «эффект сакура», «цвет синий», «стань больше»',sync:'«переиндексируй»',notes:'«заметка: Заголовок — текст», «рабочая заметка: …», «мои заметки»',tasks:'«дело: купить чай завтра в 18:00», «рабочее дело: отчёт в пятницу», «важное дело: …», «готово: купить чай», «рабочие дела», «дела на завтра», «просроченные»',calendar:'«что на сегодня», «что на неделе», «перенеси отчёт на понедельник», «сколько дней до 31.12»',convert:'«переведи 5 км в мили», «сколько 100 F в C», «2 ГБ в МБ»',password:'«придумай пароль на 20»',facts:'«запомни Анна | живёт в | Казань»',search:'«найди Анна»',navigate:'«открой календарь», «открой дела», «покажи мозг»',backup:'«сделай резервную копию»',status:'«статус»',clock:'«который час»'};
+ const lines={insights:'«итоги дня», «противоречия», «связи Анна», «чему ты научилась»',reminders:'«напомни через 10 минут позвонить», «помодоро»',calc:'«посчитай (2+3)*4»',fun:'«брось кубик», «монетка», «выбери чай, кофе или какао»',avatar:'«поза поклон», «эффект сакура», «цвет синий», «стань больше»',sync:'«переиндексируй»',notes:'«заметка: Заголовок — текст», «рабочая заметка: …», «мои заметки»',tasks:'«дело: купить чай завтра в 18:00», «рабочее дело: отчёт в пятницу», «важное дело: …», «готово: купить чай», «рабочие дела», «дела на завтра», «просроченные»',calendar:'«что на сегодня», «что на неделе», «перенеси отчёт на понедельник», «сколько дней до 31.12»',convert:'«переведи 5 км в мили», «сколько 100 F в C», «2 ГБ в МБ»',password:'«придумай пароль на 20»',facts:'«запомни Анна | живёт в | Казань»',search:'«найди Анна»',navigate:'«открой календарь», «открой дела», «покажи мозг»',backup:'«сделай резервную копию»',status:'«статус»',clock:'«который час»'};
  const on=TOOL_IDS.filter(id=>enabled.has(id));
  if(!on.length)return 'Все мои инструменты выключены. Включите их в настройках (правый клик по мне → «Инструменты»).';
  return 'Что я умею:\n'+on.map(id=>'• '+TOOLS[id].label+': '+lines[id]).join('\n');
@@ -351,8 +359,10 @@ function cleanHistory(history){
  if(!Array.isArray(history))return [];
  return history.filter(m=>m&&['user','assistant'].includes(m.role)&&typeof m.text==='string').slice(-MAX_HISTORY).map(m=>({role:m.role,content:m.text.slice(0,MAX_MESSAGE)}));
 }
-function localReply(name,facts,notes,enabled){
+function localReply(name,facts,notes,enabled,past=[]){
  const lines=[];
+ const fix=past.find(e=>e.feedback==='fix'&&e.correction);
+ if(fix)lines.push('Помню, на похожий вопрос вы меня поправили: «'+fix.correction.slice(0,200)+'»\n');
  if(facts.length){lines.push('Вот что я помню:');for(const f of facts)lines.push(factLine(f))}
  if(notes.length){lines.push(facts.length?'\nИ в заметках:':'Нашла в заметках:');for(const n of notes)lines.push(noteLine(n))}
  if(!lines.length)lines.push('Пока ничего об этом не знаю.'+(enabled.has('facts')?' Скажите «запомни субъект | связь | объект», и я запомню.':''));
@@ -360,12 +370,14 @@ function localReply(name,facts,notes,enabled){
  return lines.join('\n');
 }
 
-async function modelReply(name,message,history,facts,notes,enabled,impl,result){
+async function modelReply(name,message,history,facts,notes,enabled,impl,result,past=[]){
  const context=[...facts.map(f=>'ФАКТ: '+f.subject+' | '+f.predicate+' | '+f.object),...notes.map(n=>'ЗАМЕТКА: '+n.title+' — '+(n.content||'').slice(0,500))].join('\n');
  const allowed=Object.keys(SCHEMAS).filter(fn=>enabled.has(OWNER[fn]));
  const tools=allowed.map(fn=>({type:'function',function:{name:fn,...SCHEMAS[fn]}}));
  const persona=(llm.config()?.systemPrompt||'').trim();
- const system=(persona||'Ты '+name+' — девятихвостая лиса-кицунэ, хранительница личной памяти Tenmayurika. Отвечай по-русски, тепло и кратко.')+' Твоё имя: '+name+'. Сегодня '+new Date().toLocaleDateString('ru-RU')+'.'+(allowed.length?' Используй инструменты, когда пользователь просит что-то сделать.':'')+(context?'\nИзвестно из памяти пользователя:\n'+context:'');
+ const system=(persona||'Ты '+name+' — девятихвостая лиса-кицунэ, хранительница личной памяти Tenmayurika. Отвечай по-русски, тепло и кратко.')+' Твоё имя: '+name+'. Сегодня '+new Date().toLocaleDateString('ru-RU')+'.'+(allowed.length?' Используй инструменты, когда пользователь просит что-то сделать.':'')+(context?'\nИзвестно из памяти пользователя:\n'+context:'')
+  // Свой опыт: как раньше понимала похожие вопросы и что пользователь подтвердил или поправил.
+  +(past.length?'\nТвой опыт с похожими вопросами (учитывай поправки пользователя, не повторяй прежних ошибок):\n'+past.map(experience.describe).join('\n'):'');
  const messages=[{role:'system',content:system},...history,{role:'user',content:message}];
  for(let round=0;round<MAX_TOOL_ROUNDS;round++){
   const msg=await llm.complete({messages,tools});
@@ -405,6 +417,26 @@ async function reply(input,ctx={}){
  if(!input||typeof input!=='object'||typeof input.message!=='string'||!input.message.trim())throw new TypeError('Invalid message');
  const message=input.message.trim();
  if(message.length>MAX_MESSAGE)throw new TypeError('Сообщение длиннее '+MAX_MESSAGE+' символов. Сократите его или разбейте на части.');
+ learnFromFeedback(input,message);
+ const out=await answer(input,message,ctx);
+ // Каждый ответ — эпизод опыта: как поняла, что нашла, что сделала. Справка и ошибки ввода не в счёт.
+ // «Спасибо», «верно» — это отклик на прошлый ответ, а не новый вопрос.
+ if(out.understood&&experience.detect(message)!=='ok'){
+  let id=null;try{id=experience.record({question:message,understood:out.understood,recalled:out.recalled,tools:out.tools,answer:out.secret?'':out.reply,source:out.source,ok:!out.fallback})}catch(e){console.error('Experience record failed:',e.name)}
+  if(id)out.experience={id,used:out.used||[]};
+ }
+ delete out.understood;delete out.used;
+ return out;
+}
+// Поправка или подтверждение прошлого ответа: явно (кнопка 👎 и следующее сообщение) или словами («нет, я имела в виду …», «верно»).
+function learnFromFeedback(input,message){
+ try{
+  if(typeof input.correctionFor==='string'&&input.correctionFor){experience.feedback(input.correctionFor,'fix',message);return}
+  const kind=experience.detect(message);if(!kind)return;
+  const prev=experience.last();if(prev)experience.feedback(prev.id,kind,kind==='fix'?message:null);
+ }catch(e){if(!(e instanceof TypeError))console.error('Experience feedback failed:',e.name)}
+}
+async function answer(input,message,ctx){
  const name=typeof input.avatar==='string'&&input.avatar.trim()?input.avatar.trim().slice(0,40):'Юрика';
  // Без списка — все инструменты включены; с пустым списком — все выключены.
  const enabled=new Set(Array.isArray(input.tools)?input.tools.filter(id=>TOOL_IDS.includes(id)):TOOL_IDS);
@@ -416,22 +448,33 @@ async function reply(input,ctx={}){
   if(!enabled.has(OWNER[command.fn]))return {reply:'Инструмент «'+TOOLS[OWNER[command.fn]].label+'» выключен в моих настройках (правый клик по мне → «Инструменты»).',source:'tool',...pub(result)};
   let out;try{out=await impl[command.fn](command.args)}catch(e){if(e instanceof TypeError)out={ok:false,text:'Не получилось: '+e.message};else throw e}
   track(result,command.fn,out);
-  return {reply:out.text,source:'tool',...pub(result)};
+  return {reply:out.text,source:'tool',understood:'команда '+command.fn,...pub(result)};
  }
- const facts=findFacts(message),notes=await findNotes(message);
+ let facts=findFacts(message),notes=await findNotes(message);
+ // Опыт: на похожий вопрос раньше нашлись другие записи — вспоминаем их снова (кроме ответов, которые пользователь поправил).
+ let past=[];try{past=experience.similar(message,3)}catch(e){console.error('Experience lookup failed:',e.name)}
+ const useful=past.filter(e=>e.feedback!=='fix');
+ if(useful.length){
+  const have=new Set(facts.map(f=>f.id));
+  for(const f of memory.factsById(useful.flatMap(e=>e.recalled.facts)))if(facts.length<8&&!have.has(f.id)){facts.push(f);have.add(f.id)}
+  const ids=new Set(useful.flatMap(e=>e.recalled.notes)),haveN=new Set(notes.map(n=>n.id));
+  if(ids.size)for(const n of (await storage.load()).notes||[])if(ids.has(n.id)&&!haveN.has(n.id)&&notes.length<5){notes.push(n);haveN.add(n.id)}
+ }
+ const understood=(words(message).join(', ')||'без ключевых слов')+(past.length?' · опыт: '+past.length:'');
+ const meta={understood,used:past.map(e=>e.id)};
  // Что аватар вспомнил для ответа — «Мозг» подсвечивает эти нейроны.
  result.recalled={facts:facts.map(f=>f.id),notes:notes.map(n=>n.id)};
  if(llm.config()){
-  try{return {reply:await modelReply(name,message,cleanHistory(input.history),facts,notes,enabled,impl,result),source:'model',...pub(result)}}
+  try{return {reply:await modelReply(name,message,cleanHistory(input.history),facts,notes,enabled,impl,result,past),source:'model',...meta,...pub(result)}}
   catch(e){
    const why=modelFailure(e);console.error('Chat model failed:',why);
    const done=result.done.length?'Модель не ответила до конца, но уже сделано:\n'+result.done.map(t=>'• '+t).join('\n'):null;
-   return {reply:done||'⚠ Модель не ответила: '+why+'\nПока отвечаю без неё.\n\n'+localReply(name,facts,notes,enabled),source:'local',fallback:true,modelError:why,...pub(result)};
+   return {reply:done||'⚠ Модель не ответила: '+why+'\nПока отвечаю без неё.\n\n'+localReply(name,facts,notes,enabled,past),source:'local',fallback:true,modelError:why,...meta,...pub(result)};
   }
  }
  // Без модели честно говорим, что она не подключена, если ответить по памяти нечего.
- const local=localReply(name,facts,notes,enabled);
- return {reply:facts.length||notes.length?local:local+'\n\nЯзыковая модель не подключена, поэтому свободный разговор пока не получится. Правый клик по мне → «Модель ИИ»: ключ, модель, «Сохранить», затем «Проверить связь».',source:'local',...pub(result)};
+ const local=localReply(name,facts,notes,enabled,past);
+ return {reply:facts.length||notes.length?local:local+'\n\nЯзыковая модель не подключена, поэтому свободный разговор пока не получится. Правый клик по мне → «Модель ИИ»: ключ, модель, «Сохранить», затем «Проверить связь».',source:'local',...meta,...pub(result)};
 }
 // Разбор строки быстрого ввода планера. Префиксы «дело:», «рабочее дело:» и т.п. допускаются.
 function parseTask(text){

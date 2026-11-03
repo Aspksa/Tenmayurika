@@ -197,11 +197,25 @@
    if(q.send){input.value=q.send;form.requestSubmit()}else{input.value=q.insert;input.focus();const at=q.insert.indexOf(' ')+1||q.insert.length;input.setSelectionRange(q.tool==='facts'?8:q.insert.length,q.tool==='facts'?8:q.insert.length);void at;autoGrow()}
   }})));
  }
- function bubble(role,text,tag){const el=h('div',{class:'msg '+role},tag?h('span',{class:'msg-tag',text:tag}):null,document.createTextNode(text));log.append(el);log.scrollTop=log.scrollHeight;return el}
+ function bubble(role,text,tag,m){const el=h('div',{class:'msg '+role},tag?h('span',{class:'msg-tag',text:tag}):null,document.createTextNode(text));if(m&&m.exp)el.append(rateRow(m));log.append(el);log.scrollTop=log.scrollHeight;return el}
+ // Оценка ответа: 👍 — она запоминает, что поняла верно; 👎 — следующее сообщение станет поправкой, и на похожий вопрос она её учтёт.
+ let pendingFix=null;
+ const BASE_PLACEHOLDER=input.placeholder;
+ function rateRow(m){
+  if(m.fb)return h('span',{class:'msg-rate done',text:m.fb==='ok'?'✓ запомнила, что поняла верно':'✎ учту поправку'});
+  const row=h('span',{class:'msg-rate'});
+  const rate=async kind=>{
+   try{const r=await fetch('/api/experience/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:m.exp,kind})});if(!r.ok)throw Error()}catch{row.replaceChildren('не удалось сохранить оценку');return}
+   m.fb=kind;store(CHAT_KEY,history);row.replaceWith(rateRow(m));
+   if(kind==='fix'){pendingFix=m.exp;input.placeholder='Как правильно? Я запомню поправку…';input.focus()}
+  };
+  row.append(h('button',{type:'button',title:'Поняла верно',text:'👍',onclick:()=>rate('ok')}),h('button',{type:'button',title:'Не то: поправить',text:'👎',onclick:()=>rate('fix')}));
+  return row;
+ }
  function renderHistory(){
   log.replaceChildren();
   if(!history.length)bubble('assistant','Здравствуйте! Я '+cfg.name+'. Веду личные и рабочие дела с календарём, заметки, запоминаю факты, ищу в памяти и делаю резервные копии. Напишите «помощь» или нажмите кнопку ниже.\nПеретащите меня куда удобно; правый клик — мои настройки.');
-  for(const m of history)bubble(m.role,m.text,m.tag);
+  for(const m of history)bubble(m.role,m.text,m.tag,m);
  }
  const TOOL_TAG={agenda:'повестка',move_task:'перенос',days_until:'дни',convert_units:'конвертер',generate_password:'пароль',pick_random:'выбор',list_notes:'заметки',day_summary:'итоги',fact_conflicts:'противоречия',fact_relations:'связи',set_reminder:'напоминание',calculate:'калькулятор',roll_dice:'кубик',flip_coin:'монетка',change_look:'облик',reindex_memory:'индекс',add_note:'заметка',add_task:'дело',complete_task:'дело',list_tasks:'дела',remember_fact:'факт',search_memory:'поиск',open_page:'переход',create_backup:'бэкап',system_status:'статус',current_time:'время'};
  let busy=false,conversation=0;
@@ -211,7 +225,7 @@
   // Контекст для модели ограничен по объёму, чтобы запрос не превысил лимит сервера (100 КБ).
   const prior=[];let budget=20000;
   for(const m of history.filter(m=>!m.private).slice(-12).reverse()){const t=m.text.slice(0,1500);if(t.length>budget)break;budget-=t.length;prior.unshift({role:m.role,text:t})}
-  const gen=conversation;
+  const gen=conversation,fixFor=pendingFix;pendingFix=null;input.placeholder=BASE_PLACEHOLDER;
   history.push({role:'user',text});bubble('user',text);
   const typing=h('div',{class:'msg assistant typing','aria-label':cfg.name+' думает'},h('span',{text:'•'}),h('span',{text:'•'}),h('span',{text:'•'}));
   log.append(typing);log.scrollTop=log.scrollHeight;state('think');
@@ -222,20 +236,22 @@
   const ctrl=new AbortController(),limit=setTimeout(()=>ctrl.abort(),300000);
   let answer,tag,data={};
   try{
-   const r=await fetch('/api/chat',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,avatar:cfg.name,history:prior,tools:Object.keys(TOOLS).filter(k=>cfg.tools[k])})});
+   const r=await fetch('/api/chat',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,avatar:cfg.name,history:prior,tools:Object.keys(TOOLS).filter(k=>cfg.tools[k]),...(fixFor?{correctionFor:fixFor}:{})})});
    data=await r.json();if(!r.ok)throw Error(data.error||'Ошибка');answer=data.reply;
    if(data.tools?.length)tag='⚙ '+[...new Set(data.tools.map(t=>TOOL_TAG[t]||t))].join(', ');
   }catch(err){answer=err.name==='AbortError'?'Не получилось ответить: сервер не ответил за 5 минут. Проверьте, что окно Tenmayurika открыто.':'Не получилось ответить: '+(err.message==='Failed to fetch'?'нет связи с сервером Tenmayurika (окно сервера закрыто?)':err.message)}
   clearInterval(tick);clearTimeout(limit);
   // «Мозг» показывает, что она вспомнила, и учится из сообщения (кандидаты подтверждаются в «Мозге»).
   window.dispatchEvent(new CustomEvent('tenma:thinking',{detail:{on:false}}));
-  if(data&&data.recalled)window.dispatchEvent(new CustomEvent('tenma:recall',{detail:{...data.recalled,text}}));
+  if(data&&data.recalled)window.dispatchEvent(new CustomEvent('tenma:recall',{detail:{...data.recalled,text,experience:data.experience}}));
+  if(data&&data.experience)window.dispatchEvent(new CustomEvent('tenma:experience',{detail:data.experience}));
   if(data&&data.source!=='tool'&&!data.secret&&text.length>=12&&window.TenmaLearn?.fromChat())window.TenmaLearn.learn(text,'chat');
   if(!answer||!String(answer).trim())answer='Модель прислала пустой ответ. Нажмите «Проверить связь» в меню «Модель ИИ».';
   typing.remove();busy=false;send.disabled=false;
   if(gen!==conversation)return; // чат очистили, пока шёл ответ
-  history.push({role:'assistant',text:answer,tag,...(data&&data.secret?{private:true}:{})});history=history.slice(-100);store(CHAT_KEY,history);
-  bubble('assistant',answer,tag);state('answer',2600);
+  const entry={role:'assistant',text:answer,tag,...(data&&data.secret?{private:true}:{}),...(data?.experience?.id?{exp:data.experience.id}:{})};
+  history.push(entry);history=history.slice(-100);store(CHAT_KEY,history);
+  bubble('assistant',answer,tag,entry);state('answer',2600);
   if(data.changed)window.TenmaApp?.refresh({keepDrafts:true});
   // Новый факт из чата — «Мозг» сразу показывает вспышку нейрона.
   if((data.tools||[]).includes('remember_fact'))window.dispatchEvent(new CustomEvent('tenma:memory'));

@@ -11,6 +11,7 @@ const maintenance=require('./tools/maintenance');
 const memory=require('./memory-core');
 const chat=require('./chat');
 const learn=require('./learn');
+const experience=require('./experience');
 const llm=require('./llm');
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
@@ -132,6 +133,9 @@ if(req.method==='GET'&&p==='/api/search'){const query=url.searchParams.get('q')|
 if(p==='/api/facts'||p.startsWith('/api/facts/'))return await handleFacts(req,res,p,url);
 if(p==='/api/llm'||p.startsWith('/api/llm/'))return await handleLlm(req,res,p);
 if(req.method==='POST'&&p==='/api/chat'){try{return respond(res,200,await chat.reply(await body(req),chatContext))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
+// Опыт аватара: как она понимала вопросы, что нашла и сделала; подтверждение или поправка ответа.
+if(req.method==='GET'&&p==='/api/experience'){try{return respond(res,200,{items:experience.list(limitParam(url,50,500)),stats:experience.stats()})}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
+if(req.method==='POST'&&p==='/api/experience/feedback'){try{const input=await body(req);const r=experience.feedback(input?.id,input?.kind,input?.correction);return r?respond(res,200,r):respond(res,404,{error:'Not found'})}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
 // Самообучение: кандидаты в факты из текста заметки или чата (подтверждает пользователь в «Мозге»).
 if(req.method==='POST'&&p==='/api/learn'){try{return respond(res,200,await learn.extract(await body(req)))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
 // Быстрый ввод планера: «созвон завтра в 10 #работа !» → поля дела (тот же разбор, что у аватара).
