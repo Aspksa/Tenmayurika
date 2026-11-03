@@ -20,10 +20,20 @@ const ease=t=>1-Math.pow(1-clamp(t,0,1),3);
 const rgba=(c,a)=>'rgba('+c[0]+','+c[1]+','+c[2]+','+a+')';
 const MONO='ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace';
 
-// Палитра роя: медь и угли. tones — три слоя частиц: тёмные угли, медь, раскалённые искры.
-const EMBER={haze:[150,62,22],tones:[[150,70,30],[226,128,60],[255,214,160]]};
+// Палитры роя. tones — три слоя частиц: тёмные угли, основной цвет, раскалённые искры.
+// Медь — как в ролике; лёд и неон — на выбор. Противоречия в любой палитре серые с красным.
+const PALETTES={
+ copper:{name:'Медь',haze:[150,62,22],tones:[[150,70,30],[226,128,60],[255,214,160]],colors:{personal:[236,140,66],work:[240,118,52],notes:[246,170,96],facts:[232,132,60],done:[150,110,80],core:[236,136,62]},
+  spike:[236,140,70],link:[240,150,80],star:[220,120,60],starDot:[255,170,100],glow:['rgba(255,248,230,1)','rgba(255,196,120,.85)','rgba(230,110,40,.2)'],cold:['rgba(170,70,40,.9)','rgba(110,40,20,.6)','rgba(60,20,10,.15)'],accent:'#ee8a3c',hot:'#ffcf9a'},
+ ice:{name:'Лёд',haze:[24,64,128],tones:[[36,84,150],[104,176,240],[222,242,255]],colors:{personal:[110,190,255],work:[84,156,255],notes:[150,215,255],facts:[100,180,250],done:[90,110,140],core:[120,190,255]},
+  spike:[120,190,250],link:[140,200,255],star:[90,150,230],starDot:[160,210,255],glow:['rgba(240,250,255,1)','rgba(150,210,255,.85)','rgba(40,110,220,.2)'],cold:['rgba(40,80,140,.9)','rgba(20,50,100,.6)','rgba(10,20,50,.15)'],accent:'#6fc3ff',hot:'#cfeaff'},
+ neon:{name:'Неон',haze:[88,18,120],tones:[[110,30,160],[236,64,206],[130,255,240]],colors:{personal:[255,70,200],work:[180,90,255],notes:[80,240,230],facts:[255,96,176],done:[120,90,140],core:[230,70,210]},
+  spike:[240,80,220],link:[120,240,255],star:[170,80,255],starDot:[120,240,255],glow:['rgba(255,240,255,1)','rgba(255,120,230,.85)','rgba(140,40,220,.2)'],cold:['rgba(100,40,140,.9)','rgba(60,20,90,.6)','rgba(30,10,50,.15)'],accent:'#ff4fd8',hot:'#9ffcff'}
+};
 const PALE={haze:[95,95,100],tones:[[120,120,128],[200,200,208],[245,245,250]]};
-const COLORS={personal:[236,140,66],work:[240,118,52],notes:[246,170,96],facts:[232,132,60],conflicts:[255,72,56],done:[150,110,80],core:[236,136,62]};
+let PAL=PALETTES.copper,EMBER,COLORS;
+function usePalette(id){PAL=PALETTES[id]||PALETTES.copper;EMBER={haze:PAL.haze,tones:PAL.tones};COLORS={...PAL.colors,conflicts:[255,72,56]}}
+usePalette('copper');
 const DAY=86400000;
 
 /* ---------- Частицы: объёмный шар + горячие пятна + завихрения ---------- */
@@ -31,7 +41,8 @@ function unit(r){const z=2*r()-1,t=TAU*r(),q=Math.sqrt(1-z*z);return [q*Math.cos
 function cross(a,b){return [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]}
 function norm(a){const l=Math.hypot(a[0],a[1],a[2])||1;return [a[0]/l,a[1]/l,a[2]/l]}
 function gauss(r){return (r()+r()+r()+r()-2)/2}
-function makeParticles(n,seed){
+function makeParticles(n,seed,mult=1){
+ n=Math.round(n*mult);
  const r=rng(seed);
  const spots=Array.from({length:3+Math.floor(r()*3)},()=>{const d=unit(r),k=.15+.45*r();return {c:d.map(x=>x*k),s:.12+.16*r()}});
  const bands=[0,1].map(()=>{const a=unit(r),u=norm(cross(a,Math.abs(a[1])<.9?[0,1,0]:[1,0,0]));return {u,v:cross(a,u)}});
@@ -45,7 +56,100 @@ function makeParticles(n,seed){
  }
  // Перемешано: при низком качестве рисуется только начало массива — распределение не ломается.
  for(let i=out.length-1;i>0;i--){const j=Math.floor(r()*(i+1));[out[i],out[j]]=[out[j],out[i]]}
+ // На видеокарте частиц в mult раз больше: каждая тусклее и мельче, общая яркость та же.
+ out.dens=mult>1?Math.pow(mult,-.82):1;out.size=mult>1?.82:1;
  return out;
+}
+
+/* ---------- WebGL: десятки тысяч частиц и свечение (bloom) ---------- */
+// Частицы облаков рисует видеокарта: буфер на облако загружается один раз, поворот и мерцание — в шейдере.
+// Затем сцена размывается на ½ и ⅛ размера и подмешивается обратно — получается мягкий ореол, как в ролике.
+// Нет WebGL — мозг остаётся на canvas 2D, как раньше.
+function makeGL(cv){
+ let gl=null;try{gl=cv.getContext('webgl',{alpha:false,antialias:false,depth:false,stencil:false,premultipliedAlpha:false,powerPreference:'high-performance'})}catch{gl=null}
+ if(!gl)return null;
+ const sh=(type,src)=>{const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s)||'shader');return s};
+ const prog=(vs,fs,attrs)=>{const p=gl.createProgram();gl.attachShader(p,sh(gl.VERTEX_SHADER,vs));gl.attachShader(p,sh(gl.FRAGMENT_SHADER,fs));attrs.forEach((a,i)=>gl.bindAttribLocation(p,i,a));gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(p)||'link');
+  const u={},n=gl.getProgramParameter(p,gl.ACTIVE_UNIFORMS);for(let i=0;i<n;i++){const a=gl.getActiveUniform(p,i);u[a.name.replace(/\[0\]$/,'')]=gl.getUniformLocation(p,a.name)}return {p,u}};
+ let P,Q,B,C;
+ try{
+  P=prog(`attribute vec4 a0;attribute vec4 a1;
+uniform vec2 uRes,uC;uniform float uR,uRot,uTilt,uT,uTw,uInten,uPs,uBlur;uniform vec3 uTone0,uTone1,uTone2;
+varying vec4 vC;varying float vS;
+void main(){
+ float ca=cos(uRot),sa=sin(uRot),ct=cos(uTilt),st=sin(uTilt);
+ float x1=a0.x*ca+a0.z*sa,z1=-a0.x*sa+a0.z*ca,y1=a0.y*ct-z1*st,z2=a0.y*st+z1*ct;
+ float d=(z2+1.3)/2.6,tone=a1.x;
+ float a=a1.z*d*uInten*(tone<.5?.75:1.)*(uTw>.5?.75+.25*sin(uT*a1.w+a0.w):1.);
+ vec2 p=uC+vec2(x1,y1)*uR;
+ gl_Position=vec4(p.x/uRes.x*2.-1.,1.-p.y/uRes.y*2.,0.,1.);
+ float s=a1.y*uPs*(.6+.6*d)*(tone>1.5?1.15:1.),bl=uBlur*(.55+.45*d);
+ gl_PointSize=max(1.,s+bl);
+ a*=(s*s)/((s+bl)*(s+bl));
+ vec3 c=tone<.5?uTone0:tone<1.5?uTone1:uTone2;
+ vC=vec4(c/255.,clamp(a,0.,1.));vS=bl>.6?0.:.55;
+}`,`precision mediump float;varying vec4 vC;varying float vS;
+void main(){float r=length(gl_PointCoord-.5)*2.;float k=1.-smoothstep(vS,1.,r);if(k<=0.)discard;gl_FragColor=vec4(vC.rgb*vC.a*k,1.);}`,['a0','a1']);
+  const VQ='attribute vec2 aq;varying vec2 v;void main(){v=aq*.5+.5;gl_Position=vec4(aq,0.,1.);}';
+  Q=prog(VQ,`precision mediump float;uniform sampler2D t;uniform vec2 px;uniform float th,k;varying vec2 v;
+void main(){vec3 c=(texture2D(t,v+px*vec2(-1.,-1.)).rgb+texture2D(t,v+px*vec2(1.,-1.)).rgb+texture2D(t,v+px*vec2(-1.,1.)).rgb+texture2D(t,v+px).rgb)*.25;gl_FragColor=vec4(max(c-th,0.)*k,1.);}`,['aq']);
+  B=prog(VQ,`precision mediump float;uniform sampler2D t;uniform vec2 dir;varying vec2 v;
+void main(){vec3 c=texture2D(t,v).rgb*.2270;c+=(texture2D(t,v+dir*1.3846).rgb+texture2D(t,v-dir*1.3846).rgb)*.3162;c+=(texture2D(t,v+dir*3.2308).rgb+texture2D(t,v-dir*3.2308).rgb)*.0703;gl_FragColor=vec4(c,1.);}`,['aq']);
+  C=prog(VQ,`precision mediump float;uniform sampler2D s,b1,b2;uniform float k1,k2;varying vec2 v;
+void main(){vec3 c=texture2D(s,v).rgb+texture2D(b1,v).rgb*k1+texture2D(b2,v).rgb*k2;gl_FragColor=vec4(min(c,1.),1.);}`,['aq']);
+ }catch(e){console.warn('Мозг: WebGL недоступен, рисую в 2D:',e.message);return null}
+ const tri=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,tri);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+ const targets={};let w=1,h=1;
+ function target(name,tw,th){
+  let t=targets[name];if(t&&t.w===tw&&t.h===th)return t;
+  if(t){gl.deleteTexture(t.tex);gl.deleteFramebuffer(t.fb)}
+  const tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,tw,th,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+  for(const [k,v] of [[gl.TEXTURE_MIN_FILTER,gl.LINEAR],[gl.TEXTURE_MAG_FILTER,gl.LINEAR],[gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE],[gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE]])gl.texParameteri(gl.TEXTURE_2D,k,v);
+  const fb=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,fb);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,tex,0);
+  t=targets[name]={tex,fb,w:tw,h:th};return t;
+ }
+ function bindT(t){gl.bindFramebuffer(gl.FRAMEBUFFER,t?t.fb:null);gl.viewport(0,0,t?t.w:w,t?t.h:h)}
+ function quad(pr,tex){gl.useProgram(pr.p);gl.bindBuffer(gl.ARRAY_BUFFER,tri);gl.enableVertexAttribArray(0);gl.disableVertexAttribArray(1);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+  tex.forEach((t,i)=>{gl.activeTexture(gl.TEXTURE0+i);gl.bindTexture(gl.TEXTURE_2D,t.tex)});gl.drawArrays(gl.TRIANGLES,0,3)}
+ const bufs=new Set();
+ function upload(parts){
+  if(parts._gl)return parts._gl;
+  const a=new Float32Array(parts.length*8);
+  parts.forEach((p,i)=>a.set([p.x,p.y,p.z,p.ph,p.t,p.s,p.b,p.f],i*8));
+  const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,a,gl.STATIC_DRAW);parts._gl=b;bufs.add(b);return b;
+ }
+ return {
+  gl,
+  resize(cw,ch){w=cw;h=ch;cv.width=cw;cv.height=ch},
+  free(parts){if(parts&&parts._gl){gl.deleteBuffer(parts._gl);bufs.delete(parts._gl);parts._gl=null}},
+  begin(){const s=target('scene',w,h);bindT(s);gl.disable(gl.BLEND);gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE);
+   gl.useProgram(P.p);gl.uniform2f(P.u.uRes,w,h)},
+  cloud(parts,x,y,r,rot,tilt,tones,inten,count,blur,ps,tw,t){
+   const n=Math.min(parts.length,count|0);if(n<1||inten<=0)return;
+   // Меньше частиц (адаптивное качество) — каждая ярче, чтобы общая яркость не падала.
+   inten*=Math.min(3,Math.pow(parts.length/n,.8));
+   gl.useProgram(P.p);gl.bindBuffer(gl.ARRAY_BUFFER,upload(parts));
+   gl.enableVertexAttribArray(0);gl.enableVertexAttribArray(1);gl.vertexAttribPointer(0,4,gl.FLOAT,false,32,0);gl.vertexAttribPointer(1,4,gl.FLOAT,false,32,16);
+   const u=P.u;gl.uniform2f(u.uC,x,y);gl.uniform1f(u.uR,r);gl.uniform1f(u.uRot,rot);gl.uniform1f(u.uTilt,tilt);gl.uniform1f(u.uT,t);gl.uniform1f(u.uTw,tw);
+   gl.uniform1f(u.uInten,inten*(parts.dens||1));gl.uniform1f(u.uPs,ps*(parts.size||1));gl.uniform1f(u.uBlur,blur);
+   gl.uniform3fv(u.uTone0,tones[0]);gl.uniform3fv(u.uTone1,tones[1]);gl.uniform3fv(u.uTone2,tones[2]);
+   gl.drawArrays(gl.POINTS,0,n);
+  },
+  end(bloom){
+   gl.disable(gl.BLEND);
+   const s=targets.scene,h1w=Math.max(1,w>>2),h1h=Math.max(1,h>>2),h2w=Math.max(1,w>>3),h2h=Math.max(1,h>>3);
+   const a1=target('a1',h1w,h1h),b1=target('b1',h1w,h1h),a2=target('a2',h2w,h2h),b2=target('b2',h2w,h2h);
+   if(bloom>0){
+    bindT(a1);gl.useProgram(Q.p);gl.uniform1i(Q.u.t,0);gl.uniform2f(Q.u.px,1/w,1/h);gl.uniform1f(Q.u.th,.12);gl.uniform1f(Q.u.k,1.5);quad(Q,[s]);
+    gl.useProgram(B.p);gl.uniform1i(B.u.t,0);
+    bindT(b1);gl.uniform2f(B.u.dir,1/h1w,0);quad(B,[a1]);bindT(a1);gl.uniform2f(B.u.dir,0,1/h1h);quad(B,[b1]);
+    bindT(a2);gl.useProgram(Q.p);gl.uniform2f(Q.u.px,.5/h1w,.5/h1h);gl.uniform1f(Q.u.th,0);gl.uniform1f(Q.u.k,1);quad(Q,[a1]);
+    gl.useProgram(B.p);for(let i=0;i<2;i++){bindT(b2);gl.uniform2f(B.u.dir,1/h2w,0);quad(B,[a2]);bindT(a2);gl.uniform2f(B.u.dir,0,1/h2h);quad(B,[b2])}
+   }
+   bindT(null);gl.useProgram(C.p);gl.uniform1i(C.u.s,0);gl.uniform1i(C.u.b1,1);gl.uniform1i(C.u.b2,2);gl.uniform1f(C.u.k1,.9*bloom);gl.uniform1f(C.u.k2,1.1*bloom);quad(C,[s,a1,a2]);
+  },
+  destroy(){for(const b of bufs)gl.deleteBuffer(b);bufs.clear();for(const k in targets){gl.deleteTexture(targets[k].tex);gl.deleteFramebuffer(targets[k].fb);delete targets[k]}}
+ };
 }
 
 /* ---------- Данные: workspace + факты → зоны и нейроны ---------- */
@@ -81,7 +185,10 @@ function buildModel(ws,facts,conflicts){
  events.sort((a,b)=>b.t-a.t);
  // Связи между фактами: объект одного факта — субъект другого.
  const firstOf=new Map();for(const l of lobes)for(const it of l.items)if(it.fact){const k=it.fact.subject.toLocaleLowerCase();if(!firstOf.has(k))firstOf.set(k,it.id)}
- const links=[];for(const l of lobes)for(const it of l.items)if(it.fact){const to=firstOf.get(it.fact.object.toLocaleLowerCase());if(to&&to!==it.id&&links.length<240)links.push([it.id,to])}
+ const links=[];for(const l of lobes)for(const it of l.items)if(it.fact){const to=firstOf.get(it.fact.object.toLocaleLowerCase());if(to&&to!==it.id&&links.length<240)links.push([it.id,to,'subj'])}
+ // …и общий объект у разных субъектов: «Анна живёт в Казань» — «Пётр работает в Казань».
+ const byObject=new Map();for(const l of lobes)for(const it of l.items)if(it.fact){const k=it.fact.object.toLocaleLowerCase();if(!byObject.has(k))byObject.set(k,[]);byObject.get(k).push(it)}
+ for(const list of byObject.values())for(let i=1;i<list.length&&links.length<320;i++)if(list[i].fact.subject.toLocaleLowerCase()!==list[0].fact.subject.toLocaleLowerCase())links.push([list[0].id,list[i].id,'obj'])
  return {lobes,events,links,facts:facts.length};
 }
 
@@ -134,9 +241,13 @@ window.addEventListener('tenma:recall',e=>recordRecall(recallIds(e.detail)));
 
 /* ---------- Монтирование ---------- */
 function mount(host){
- const cfg=Object.assign({paused:false,mode3d:false,labels:'all',clean:false},read(CFG_KEY,{}));
+ const cfg=Object.assign({paused:false,mode3d:false,labels:'all',clean:false,palette:'copper'},read(CFG_KEY,{}));
+ usePalette(cfg.palette);
  const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};
- const stage=el('div','brain-stage'),canvas=el('canvas'),tip=el('div','brain-tip');tip.hidden=true;
+ const stage=el('div','brain-stage'),canvas=el('canvas','brain-fx'),tip=el('div','brain-tip');tip.hidden=true;
+ // Слои: WebGL — частицы и свечение; 2D — нити, нейроны, импульсы (смешиваются «экраном»); сверху — подписи.
+ const glc=el('canvas','brain-gl'),lab=el('canvas','brain-lab'),grain=el('div','brain-grain');
+ glc.setAttribute('aria-hidden','true');lab.setAttribute('aria-hidden','true');grain.setAttribute('aria-hidden','true');
  const top=el('div','brain-top'),bar=el('div','brain-bar'),ctrl=el('div','brain-ctrl');
  const pauseBtn=el('button','brain-btn');pauseBtn.type='button';
  const resetBtn=el('button','brain-btn','Пробудить');resetBtn.type='button';resetBtn.title='Заново вырастить мозг из ядра';
@@ -145,11 +256,12 @@ function mount(host){
  const labelBtn=el('button','brain-btn');labelBtn.type='button';labelBtn.title='Подписи зон: все, только при наведении или скрыть';
  const cleanBtn=el('button','brain-btn brain-keep');cleanBtn.type='button';cleanBtn.title='Чисто: только рой, без панелей и подписей';
  const fsBtn=el('button','brain-btn brain-keep','⛶');fsBtn.type='button';fsBtn.title='На весь экран (выход — Esc)';fsBtn.setAttribute('aria-label','На весь экран');
- const viewBtn=el('button','brain-btn','⟲ Вид');viewBtn.type='button';viewBtn.title='Вернуть вид по центру';
- ctrl.append(find,btn3d,labelBtn,viewBtn,resetBtn,pauseBtn,cleanBtn,fsBtn);top.append(bar,ctrl);
+ const viewBtn=el('button','brain-btn','⟲ Вид');viewBtn.type='button';viewBtn.title='Вернуть вид по центру (двойной щелчок по зоне — приблизить её)';
+ const palBtn=el('button','brain-btn');palBtn.type='button';palBtn.title='Палитра роя: медь, лёд, неон';
+ ctrl.append(find,btn3d,labelBtn,palBtn,viewBtn,resetBtn,pauseBtn,cleanBtn,fsBtn);top.append(bar,ctrl);
  const empty=el('div','brain-empty');empty.hidden=true;
  const fixBox=el('div','brain-fix');fixBox.hidden=true;fixBox.setAttribute('role','dialog');fixBox.setAttribute('aria-label','Разбор противоречий');
- stage.append(canvas,top,tip,empty,fixBox);
+ stage.append(glc,canvas,lab,grain,top,tip,empty,fixBox);
  stage.setAttribute('role','img');
  const teach=el('form','brain-teach'),tIn=el('input'),tBtn=el('button','primary','Научить');
  tIn.placeholder='Научи меня: Анна | любит | зелёный чай';tIn.setAttribute('aria-label','Новый факт: субъект | связь | объект');tIn.maxLength=900;tBtn.type='submit';
@@ -176,18 +288,27 @@ function mount(host){
  hud.append(pLog,pAct,pTree);
  // На широком экране HUD лежит поверх холста внизу, как в рое; на телефоне — под ним.
  function placeHud(){if(wideQuery.matches){hud.classList.add('over');stage.append(hud);host.replaceChildren(stage,teach,learnBox)}else{hud.classList.remove('over');host.replaceChildren(stage,teach,learnBox,hud)}drawSpark();drawFan();dirty=true}
- const ctx=canvas.getContext('2d');
+ const ctx=canvas.getContext('2d'),lctx=lab.getContext('2d');
+ // tenma.brain.gl: 'auto' (по умолчанию), 'off' — всегда 2D, 'force' — WebGL даже на медленной машине.
+ const glMode=read('tenma.brain.gl','auto');
+ let glr=null;if(glMode!=='off')try{glr=makeGL(glc)}catch(e){console.warn('Мозг: WebGL',e);glr=null}
+ // На видеокарте частиц в несколько раз больше: ядро ~50 тыс., всего до ~100 тыс.
+ let MULT=glr?{core:5.5,lobe:4,sat:3}:{core:1,lobe:1,sat:1},slowN=0;
+ // Если видеокарта не тянет (программный WebGL), возвращаемся к 2D с обычным числом частиц.
+ function dropGL(){glr?.destroy();glr=null;stage.classList.remove('gl');MULT={core:1,lobe:1,sat:1};core.parts=makeParticles(9000,7);satParts=makeParticles(220,31);for(const st of lobeState.values())st.want=-1e9;quality=baseQ;apply()}
+ stage.classList.toggle('gl',!!glr);
+ glc.addEventListener('webglcontextlost',e=>{e.preventDefault();glr=null;dropGL()});
 
  let W=0,H=0,dpr=1,ui=1,quality=1,baseQ=1,fpsT=0,fpsN=0,model={lobes:[],events:[],links:[],facts:0},facts=[],conflicts=[];
- const core={parts:makeParticles(9000,7),pulse:0};
- const satParts=makeParticles(220,31);
+ const core={parts:makeParticles(9000,7,MULT.core),pulse:0};
+ let satParts=makeParticles(220,31,MULT.sat);
  const lobeState=new Map();
  const neurons=new Map();
  let impulses=[],seen=new Set(read(SEEN_KEY,[])),firstVisit=!seen.size,bloomStart=performance.now(),coreText='',coreKind='',coreTextT=0;
- let simT=0,last=performance.now(),raf=0,dirty=true,pinned=null,hover=null,stars=[],spikes=[];
+ let simT=0,last=performance.now(),raf=0,dirty=true,pinned=null,hover=null,stars=[],spikes=[],linkCount=new Map();
  // Камера: поворот (yaw/pitch), приближение и сдвиг. В плоском режиме всё стремится к нулю.
  const cam={yaw:0,pitch:0,zoom:1,px:0,py:0,depth:0},camT={yaw:0,pitch:0,zoom:1,px:0,py:0};
- let idleT=0,focusQ='',focusLobes=new Set(),focusItems=new Set(),thinking=false,thinkT=0,seeds=[];
+ let view0={cx:0,cy:0},focusZ=0,idleT=0,focusQ='',focusLobes=new Set(),focusItems=new Set(),thinking=false,thinkT=0,seeds=[];
  // Сила памяти: сколько раз и когда запись вспоминали (хранится в этом браузере).
  let recall=readRecall();
  const still=()=>cfg.paused||reduceQuery.matches;
@@ -203,6 +324,10 @@ function mount(host){
  function setLabels(){labelBtn.textContent=LABELS[cfg.labels]||LABELS.all;labelBtn.setAttribute('aria-label','Подписи: '+(LABELS[cfg.labels]||'').replace('Аа ',''));dirty=true}
  setLabels();
  labelBtn.onclick=()=>{cfg.labels=cfg.labels==='all'?'hover':cfg.labels==='hover'?'off':'all';write(CFG_KEY,cfg);setLabels()};
+ // Палитра: медь → лёд → неон. Цвета HUD (--ember) следуют за роем.
+ const PAL_ORDER=['copper','ice','neon'];
+ function setPalette(){usePalette(cfg.palette);palBtn.textContent='◐ '+PAL.name;palBtn.setAttribute('aria-label','Палитра: '+PAL.name);host.style.setProperty('--ember',PAL.accent);host.style.setProperty('--ember-hot',PAL.hot);sprite=null;dirty=true}
+ palBtn.onclick=()=>{cfg.palette=PAL_ORDER[(PAL_ORDER.indexOf(cfg.palette)+1)%PAL_ORDER.length];write(CFG_KEY,cfg);setPalette();apply()};
  // «Чисто»: только рой — панели, подписи и кнопки прячутся (остаются «Чисто» и «На весь экран»).
  function setClean(){cleanBtn.textContent=cfg.clean?'◉ Чисто':'○ Чисто';cleanBtn.setAttribute('aria-pressed',String(cfg.clean));host.classList.toggle('clean',cfg.clean);stage.classList.toggle('clean',cfg.clean);requestAnimationFrame(()=>{drawSpark();drawFan()});dirty=true}
  setClean();
@@ -242,7 +367,7 @@ function mount(host){
   dpr=Math.min(2,window.devicePixelRatio||1);if(W*H*dpr*dpr>9e6)dpr=Math.sqrt(9e6/(W*H)); // 4K: не больше ~9 Мп
   ui=clamp(parseFloat(getComputedStyle(document.documentElement).fontSize)/16,.85,1.9); // подписи растут вместе с интерфейсом (4K)
   baseQ=clamp(W*H/(1500*800),.45,1);quality=Math.min(quality,baseQ); // на телефоне частиц меньше
-  canvas.width=Math.round(W*dpr);canvas.height=Math.round(H*dpr);
+  canvas.width=lab.width=Math.round(W*dpr);canvas.height=lab.height=Math.round(H*dpr);if(glr)glr.resize(canvas.width,canvas.height);
   // Фон: далёкие созвездия — маленькие рои-графы, как в финале ролика.
   const r2=rng(99),nc=Math.round(clamp(W*H/60000,8,40));
   stars=Array.from({length:nc},()=>{const cx=r2(),cy=r2(),k=4+Math.floor(r2()*9),pts=[];for(let i=0;i<k;i++)pts.push([cx+(r2()-.5)*.08,cy+(r2()-.5)*.08*W/H]);return {pts,a:.08+.18*r2(),ph:TAU*r2()}});
@@ -260,8 +385,8 @@ function mount(host){
    alive.add(l.id);
    let s=lobeState.get(l.id);
    const n=l.items.length,want=Math.round(clamp(450+220*Math.sqrt(n),600,1800));
-   if(!s){s={parts:makeParticles(want,hash(l.id)),pulse:0,x:0,y:0,r:0,fil:[],streaks:[],sats:[],seed:hash(l.id)};lobeState.set(l.id,s)}
-   else if(Math.abs(s.parts.length-want)>120)s.parts=makeParticles(want,hash(l.id));
+   if(!s){s={parts:makeParticles(want,hash(l.id),MULT.lobe),want,pulse:0,x:0,y:0,r:0,fil:[],streaks:[],sats:[],seed:hash(l.id)};lobeState.set(l.id,s)}
+   else if(Math.abs(s.want-want)>120){glr?.free(s.parts);s.parts=makeParticles(want,hash(l.id),MULT.lobe);s.want=want}
    const r=rng(s.seed^0x9e37);
    const nf=Math.round(clamp(30+n*4,30,90));
    if(s.fil.length!==nf)s.fil=Array.from({length:nf},()=>({a:TAU*r(),bend:(r()-.5)*.7,off:(r()-.5)*.9}));
@@ -272,13 +397,18 @@ function mount(host){
    l.state=s;l.bad=l.id==='conflicts';l.str=l.items.length?l.items.reduce((a,it)=>a+strength(it),0)/l.items.length:1;
    for(const it of l.items){
     let nn=neurons.get(it.id);
-    if(!nn){const q=rng(hash(it.id)),d=unit(q),k=.15+.6*Math.cbrt(q());nn={ox:d[0]*k,oy:d[1]*k,oz:d[2]*k,flash:0,sx:0,sy:0,vis:0};neurons.set(it.id,nn)}
+    if(!nn){const q=rng(hash(it.id)),d=unit(q),k=.15+.6*Math.cbrt(q());nn={ox:d[0]*k,oy:d[1]*k,oz:d[2]*k,flash:0,sx:0,sy:0,vis:0,ph:TAU*q(),
+      // Отростки: 3–6 ветвей-дендритов, у части — по 1–2 веточки, на концах синапсы.
+      den:Array.from({length:3+Math.floor(q()*4)},()=>({a:TAU*q(),l:.7+.9*q(),c:(q()-.5)*.9,kids:Array.from({length:Math.floor(q()*3)},()=>({at:.45+.35*q(),a:(q()-.5)*1.6,l:.3+.4*q()}))}))};neurons.set(it.id,nn)}
     nn.item=it;nn.lobe=l;alive.add(it.id);it.str=strength(it);
     if(!seen.has(it.id)){seen.add(it.id);if(!firstVisit){impulses.push({lobe:l,item:it,u:0,f:Math.floor(Math.random()*l.state.fil.length),big:true});coreText=it.title;coreKind=l.label;coreTextT=4.5}}
    }
   }
-  for(const k of [...lobeState.keys()])if(!alive.has(k))lobeState.delete(k);
+  for(const k of [...lobeState.keys()])if(!alive.has(k)){glr?.free(lobeState.get(k).parts);lobeState.delete(k)}
   for(const k of [...neurons.keys()])if(!alive.has(k))neurons.delete(k);
+  // Соседи внутри зоны — для связей «вблизи» (детализация при приближении).
+  for(const l of model.lobes){const ns=l.items.map(it=>neurons.get(it.id)).filter(Boolean);for(const n of ns){n.near=ns.filter(o=>o!==n).map(o=>[o,(o.ox-n.ox)**2+(o.oy-n.oy)**2+(o.oz-n.oz)**2]).sort((a,b)=>a[1]-b[1]).slice(0,2).map(x=>x[0])}}
+  linkCount=new Map();for(const [a,b] of model.links){linkCount.set(a,(linkCount.get(a)||0)+1);linkCount.set(b,(linkCount.get(b)||0)+1)}
   if(seen.size>4000)seen=new Set([...neurons.keys()]);
   write(SEEN_KEY,[...seen]);
   renderHud();dirty=true;
@@ -307,7 +437,7 @@ function mount(host){
   for(const e of model.events){const i=Math.floor((e.t-base)/3600000);if(i>=0&&i<bins)counts[i]+=e.bad?3:1}
   const bad=recentBad(),max=Math.max(1,...counts);
   const pts=counts.map((v,i)=>{const x=3+i*(w-6)/(bins-1),wave=Math.sin(i*.55)*.18+Math.sin(i*1.7)*.06;return [x,h/2-(v/max-.35)*(h*.55)-wave*h*(bad?.9:.5)+(bad&&i%2?(Math.random()-.5)*h*.35:0)]});
-  c.lineWidth=1.6;c.lineJoin='round';c.strokeStyle=bad?'#ff4a38':'#ee8a3c';c.shadowColor=c.strokeStyle;c.shadowBlur=6;c.beginPath();c.moveTo(pts[0][0],pts[0][1]);
+  c.lineWidth=1.6;c.lineJoin='round';c.strokeStyle=bad?'#ff4a38':PAL.accent;c.shadowColor=c.strokeStyle;c.shadowBlur=6;c.beginPath();c.moveTo(pts[0][0],pts[0][1]);
   for(let i=1;i<pts.length;i++){const [x0,y0]=pts[i-1],[x1,y1]=pts[i];if(bad)c.lineTo(x1,y1);else c.quadraticCurveTo(x0,y0,(x0+x1)/2,(y0+y1)/2)}c.stroke();
  }
  // 03: веер — ядро → зоны → колонки нейронов.
@@ -344,13 +474,14 @@ function mount(host){
    const wob=still()?0:1;
    const wx=Math.cos(a)*rx*b+Math.sin(t*.27+s.seed%7)*m*.012*wob,wy=Math.sin(a)*ry*b+Math.cos(t*.21+s.seed%5)*m*.012*wob,wz=((s.seed%997)/997-.5)*m*1.1*b;
    const [qx,qy,kk,z2]=proj(wx,wy,wz);
-   s.x=ox+qx*Z;s.y=oy+qy*Z;s.k=kk;s.depth=z2;s.a=Math.atan2(qy,qx);
+   s.x=ox+qx*Z;s.y=oy+qy*Z;s.qx=qx;s.qy=qy;s.k=kk;s.depth=z2;s.a=Math.atan2(qy,qx);
    s.r=m*clamp(.05+.016*Math.sqrt(l.items.length),.06,.12)*(.35+.65*b)*kk*Z;
    if(focusLobes.has(l.id)){const rr=s.r/Z*1.6;fx0=Math.min(fx0,qx-rr);fx1=Math.max(fx1,qx+rr);fy0=Math.min(fy0,qy-rr);fy1=Math.max(fy1,qy+rr);fn++}
   });
   // Поиск-фокус: камера подлетает к найденным зонам.
   // Поиск-фокус: камера подлетает так, чтобы найденные зоны заняли кадр.
   if(fn){camT.px=-(fx0+fx1)/2;camT.py=-(fy0+fy1)/2;camT.zoom=clamp(Math.min(W*.75/(fx1-fx0),h*.75/(fy1-fy0)),1,2.4)}
+  view0={cx,cy};
   return {cx:ox,cy:oy,coreR,m,b,Z};
  }
  // Нить ядро→зона: квадратичная кривая; f.off раздвигает нити в пучок.
@@ -365,11 +496,13 @@ function mount(host){
  /* ---------- Отрисовка ---------- */
  let sprite=null,spriteBad=null,spriteCold=null,spriteSeed=null;
  function glowSprite(c1,c2,c3){const c=document.createElement('canvas');c.width=c.height=64;const g=c.getContext('2d'),gr=g.createRadialGradient(32,32,0,32,32,32);gr.addColorStop(0,c1);gr.addColorStop(.2,c2);gr.addColorStop(.55,c3);gr.addColorStop(1,'rgba(0,0,0,0)');g.fillStyle=gr;g.fillRect(0,0,64,64);return c}
- function cloud(parts,x,y,r,rot,pal,inten,hazeA,count){
+ function cloud(parts,x,y,r,rot,pal,inten,hazeA,count,blur=0){
   rot+=cam.yaw;const tilt=.38+cam.pitch*cam.depth;
   const R=r*dpr,X=x*dpr,Y=y*dpr;
   const hz=ctx.createRadialGradient(X,Y,0,X,Y,R*1.3);hz.addColorStop(0,rgba(pal.haze,.55*hazeA));hz.addColorStop(.55,rgba(pal.haze,.22*hazeA));hz.addColorStop(1,rgba(pal.haze,0));
   ctx.globalAlpha=1;ctx.fillStyle=hz;ctx.fillRect(X-R*1.35,Y-R*1.35,R*2.7,R*2.7);
+  // При приближении частицы крупнее и ярче, чтобы облако не рассыпалось в редкую пыль.
+  if(glr){const zk=clamp(Math.sqrt(cam.zoom),1,2.2);glr.cloud(parts,X,Y,R,rot,tilt,pal.tones,inten*Math.sqrt(zk),count,blur*dpr,Math.max(1,dpr*1.15*ui)*zk,still()?0:1,simT);return}
   const ca=Math.cos(rot),sa=Math.sin(rot),ct=Math.cos(tilt),st=Math.sin(tilt),tw=still()?0:1;
   const ps=Math.max(1,dpr*1.15*ui),lim=Math.min(parts.length,count||parts.length);
   for(let tone=0;tone<3;tone++){
@@ -384,14 +517,18 @@ function mount(host){
   ctx.globalAlpha=1;
  }
  function draw(dt){
-  if(!sprite){sprite=glowSprite('rgba(255,248,230,1)','rgba(255,196,120,.85)','rgba(230,110,40,.2)');spriteBad=glowSprite('rgba(255,255,255,1)','rgba(230,230,240,.7)','rgba(180,180,190,.15)');spriteCold=glowSprite('rgba(170,70,40,.9)','rgba(110,40,20,.6)','rgba(60,20,10,.15)');spriteSeed=glowSprite('rgba(255,255,255,1)','rgba(255,230,190,.6)','rgba(255,200,140,.12)')}
+  if(!sprite){sprite=glowSprite(...PAL.glow);spriteBad=glowSprite('rgba(255,255,255,1)','rgba(230,230,240,.7)','rgba(180,180,190,.15)');spriteCold=glowSprite(...PAL.cold);spriteSeed=glowSprite('rgba(255,255,255,1)','rgba(255,230,190,.6)','rgba(255,200,140,.12)')}
   const G=layout(simT,dt),pal=l=>l.bad?PALE:EMBER,focusing=focusLobes.size>0,dimOf=l=>focusing&&!focusLobes.has(l.id)?.16:1;
-  ctx.setTransform(1,0,0,1,0,0);ctx.globalCompositeOperation='source-over';ctx.fillStyle='#000';ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.setTransform(1,0,0,1,0,0);ctx.globalCompositeOperation='source-over';
+  if(glr){ctx.clearRect(0,0,canvas.width,canvas.height);glr.begin()}else{ctx.fillStyle='#000';ctx.fillRect(0,0,canvas.width,canvas.height)}
+  lctx.setTransform(1,0,0,1,0,0);lctx.clearRect(0,0,lab.width,lab.height);
   ctx.globalCompositeOperation='lighter';
+  // Глубина резкости (3D): резко — ядро или найденная зона, остальное размывается по удалённости.
+  const fl=model.lobes.filter(l=>focusLobes.has(l.id));focusZ=fl.length?fl.reduce((a,l)=>a+l.state.depth,0)/fl.length:0;
   // Далёкие созвездия (в 3D слегка смещаются — параллакс).
   const shx=-cam.yaw*W*.04*dpr,shy=cam.pitch*H*.04*dpr;
-  ctx.lineWidth=dpr*.6;for(const c of stars){const a=c.a*(still()?1:.7+.3*Math.sin(simT*.4+c.ph))*(focusing?.5:1);ctx.strokeStyle='rgba(220,120,60,'+a*.5+')';ctx.beginPath();c.pts.forEach(([x,y],i)=>{const X=x*canvas.width+shx,Y=y*canvas.height+shy;i?ctx.lineTo(X,Y):ctx.moveTo(X,Y)});ctx.stroke();
-   ctx.fillStyle='rgba(255,170,100,'+a+')';for(const [x,y] of c.pts)ctx.fillRect(x*canvas.width+shx,y*canvas.height+shy,1.4*dpr,1.4*dpr)}
+  ctx.lineWidth=dpr*.6;for(const c of stars){const a=c.a*(still()?1:.7+.3*Math.sin(simT*.4+c.ph))*(focusing?.5:1);ctx.strokeStyle=rgba(PAL.star,a*.5);ctx.beginPath();c.pts.forEach(([x,y],i)=>{const X=x*canvas.width+shx,Y=y*canvas.height+shy;i?ctx.lineTo(X,Y):ctx.moveTo(X,Y)});ctx.stroke();
+   ctx.fillStyle=rgba(PAL.starDot,a);for(const [x,y] of c.pts)ctx.fillRect(x*canvas.width+shx,y*canvas.height+shy,1.4*dpr,1.4*dpr)}
   // Пучки нитей.
   for(const l of model.lobes){const s=l.state,col=l.bad?[200,200,210]:l.color;ctx.strokeStyle=rgba(col,.045*G.b*dimOf(l));ctx.lineWidth=dpr*.6;
    for(const f of s.fil){ctx.beginPath();for(let k=0;k<=14;k++){const [x,y]=curve(G,s,f,k/14);k?ctx.lineTo(x*dpr,y*dpr):ctx.moveTo(x*dpr,y*dpr)}ctx.stroke()}}
@@ -412,7 +549,16 @@ function mount(host){
   for(const l of order)if(l.state.depth>=0)drawLobe(l,G,pal(l),dimOf(l),dt);
   ctx.globalAlpha=1;
   // Связи факт→факт.
-  ctx.lineWidth=dpr*.9;for(const [a,b] of model.links){const A=neurons.get(a),B=neurons.get(b);if(!A||!B)continue;const lit=focusItems.has(a)||focusItems.has(b);ctx.strokeStyle='rgba(240,150,80,'+((focusing?(lit?.7:.05):.22)*G.b)+')';ctx.beginPath();ctx.moveTo(A.sx*dpr,A.sy*dpr);const mx=(A.sx+B.sx)/2,my=(A.sy+B.sy)/2;ctx.quadraticCurveTo(mx*dpr+(G.cx-mx)*.3*dpr,my*dpr+(G.cy-my)*.3*dpr,B.sx*dpr,B.sy*dpr);ctx.stroke()}
+  // Связи между фактами через зоны: «объект → субъект» сплошной нитью, общий объект — пунктиром.
+  // По каждой бежит искра; при наведении на нейрон его связи загораются, остальные гаснут.
+  const hl=hover?.id||(pinned?.type==='neuron'?pinned.n.item.id:null);
+  for(const [a,b,kind] of model.links){const A=neurons.get(a),B=neurons.get(b);if(!A||!B)continue;
+   const lit=focusItems.has(a)||focusItems.has(b)||hl===a||hl===b,base=(focusing||hl?(lit?.85:.05):.28)*G.b*(kind==='obj'?.8:1);
+   const mx=(A.sx+B.sx)/2,my=(A.sy+B.sy)/2,qx=mx+(G.cx-mx)*.3,qy=my+(G.cy-my)*.3;
+   ctx.lineWidth=dpr*(lit?1.5:.9);ctx.strokeStyle=rgba(PAL.link,base);if(kind==='obj')ctx.setLineDash([4*dpr,3*dpr]);
+   ctx.beginPath();ctx.moveTo(A.sx*dpr,A.sy*dpr);ctx.quadraticCurveTo(qx*dpr,qy*dpr,B.sx*dpr,B.sy*dpr);ctx.stroke();ctx.setLineDash([]);
+   const u=(simT*.22+(hash(a+b)%1000)/1000)%1,v=1-u,px=v*v*A.sx+2*v*u*qx+u*u*B.sx,py=v*v*A.sy+2*v*u*qy+u*u*B.sy,z=dpr*ui*(lit?15:9);
+   ctx.globalAlpha=Math.min(1,base*2.6);ctx.drawImage(sprite,px*dpr-z/2,py*dpr-z/2,z,z);ctx.globalAlpha=1}
   // Зародыши: факты, которые мозг предлагает запомнить, кружат вокруг ядра.
   for(const sd of seeds){const a=sd.a+(still()?0:simT*.25),rr=G.coreR*(1.25+.2*Math.sin(simT*.7+sd.a*3));sd.sx=G.cx+Math.cos(a)*rr;sd.sy=G.cy+Math.sin(a)*rr*.8;
    const z=dpr*ui*(16+4*Math.sin(simT*3+sd.a));ctx.globalAlpha=.95*G.b;ctx.drawImage(spriteSeed,sd.sx*dpr-z/2,sd.sy*dpr-z/2,z,z);
@@ -421,46 +567,83 @@ function mount(host){
   // Импульсы: новые записи (крупные), воспоминания (белые), фоновая «болтовня».
   impulses=impulses.filter(p=>{const s=p.lobe.state,f=s&&s.fil[p.f];if(!f)return false;p.u+=dt*(reduceQuery.matches?4:p.big?.55:p.recall?.8:.9);
    if(p.u>=1){if(p.item){const n=neurons.get(p.item.id);if(n)n.flash=p.recall?.75:1;s.pulse=p.recall?.6:1}return false}
-   const [x,y]=curve(G,s,f,ease(p.u)),z=dpr*(p.big?26:p.recall?18:12);ctx.globalAlpha=p.big||p.recall?1:.55;ctx.drawImage(p.recall?spriteSeed:sprite,x*dpr-z/2,y*dpr-z/2,z,z);return true});
+   const [x,y]=curve(G,s,f,ease(p.u)),z=dpr*(p.big?26:p.recall?18:12);
+   // Хвост: гаснущий след вдоль волокна.
+   const col=p.recall?[255,255,255]:p.big?PAL.tones[2]:PAL.tones[1],N=p.big?16:p.recall?12:8,step=p.big?.014:.018;let tx=x,ty=y;ctx.lineCap='round';
+   for(let k=1;k<=N;k++){const uu=p.u-k*step;if(uu<=0)break;const [x2,y2]=curve(G,s,f,ease(uu)),fade=1-k/(N+1);ctx.globalAlpha=1;ctx.strokeStyle=rgba(col,(p.big||p.recall?.8:.4)*fade*fade);ctx.lineWidth=dpr*((p.big?3.4:p.recall?2.6:1.6)*fade+.4);ctx.beginPath();ctx.moveTo(tx*dpr,ty*dpr);ctx.lineTo(x2*dpr,y2*dpr);ctx.stroke();tx=x2;ty=y2}
+   ctx.globalAlpha=p.big||p.recall?1:.55;ctx.drawImage(p.recall?spriteSeed:sprite,x*dpr-z/2,y*dpr-z/2,z,z);return true});
   ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';
+  if(glr)glr.end(1);
+  details(G,dimOf);
   labels(G,dimOf);
   // Подпись внутри ядра — как «тикет → решён» в ролике.
   const txt=coreTextT>0?trim(coreKind,16)+' → '+trim(coreText,W<520?18:30):thinking?'думаю…':'';
   if(coreTextT>0)coreTextT-=dt;
-  if(txt){const a=thinking&&coreTextT<=0?.6+.4*Math.sin(thinkT*4):clamp(coreTextT,0,1);ctx.font='600 '+Math.round(11.5*ui*dpr)+'px '+MONO;ctx.textAlign='center';ctx.textBaseline='middle';ctx.shadowColor='rgba(0,0,0,.9)';ctx.shadowBlur=6*dpr;ctx.fillStyle='rgba(255,246,230,'+a+')';ctx.fillText(txt,G.cx*dpr,G.cy*dpr);ctx.shadowBlur=0;ctx.textBaseline='alphabetic'}
+  if(txt){const c=lctx,a=thinking&&coreTextT<=0?.6+.4*Math.sin(thinkT*4):clamp(coreTextT,0,1);c.font='600 '+Math.round(11.5*ui*dpr)+'px '+MONO;c.textAlign='center';c.textBaseline='middle';c.shadowColor='rgba(0,0,0,.9)';c.shadowBlur=6*dpr;c.fillStyle='rgba(255,246,230,'+a+')';c.fillText(txt,G.cx*dpr,G.cy*dpr);c.shadowBlur=0;c.textBaseline='alphabetic'}
  }
  function drawCore(G,dt,focusing){
   if(spikes.length!==160){const r=rng(5);spikes=Array.from({length:160},()=>({a:TAU*r(),u:r(),v:.05+.1*r(),len:.15+.35*r()}))}
   const dim=focusing?.35:1;
-  ctx.lineWidth=dpr*.8;for(const p of spikes){if(!still())p.u=(p.u+p.v*dt)%1;const r0=G.coreR*(.85+p.u*.6),r1=r0+G.coreR*p.len*.4;ctx.strokeStyle='rgba(236,140,70,'+(.22*dim*Math.sin(Math.PI*p.u))+')';ctx.beginPath();ctx.moveTo((G.cx+Math.cos(p.a)*r0)*dpr,(G.cy+Math.sin(p.a)*r0)*dpr);ctx.lineTo((G.cx+Math.cos(p.a)*r1)*dpr,(G.cy+Math.sin(p.a)*r1)*dpr);ctx.stroke()}
-  cloud(core.parts,G.cx,G.cy,G.coreR*(1+core.pulse*.05),simT*.1,EMBER,(1.3+core.pulse*.6)*dim,(1.6+core.pulse)*dim,Math.round(core.parts.length*quality));
+  ctx.lineWidth=dpr*.8;for(const p of spikes){if(!still())p.u=(p.u+p.v*dt)%1;const r0=G.coreR*(.85+p.u*.6),r1=r0+G.coreR*p.len*.4;ctx.strokeStyle=rgba(PAL.spike,.22*dim*Math.sin(Math.PI*p.u));ctx.beginPath();ctx.moveTo((G.cx+Math.cos(p.a)*r0)*dpr,(G.cy+Math.sin(p.a)*r0)*dpr);ctx.lineTo((G.cx+Math.cos(p.a)*r1)*dpr,(G.cy+Math.sin(p.a)*r1)*dpr);ctx.stroke()}
+  cloud(core.parts,G.cx,G.cy,G.coreR*(1+core.pulse*.05),simT*.1,EMBER,(1.3+core.pulse*.6)*dim,(1.6+core.pulse)*dim,Math.round(core.parts.length*quality),blurOf(0,G));
   const hot=G.coreR*dpr*(.5+core.pulse*.3);ctx.globalAlpha=(.3+.4*core.pulse)*dim;ctx.drawImage(sprite,G.cx*dpr-hot,G.cy*dpr-hot,hot*2,hot*2);ctx.globalAlpha=1;
  }
  // Зона: спутники, облако и нейроны. Яркость зоны и нейронов зависит от силы памяти.
+ const blurOf=(depth,G)=>cam.depth*clamp(Math.abs(depth-focusZ)/G.m*9-.35,0,7);
  function drawLobe(l,G,P,dim,dt){
   const s=l.state;s.pulse=Math.max(0,s.pulse-dt*1.4);
-  const rot=simT*(.18+(s.seed%5)*.02)+s.seed,wob=still()?0:simT,warm=.55+.45*Math.min(1,l.str??1);
+  const rot=simT*(.18+(s.seed%5)*.02)+s.seed,wob=still()?0:simT,warm=.55+.45*Math.min(1,l.str??1),blur=blurOf(s.depth,G),bz=1+blur*.12,ba=1/(1+blur*.35);
   for(const sat of s.sats){const a=sat.a+wob*sat.sp,sx=s.x+Math.cos(a)*s.r*sat.d,sy=s.y+Math.sin(a)*s.r*sat.d;
-   ctx.strokeStyle=rgba(l.bad?[200,200,210]:l.color,.18*G.b*dim);ctx.lineWidth=dpr*.7;ctx.beginPath();ctx.moveTo(s.x*dpr,s.y*dpr);ctx.lineTo(sx*dpr,sy*dpr);ctx.stroke();
-   cloud(satParts,sx,sy,s.r*sat.k,rot*1.3+sat.a,P,.95*G.b*dim*warm,.9*G.b*dim*warm,Math.round(satParts.length*quality))}
-  cloud(s.parts,s.x,s.y,s.r*(1+s.pulse*.15),rot,P,((l.bad?1.05:1)*warm+s.pulse)*dim,(1+s.pulse*1.5)*dim*warm,Math.round(s.parts.length*quality));
-  const ca=Math.cos(rot+cam.yaw),sa=Math.sin(rot+cam.yaw);
+   ctx.strokeStyle=rgba(l.bad?[200,200,210]:l.color,.18*G.b*dim*ba);ctx.lineWidth=dpr*.7;ctx.beginPath();ctx.moveTo(s.x*dpr,s.y*dpr);ctx.lineTo(sx*dpr,sy*dpr);ctx.stroke();
+   cloud(satParts,sx,sy,s.r*sat.k,rot*1.3+sat.a,P,.95*G.b*dim*warm,.9*G.b*dim*warm,Math.round(satParts.length*quality),blur)}
+  cloud(s.parts,s.x,s.y,s.r*(1+s.pulse*.15),rot,P,((l.bad?1.05:1)*warm+s.pulse)*dim,(1+s.pulse*1.5)*dim*warm,Math.round(s.parts.length*quality),blur);
+  // Детализация: чем крупнее зона на экране, тем больше видно (связи соседей, названия записей).
+  s.det=dim<.5?0:clamp((s.r/G.m-.11)/.09,0,1);
+  const ca=Math.cos(rot+cam.yaw),sa=Math.sin(rot+cam.yaw),list=[];
   for(const it of l.items){const n=neurons.get(it.id);if(!n)continue;n.flash=Math.max(0,n.flash-dt*.45);
    const x1=n.ox*ca+n.oz*sa,z1=-n.ox*sa+n.oz*ca,d=(z1+1.2)/2.4,str=Math.min(1.2,it.str??1),lit=focusItems.has(it.id);
-   n.sx=s.x+x1*s.r;n.sy=s.y+n.oy*s.r;n.vis=G.b*(dim>.5||lit?1:0);
-   const spr=l.bad?spriteBad:str<.35?spriteCold:sprite;
-   const size=ui*dpr*(5+3*it.weight+(it.hot?3:0)+n.flash*22)*(.7+.5*d)*(.65+.45*str)*(hover&&hover.id===it.id?1.6:1)*(lit?1.5:1)*Math.min(1.6,Math.sqrt(s.k||1)*Math.sqrt(G.Z));
-   ctx.globalAlpha=clamp(((it.dim?.3:.65)*d*(.35+.65*str)+n.flash)*(lit?1.6:dim),0,1)*G.b;ctx.drawImage(spr,n.sx*dpr-size/2,n.sy*dpr-size/2,size,size);
+   n.sx=s.x+x1*s.r;n.sy=s.y+n.oy*s.r;n.vis=G.b*(dim>.5||lit?1:0);n.d=d;
+   n.size=ui*dpr*(5+3*it.weight+(it.hot?3:0)+n.flash*22)*(.7+.5*d)*(.65+.45*str)*(hover&&hover.id===it.id?1.6:1)*(lit?1.5:1)*Math.min(1.6,Math.sqrt(s.k||1)*Math.sqrt(G.Z))*bz;
+   n.alpha=clamp(((it.dim?.3:.65)*d*(.35+.65*str)+n.flash)*(lit?1.6:dim),0,1)*G.b*(lit?1:ba);list.push([n,it,str,lit])}
+  // Отростки нейронов — одной кистью на зону; на концах синапсы.
+  const col=l.bad?[210,210,220]:l.color,denA=.34*G.b*dim*warm*ba,tw=still()?0:1,tips=[];
+  if(denA>.02&&list.length){ctx.strokeStyle=rgba(col,denA);ctx.lineWidth=dpr*(.6+.25*s.det);ctx.beginPath();
+   for(const [n] of list){const L=Math.max(5*dpr*ui,n.size*(.62+.5*s.det)),X=n.sx*dpr,Y=n.sy*dpr;
+    for(const b of n.den){const a=b.a+tw*Math.sin(simT*.5+n.ph+b.a)*.07,len=b.l*L,ex=X+Math.cos(a)*len,ey=Y+Math.sin(a)*len,qx=(X+ex)/2-Math.sin(a)*b.c*len*.45,qy=(Y+ey)/2+Math.cos(a)*b.c*len*.45;
+     ctx.moveTo(X,Y);ctx.quadraticCurveTo(qx,qy,ex,ey);tips.push(ex,ey);
+     for(const k of b.kids){const sx=X+(ex-X)*k.at+(qx-(X+ex)/2)*.5,sy=Y+(ey-Y)*k.at+(qy-(Y+ey)/2)*.5,ka=a+k.a,kl=k.l*len,kx=sx+Math.cos(ka)*kl,ky=sy+Math.sin(ka)*kl;ctx.moveTo(sx,sy);ctx.lineTo(kx,ky);tips.push(kx,ky)}}}
+   ctx.stroke();
+   ctx.fillStyle=rgba(col,Math.min(1,denA*1.8));const ts=Math.max(1,dpr*ui*(1+.6*s.det));for(let i=0;i<tips.length;i+=2)ctx.fillRect(tips[i]-ts/2,tips[i+1]-ts/2,ts,ts)}
+  // Вблизи: синаптические связи с двумя ближайшими соседями.
+  if(s.det>0){ctx.strokeStyle=rgba(col,.3*s.det*G.b);ctx.lineWidth=dpr*.8;ctx.beginPath();for(const [n] of list)for(const o of n.near||[]){if(o.lobe!==l)continue;ctx.moveTo(n.sx*dpr,n.sy*dpr);ctx.lineTo(o.sx*dpr,o.sy*dpr)}ctx.stroke()}
+  for(const [n,,str,lit] of list){
+   const spr=l.bad?spriteBad:str<.35?spriteCold:sprite,size=n.size;
+   ctx.globalAlpha=n.alpha;ctx.drawImage(spr,n.sx*dpr-size/2,n.sy*dpr-size/2,size,size);
    if(n.flash>0){ctx.globalAlpha=n.flash*.8;ctx.strokeStyle=rgba(l.color,1);ctx.lineWidth=dpr*1.2;ctx.beginPath();ctx.arc(n.sx*dpr,n.sy*dpr,dpr*(6+(1-n.flash)*40),0,TAU);ctx.stroke()}
    if(lit){ctx.globalAlpha=.6+.3*Math.sin(simT*4);ctx.strokeStyle='#ffe2b8';ctx.lineWidth=dpr;ctx.beginPath();ctx.arc(n.sx*dpr,n.sy*dpr,size*.7,0,TAU);ctx.stroke()}
   }
   ctx.globalAlpha=1;
  }
+ // Названия записей у крупных (приближенных) зон; без наложений, не больше 48 на кадр.
+ function details(G,dimOf){
+  const c=lctx,boxes=[],fs=Math.round(9.5*ui*dpr);let n=0;
+  if(cfg.clean||cfg.labels==='off'||G.b<.9)return;
+  c.font=fs+'px '+MONO;c.textBaseline='middle';c.textAlign='left';
+  for(const l of model.lobes){const s=l.state;if(!s.det||dimOf(l)<.5)continue;
+   const items=[...l.items].sort((a,b)=>(b.str??1)*b.weight-(a.str??1)*a.weight);
+   for(const it of items){if(n>=48)break;const nn=neurons.get(it.id);if(!nn||!nn.vis)continue;
+    const t=trim(it.title,W<640?18:30),w=c.measureText(t).width+8*dpr,h=fs+6*dpr,x=nn.sx*dpr+nn.size*.4+4*dpr,y=nn.sy*dpr-h/2;
+    if(x+w>lab.width-2||boxes.some(b=>x<b[0]+b[2]&&x+w>b[0]&&y<b[1]+b[3]&&y+h>b[1]))continue;boxes.push([x,y,w,h]);n++;
+    c.globalAlpha=s.det*clamp(nn.alpha*1.4,.35,1);c.fillStyle='rgba(0,0,0,.62)';c.fillRect(x,y,w,h);c.fillStyle=l.bad?'#ff8a7c':'#efe6d6';c.fillText(t,x+4*dpr,y+h/2)}}
+  c.globalAlpha=1;c.textBaseline='alphabetic';
+ }
  function trim(s,n){s=String(s||'');return s.length>n?s.slice(0,n-1)+'…':s}
  // Подписи кластеров: рамка с названием и подзаголовком, точка на краю кластера и выноска.
  function labels(G,dimOf){
+  const ctx=lctx;
   const small=W<520,fs1=(small?9.5:10.5)*ui,fs2=(small?8.5:9)*ui;
   for(const l of model.lobes){const s=l.state;if(G.b<.55)continue;
+   if(s.x<0||s.x>W||s.y<0||s.y>H)continue; // зона за краем кадра (приближение) — без подписи
    const dim=dimOf(l);if(dim<.5&&W<640)continue;
    if(cfg.clean||cfg.labels==='off'||cfg.labels==='hover'&&hoverLobe!==l.id&&!focusLobes.has(l.id)&&!(pinned&&(pinned.l===l||pinned.n?.lobe===l)))continue;
    const right=Math.cos(s.a)>=-.15,title=trim(l.label,small?16:26),sub=trim(l.sub,small?20:30);
@@ -468,7 +651,8 @@ function mount(host){
    const pad=5*dpr,bw=Math.max(w1,w2)+pad*2,bh=(fs1+fs2)*dpr+pad*2.4;
    const ax=(s.x+(right?1:-1)*s.r*.62)*dpr,ay=(s.y-s.r*.62)*dpr;
    let bx=right?ax+10*dpr:ax-10*dpr-bw,by=ay-bh-6*dpr;
-   bx=clamp(bx,4*dpr,canvas.width-bw-4*dpr);by=clamp(by,4*dpr,canvas.height-bh-4*dpr);
+   const yMin=((top.offsetTop||0)+(top.offsetHeight||0)+4)*dpr,yMax=(hud.classList.contains('over')&&!cfg.clean?H-(hud.offsetHeight||0)-12:H-4)*dpr-bh;
+   bx=clamp(bx,4*dpr,canvas.width-bw-4*dpr);by=clamp(by,yMin,Math.max(yMin,yMax));
    ctx.globalAlpha=clamp((G.b-.55)/.45,0,1)*(dim<.5?.3:1);
    ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(bx,by,bw,bh);ctx.strokeStyle=l.bad?'rgba(255,80,60,.6)':'rgba(255,255,255,.16)';ctx.lineWidth=dpr;ctx.strokeRect(bx+.5,by+.5,bw-1,bh-1);
    ctx.textAlign='left';ctx.textBaseline='top';
@@ -495,7 +679,7 @@ function mount(host){
   tip.replaceChildren();
   if(hit.type==='seed'){const f=hit.sd.f;tip.append(el('div','brain-tip-k','предлагаю запомнить'),el('div','brain-tip-t',f.subject+' — '+f.predicate+' → '+f.object),el('div','brain-tip-m',(String(f.source||'').startsWith('note:')?'из заметки':'из чата')+(f.via==='model'?' · нашла модель':' · по правилам')));
    if(withButton){const row=el('div','brain-row'),ok=el('button','brain-btn','✓ Запомнить'),no=el('button','brain-btn','✗');ok.type=no.type='button';ok.onclick=()=>acceptSeed(f.id);no.onclick=()=>{TenmaLearn.reject(f.id);tip.hidden=true;pinned=null};row.append(ok,no);tip.append(row)}}
-  else if(hit.type==='neuron'){const it=hit.n.item,r=recall[it.id];tip.append(el('div','brain-tip-k',hit.n.lobe.label),el('div','brain-tip-t',trim(it.title,140)),el('div','brain-tip-m',it.meta+' · сила памяти '+Math.round(Math.min(1,it.str??1)*100)+'%'+(r?' · вспоминала '+r.n+' '+plural(r.n,'раз','раза','раз'):'')));
+  else if(hit.type==='neuron'){const it=hit.n.item,r=recall[it.id];tip.append(el('div','brain-tip-k',hit.n.lobe.label),el('div','brain-tip-t',trim(it.title,140)),el('div','brain-tip-m',it.meta+' · сила памяти '+Math.round(Math.min(1,it.str??1)*100)+'%'+(r?' · вспоминала '+r.n+' '+plural(r.n,'раз','раза','раз'):'')+(linkCount.get(it.id)?' · связей '+linkCount.get(it.id):'')));
    if(withButton){const b=el('button','brain-btn','Открыть');b.type='button';b.onclick=()=>{recordRecall([it.id]);recall=readRecall();it.open()};tip.append(b)}}
   else{const l=hit.l;tip.append(el('div','brain-tip-k','зона'),el('div','brain-tip-t',l.label),el('div','brain-tip-m',l.items.length+' '+plural(l.items.length,'запись','записи','записей')));
    if(withButton){const b=el('button','brain-btn','Открыть раздел');b.type='button';b.onclick=()=>l.open();tip.append(b)}}
@@ -510,14 +694,19 @@ function mount(host){
   if(ptrs.size===2){const [a,b]=[...ptrs.values()];pinch=Math.hypot(a[0]-b[0],a[1]-b[1])}});
  canvas.addEventListener('pointermove',e=>{
   if(ptrs.has(e.pointerId))ptrs.set(e.pointerId,local(e));
-  if(cfg.mode3d&&ptrs.size===2&&pinch){const [a,b]=[...ptrs.values()],d=Math.hypot(a[0]-b[0],a[1]-b[1]);camT.zoom=clamp(camT.zoom*d/pinch,.45,3.2);pinch=d;moved=true;idleT=0;dirty=true;return}
+  if(cfg.mode3d&&ptrs.size===2&&pinch){const [a,b]=[...ptrs.values()],d=Math.hypot(a[0]-b[0],a[1]-b[1]);camT.zoom=clamp(camT.zoom*d/pinch,.45,5);pinch=d;moved=true;idleT=0;dirty=true;return}
   if(drag&&ptrs.has(e.pointerId)){const dx=e.clientX-drag.x,dy=e.clientY-drag.y;if(Math.abs(dx)+Math.abs(dy)>3)moved=true;
    if(moved){camT.yaw+=dx*.008;camT.pitch=clamp(camT.pitch+dy*.006,-1.2,1.2);cam.yaw=camT.yaw;cam.pitch=camT.pitch;drag={x:e.clientX,y:e.clientY};idleT=0;tip.hidden=true;canvas.style.cursor='grabbing';dirty=true;return}}
   if(e.pointerType!=='mouse'||pinned)return;const [x,y]=local(e),hit=pick(x,y);hover=hit&&hit.type==='neuron'?hit.n.item:null;hoverLobe=hit?(hit.l||hit.n?.lobe)?.id||null:null;canvas.style.cursor=hit?'pointer':cfg.mode3d?'grab':'default';showTip(hit,x,y,false);dirty=true});
  const up=e=>{ptrs.delete(e.pointerId);if(ptrs.size<2)pinch=0;if(!ptrs.size)drag=null};
  canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
  canvas.addEventListener('pointerleave',()=>{if(!pinned){tip.hidden=true;hover=null;dirty=true}});
- canvas.addEventListener('wheel',e=>{if(!cfg.mode3d)return;e.preventDefault();camT.zoom=clamp(camT.zoom*Math.exp(-e.deltaY*.0015),.45,3.2);idleT=0;dirty=true},{passive:false});
+ // Приближение к точке под курсором: в 3D, на весь экран или с Ctrl (щипок на тачпаде); иначе колесо листает страницу.
+ function zoomAt(x,y,z){const Z0=camT.zoom,Z1=clamp(z,.45,5),qx=(x-view0.cx)/Z0-camT.px,qy=(y-view0.cy)/Z0-camT.py;camT.zoom=Z1;camT.px=(x-view0.cx)/Z1-qx;camT.py=(y-view0.cy)/Z1-qy;if(Z1<=1.001&&!cfg.mode3d){camT.px=0;camT.py=0}idleT=0;dirty=true}
+ canvas.addEventListener('wheel',e=>{if(!cfg.mode3d&&!isFs()&&!e.ctrlKey)return;e.preventDefault();const [x,y]=local(e);zoomAt(x,y,camT.zoom*Math.exp(-e.deltaY*.0015))},{passive:false});
+ // Двойной щелчок по зоне — подлететь к ней и рассмотреть записи; по пустому месту — вернуть вид.
+ canvas.addEventListener('dblclick',e=>{const [x,y]=local(e),hit=pick(x,y),l=hit&&(hit.l||hit.n?.lobe);tip.hidden=true;pinned=null;
+  if(l){camT.zoom=clamp(Math.min(W,H)*.32/Math.max(8,l.state.r/cam.zoom),2,5);camT.px=-l.state.qx;camT.py=-l.state.qy}else Object.assign(camT,{zoom:1,px:0,py:0});idleT=0;dirty=true});
  canvas.addEventListener('click',e=>{if(moved){moved=false;return}const [x,y]=local(e),hit=pick(x,y);pinned=hit;hover=hit&&hit.type==='neuron'?hit.n.item:null;showTip(hit,x,y,true);if(hit&&hit.type==='lobe'){hit.l.state.pulse=1;if(hit.l.bad){tip.hidden=true;pinned=null;fixBox.hidden=false;renderFix()}}dirty=true});
  document.addEventListener('keydown',onKey);
  function onKey(e){if(e.key!=='Escape')return;if(!fixBox.hidden){fixBox.hidden=true;return}if(isFs()){if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});stage.classList.remove('fs');setFs();return}if(pinned){pinned=null;tip.hidden=true;hover=null;dirty=true}}
@@ -609,10 +798,11 @@ function mount(host){
   else if(!busy&&!dirty)return;
   dirty=false;draw(dt);
   // Адаптивное качество: на слабой видеокарте частиц становится меньше, на сильной — возвращаются.
-  fpsT+=dt;fpsN++;if(fpsT>=1.2){const fps=fpsN/fpsT;if(fps<42&&quality>.25)quality*=.8;else if(fps>56&&quality<baseQ)quality=Math.min(baseQ,quality*1.1);fpsT=0;fpsN=0}
+  fpsT+=dt;fpsN++;if(fpsT>=1.2){const fps=fpsN/fpsT;if(fps<42&&quality>.25)quality*=.8;else if(fps>56&&quality<baseQ)quality=Math.min(baseQ,quality*1.1);
+   slowN=glr&&glMode!=='force'&&quality<=.26&&fps<20?slowN+1:0;if(slowN>=3){console.warn('Мозг: WebGL слишком медленный, перехожу на 2D');dropGL()}fpsT=0;fpsN=0}
  }
- function destroy(){cancelAnimationFrame(raf);clearInterval(poll);ro.disconnect();hudRo.disconnect();window.removeEventListener('tenma:workspace',onWorkspace);window.removeEventListener('tenma:memory',onMemory);wideQuery.removeEventListener('change',onWide);document.removeEventListener('keydown',onKey);document.removeEventListener('fullscreenchange',onFsChange);document.documentElement.classList.remove('brain-fs-lock');window.removeEventListener('tenma:thinking',onThinking);window.removeEventListener('tenma:recall',onRecall);window.removeEventListener('tenma:learn',onLearn)}
- placeHud();resize();apply();renderLearn();loadFacts();raf=requestAnimationFrame(frame);
+ function destroy(){cancelAnimationFrame(raf);clearInterval(poll);ro.disconnect();hudRo.disconnect();window.removeEventListener('tenma:workspace',onWorkspace);window.removeEventListener('tenma:memory',onMemory);wideQuery.removeEventListener('change',onWide);document.removeEventListener('keydown',onKey);document.removeEventListener('fullscreenchange',onFsChange);document.documentElement.classList.remove('brain-fs-lock');window.removeEventListener('tenma:thinking',onThinking);window.removeEventListener('tenma:recall',onRecall);window.removeEventListener('tenma:learn',onLearn);glr?.destroy()}
+ setPalette();placeHud();resize();apply();renderLearn();loadFacts();raf=requestAnimationFrame(frame);
  return {destroy};
 }
 window.TenmaBrain={mount};
