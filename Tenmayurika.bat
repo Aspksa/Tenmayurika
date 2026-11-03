@@ -34,6 +34,9 @@ if not exist "node_modules\" (
  )
  if errorlevel 1 goto :failed
 )
+echo [INFO] Checking project dependencies...
+call npm.cmd install --no-audit --no-fund
+if errorlevel 1 goto :failed
 node.exe -e "const s=require('./package.json').scripts||{};process.exit(s.start?0:s.dev?1:2)"
 if errorlevel 1 goto :check_dev
 echo [INFO] Open http://127.0.0.1:5173 in your browser.
