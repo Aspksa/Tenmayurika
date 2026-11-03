@@ -13,7 +13,7 @@ if exist "runtime\node\node.exe" (
 "%NODE%" -e "process.exit(Number(process.versions.node.split('.')[0])>=24?0:1)"
 if errorlevel 1 (
  echo [INFO] Preparing portable Node.js 24...
- powershell.exe -NoProfile -NonInteractive -File "tools\bootstrap-node.ps1"
+ powershell.exe -NoProfile -NonInteractive -File "%~dp0tools\bootstrap-node.ps1"
  if errorlevel 1 goto :node_error
  if exist "runtime\node\node.exe" (
   set "NODE=%~dp0runtime\node\node.exe"
@@ -24,7 +24,7 @@ if errorlevel 1 (
 
 if not exist "%~dp0runtime\python\python.exe" (
  echo [INFO] Checking portable Python...
- powershell.exe -NoProfile -NonInteractive -File "tools\bootstrap-python.ps1"
+ powershell.exe -NoProfile -NonInteractive -File "%~dp0tools\bootstrap-python.ps1"
  if errorlevel 1 (
   echo [WARN] Python setup failed; core Node.js app can still start.
  )
