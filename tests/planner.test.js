@@ -109,3 +109,37 @@ test('review fixes: calculator precedence, navigation words, server survives bad
   assert.equal((await fetch(base+'/api/health')).status,200);
  }finally{await new Promise(r=>server.close(r))}
 });
+test('review fixes: time-only move keeps the date, passwords stay out of the model',async()=>{
+ const {server}=require('../server');
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const http=require('node:http');let seen='';let calls=0;
+ const fake=http.createServer((req,res)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{calls++;seen+=b;res.writeHead(200,{'Content-Type':'application/json'});
+  res.end(JSON.stringify({choices:[{message:calls===1?{role:'assistant',content:null,tool_calls:[{id:'p1',type:'function',function:{name:'generate_password',arguments:'{"length":20}'}}]}:{role:'assistant',content:'Готово, держите пароль.'}}]}))})});
+ await new Promise(r=>fake.listen(0,'127.0.0.1',r));
+ try{
+  const base='http://127.0.0.1:'+server.address().port;
+  const say=async(message,extra={})=>(await fetch(base+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,...extra})})).json();
+  await say('дело: Годовой план 20.12');
+  const moved=await say('перенеси годовой план в 16:00');
+  assert.match(moved.reply,/16:00/);
+  const ws=await (await fetch(base+'/api/workspace')).json();
+  const t=ws.tasks.find(x=>x.title==='Годовой план');
+  assert.equal(t.time,'16:00');assert.match(t.due,/-12-20$/);
+  process.env.CHAT_URL='http://127.0.0.1:'+fake.address().port+'/v1/chat/completions';
+  const r=await say('сгенерируй мне что-нибудь надёжное для входа');
+  const pw=r.reply.match(/🔐 (\S+)/)[1];
+  assert.equal(pw.length,20);assert.equal(r.secret,true);
+  assert.ok(!seen.includes(pw),'password must not be sent to the model');
+ }finally{delete process.env.CHAT_URL;await new Promise(r=>fake.close(r));await new Promise(r=>server.close(r))}
+});
+test('review fix: an older indexing completion does not drop a newer edit',()=>{
+ const storage=require('../storage'),id='00000000-0000-4000-8000-00000000abcd';
+ storage.syncNode({id,title:'v1',content:''});
+ const job=storage.pending().find(j=>j.id===id);
+ storage.syncNode({id,title:'v2',content:''});
+ storage.indexed(id,job.version);
+ const again=storage.pending().find(j=>j.id===id);
+ assert.ok(again,'newer edit stays queued');assert.equal(again.version,job.version+1);
+ storage.indexed(id,again.version);
+ assert.ok(!storage.pending().some(j=>j.id===id));
+});

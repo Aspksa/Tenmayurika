@@ -20,7 +20,8 @@ const L='(?<![\\p{L}\\p{N}])',R='(?![\\p{L}\\p{N}])';
 const rx=src=>new RegExp(L+src+R,'iu');
 
 // Находит дату и время в тексте. Возвращает {due, time, rest}, где rest — текст без найденных выражений.
-function parseWhen(text,now=new Date()){
+// opts.defaultToday=false: время без даты не подставляет «сегодня» (для переноса дела только по времени).
+function parseWhen(text,now=new Date(),opts={}){
  let rest=' '+String(text||'')+' ',due=null,time=null,m;
  const cut=match=>{rest=rest.replace(match[0],' ')};
  const today=startOfDay(now);
@@ -61,7 +62,7 @@ function parseWhen(text,now=new Date()){
    }
   }
  }
- if(time&&!due)due=today;
+ if(time&&!due&&opts.defaultToday!==false)due=today;
  rest=rest.replace(/\s+/g,' ').replace(/\s+([,.!?])/g,'$1').replace(/^[\s,:—–-]+|[\s,:—–-]+$/g,'').trim();
  return {due:due?ymd(due):null,time,rest};
 }

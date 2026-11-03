@@ -125,7 +125,7 @@ function makeTools(ctx){
    const found=await findTask(title,false);
    if(!found)return {ok:false,text:'Не нашла открытого дела «'+(title||'')+'».'};
    let d=validDue(due),t=validTime(time);
-   if(typeof when==='string'&&when.trim()){const w=planner.parseWhen(when);d=d||w.due;t=t||w.time}
+   if(typeof when==='string'&&when.trim()){const w=planner.parseWhen(when,new Date(),{defaultToday:false});d=d||w.due;t=t||w.time}
    if(!d&&!t)return {ok:false,text:'На когда перенести? Например: «перенеси '+found.title+' на завтра».'};
    const patch={};if(d)patch.due=d;if(t){patch.time=t;if(!d&&!found.due)patch.due=planner.ymd(new Date())}
    const item=ctx.updateTask(found.id,patch);
@@ -195,7 +195,8 @@ function makeTools(ctx){
    const chars=sets.map(set=>set[crypto.randomInt(set.length)]);
    while(chars.length<n)chars.push(all[crypto.randomInt(all.length)]);
    for(let i=chars.length-1;i>0;i--){const j=crypto.randomInt(i+1);[chars[i],chars[j]]=[chars[j],chars[i]]}
-   return {ok:true,text:'🔐 '+chars.join('')+'\n('+n+' символов. Пароль создан на этом компьютере и никуда не отправлялся; сохраните его в менеджер паролей и очистите чат.)'};
+   // secret: пароль не уходит в модель — ей достаётся только modelText, а сам пароль добавляется к ответу локально.
+   return {ok:true,secret:true,text:'🔐 '+chars.join('')+'\n('+n+' символов. Пароль создан на этом компьютере и в языковую модель не отправлялся; сохраните его в менеджер паролей и очистите чат.)',modelText:'Пароль из '+n+' символов создан и будет показан пользователю отдельно. Не повторяй и не придумывай его.'};
   },
   async pick_random({options}){
    const list=(Array.isArray(options)?options:String(options||'').split(/\s*(?:,|;|\s+или\s+)\s*/)).map(x=>String(x).trim()).filter(Boolean).slice(0,30);
@@ -367,21 +368,21 @@ async function modelReply(name,message,history,facts,notes,enabled,impl,result){
  for(let round=0;round<MAX_TOOL_ROUNDS;round++){
   const msg=await llm.complete({messages,tools});
   const calls=Array.isArray(msg.tool_calls)?msg.tool_calls:[];
-  if(!calls.length){if(typeof msg.content!=='string'||!msg.content.trim())throw Error('Empty chat reply');return msg.content.trim()}
+  if(!calls.length){if(typeof msg.content!=='string'||!msg.content.trim())throw Error('Empty chat reply');return msg.content.trim()+(result.secrets.length?'\n\n'+result.secrets.join('\n\n'):'')}
   messages.push({role:'assistant',content:msg.content||null,tool_calls:calls});
   for(const call of calls){
    const fn=call.function?.name;let out;
    if(!allowed.includes(fn))out={ok:false,text:'Инструмент недоступен'};
    else{let args={};try{args=JSON.parse(call.function.arguments||'{}')}catch{}try{out=await impl[fn](args)}catch(e){out={ok:false,text:e instanceof TypeError?e.message:'Ошибка инструмента'}}}
    track(result,fn,out);
-   messages.push({role:'tool',tool_call_id:call.id,content:out.text});
+   messages.push({role:'tool',tool_call_id:call.id,content:out.secret?out.modelText:out.text});
   }
  }
  // Модель исчерпала лимит раундов: честно показываем, что вышло у каждого инструмента.
  return result.outcomes.length?'Не успела закончить ответ. Результаты инструментов:\n'+result.outcomes.map(o=>(o.ok?'• ':'✗ ')+o.text).join('\n'):'Не удалось завершить ответ.';
 }
-const pub=({done,outcomes,...rest})=>rest;
-function track(result,fn,out){result.tools.push(fn);result.outcomes.push({ok:out.ok!==false,text:out.text});if(out.ok!==false)result.done.push(out.text);if(out.changed)result.changed=true;if(out.action)result.actions.push(out.action)}
+const pub=({done,outcomes,secrets,...rest})=>secrets.length?{...rest,secret:true}:rest;
+function track(result,fn,out){result.tools.push(fn);result.outcomes.push({ok:out.ok!==false,text:out.text});if(out.ok!==false)result.done.push(out.text);if(out.secret)result.secrets.push(out.text);if(out.changed)result.changed=true;if(out.action)result.actions.push(out.action)}
 
 async function reply(input,ctx={}){
  if(!input||typeof input!=='object'||typeof input.message!=='string'||!input.message.trim())throw new TypeError('Invalid message');
@@ -390,7 +391,7 @@ async function reply(input,ctx={}){
  const name=typeof input.avatar==='string'&&input.avatar.trim()?input.avatar.trim().slice(0,40):'Юрика';
  // Без списка — все инструменты включены; с пустым списком — все выключены.
  const enabled=new Set(Array.isArray(input.tools)?input.tools.filter(id=>TOOL_IDS.includes(id)):TOOL_IDS);
- const impl=makeTools(ctx),result={tools:[],actions:[],changed:false,done:[],outcomes:[]};
+ const impl=makeTools(ctx),result={tools:[],actions:[],changed:false,done:[],outcomes:[],secrets:[]};
  const command=parseCommand(message);
  if(command){
   if(command.help)return {reply:helpText(enabled),source:'tool',...pub(result)};

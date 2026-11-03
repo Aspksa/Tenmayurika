@@ -200,7 +200,7 @@
  function bubble(role,text,tag){const el=h('div',{class:'msg '+role},tag?h('span',{class:'msg-tag',text:tag}):null,document.createTextNode(text));log.append(el);log.scrollTop=log.scrollHeight;return el}
  function renderHistory(){
   log.replaceChildren();
-  if(!history.length)bubble('assistant','Здравствуйте! Я '+cfg.name+'. Веду личные и рабочие дела с календарём, заметки, запоминаю факты, искать в памяти, делать резервную копию. Напишите «помощь» или нажмите кнопку ниже.\nПеретащите меня куда удобно; правый клик — мои настройки.');
+  if(!history.length)bubble('assistant','Здравствуйте! Я '+cfg.name+'. Веду личные и рабочие дела с календарём, заметки, запоминаю факты, ищу в памяти и делаю резервные копии. Напишите «помощь» или нажмите кнопку ниже.\nПеретащите меня куда удобно; правый клик — мои настройки.');
   for(const m of history)bubble(m.role,m.text,m.tag);
  }
  const TOOL_TAG={agenda:'повестка',move_task:'перенос',days_until:'дни',convert_units:'конвертер',generate_password:'пароль',pick_random:'выбор',list_notes:'заметки',day_summary:'итоги',fact_conflicts:'противоречия',fact_relations:'связи',set_reminder:'напоминание',calculate:'калькулятор',roll_dice:'кубик',flip_coin:'монетка',change_look:'облик',reindex_memory:'индекс',add_note:'заметка',add_task:'дело',complete_task:'дело',list_tasks:'дела',remember_fact:'факт',search_memory:'поиск',open_page:'переход',create_backup:'бэкап',system_status:'статус',current_time:'время'};
@@ -210,7 +210,7 @@
   busy=true;send.disabled=true;input.value='';autoGrow();
   // Контекст для модели ограничен по объёму, чтобы запрос не превысил лимит сервера (100 КБ).
   const prior=[];let budget=20000;
-  for(const m of history.slice(-12).reverse()){const t=m.text.slice(0,1500);if(t.length>budget)break;budget-=t.length;prior.unshift({role:m.role,text:t})}
+  for(const m of history.filter(m=>!m.private).slice(-12).reverse()){const t=m.text.slice(0,1500);if(t.length>budget)break;budget-=t.length;prior.unshift({role:m.role,text:t})}
   const gen=conversation;
   history.push({role:'user',text});bubble('user',text);
   const typing=h('div',{class:'msg assistant typing','aria-label':cfg.name+' думает'},h('span',{text:'•'}),h('span',{text:'•'}),h('span',{text:'•'}));
@@ -223,7 +223,7 @@
   }catch(err){answer='Не получилось ответить: '+err.message}
   typing.remove();busy=false;send.disabled=false;
   if(gen!==conversation)return; // чат очистили, пока шёл ответ
-  history.push({role:'assistant',text:answer,tag});history=history.slice(-100);store(CHAT_KEY,history);
+  history.push({role:'assistant',text:answer,tag,...(data&&data.secret?{private:true}:{})});history=history.slice(-100);store(CHAT_KEY,history);
   bubble('assistant',answer,tag);state('answer',2600);
   if(data.changed)window.TenmaApp?.refresh({keepDrafts:true});
   for(const a of data.actions||[])runAction(a);
