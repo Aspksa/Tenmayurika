@@ -9,7 +9,7 @@ function verify(file){
  if(!fs.statSync(target).isFile())throw Error('Резервная копия не является файлом');
  const checksumFile=target+'.sha256';
  const line=fs.readFileSync(checksumFile,'utf8').trim();
- const match=/^([a-f0-9]{64})  (tenmayurika-\d+-[a-f0-9]{8}\.sqlite)$/.exec(line);
+ const match=/^([a-f0-9]{64}) {2}(tenmayurika-\d+-[a-f0-9]{8}\.sqlite)$/.exec(line);
  if(!match||match[2]!==path.basename(target))throw Error('Некорректный файл SHA-256');
  const hash=crypto.createHash('sha256');
  const fd=fs.openSync(target,'r');
