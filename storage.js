@@ -60,6 +60,7 @@ function backup(){
  if(!backupInProgress)backupInProgress=createBackup().finally(()=>{backupInProgress=null});
  return backupInProgress;
 }
+function enqueueMissing(ids){ensure();const stmt=db.prepare('INSERT OR IGNORE INTO vector_queue(id) VALUES(?)');let added=0;db.exec('BEGIN IMMEDIATE');try{for(const id of ids){if(typeof id==='string'&&id&&stmt.run(id).changes)added++}db.exec('COMMIT')}catch(e){db.exec('ROLLBACK');throw e}return added}
 function reindexAll(){ensure();db.exec('INSERT OR IGNORE INTO vector_queue(id) SELECT id FROM knowledge_nodes');return db.prepare('SELECT COUNT(*) AS count FROM vector_queue').get().count}
 function close(){if(db){db.close();db=undefined}}
-module.exports={connect,load,save,mutate,syncNode,graph,pending,indexed,failed,backup,reindexAll,close};
+module.exports={connect,load,save,mutate,syncNode,graph,pending,indexed,failed,backup,reindexAll,enqueueMissing,close};
