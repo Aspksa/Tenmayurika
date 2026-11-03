@@ -10,6 +10,7 @@ const syncWorker=require('./sync-worker');
 const maintenance=require('./tools/maintenance');
 const memory=require('./memory-core');
 const chat=require('./chat');
+const learn=require('./learn');
 const llm=require('./llm');
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
@@ -34,7 +35,7 @@ async function handleFacts(req,res,p,url){
   if(req.method==='GET'&&p==='/api/facts'){
    const q=url.searchParams.get('q'),subject=url.searchParams.get('subject');
    if(q&&q.trim())return respond(res,200,memory.searchFacts(q,limitParam(url,30,100)));
-   return respond(res,200,memory.queryFacts({subject:subject&&subject.trim()?subject:undefined,limit:limitParam(url,50,500)}));
+   return respond(res,200,memory.queryFacts({subject:subject&&subject.trim()?subject:undefined,limit:limitParam(url,50,5000)}));
   }
   if(req.method==='POST'&&p==='/api/facts'){
    const input=await body(req);
@@ -43,6 +44,7 @@ async function handleFacts(req,res,p,url){
    return respond(res,result.duplicate?200:201,result);
   }
   if(req.method==='GET'&&p==='/api/facts/relations'){const subject=url.searchParams.get('subject')||'';return respond(res,200,memory.relations(subject,limitParam(url,100,500)))}
+  if(req.method==='POST'&&p==='/api/facts/conflicts/resolve'){const input=await body(req);if(!input||typeof input!=='object')return respond(res,400,{error:'Invalid input'});const r=memory.resolveConflict(input.id,input.keep);return r?respond(res,200,r):respond(res,404,{error:'Not found'})}
   if(req.method==='GET'&&p==='/api/facts/conflicts')return respond(res,200,memory.conflicts(limitParam(url,100,500)));
   if(req.method==='GET'&&p==='/api/facts/diagnostics')return respond(res,200,memory.diagnostics());
   return respond(res,404,{error:'Not found'});
@@ -130,6 +132,8 @@ if(req.method==='GET'&&p==='/api/search'){const query=url.searchParams.get('q')|
 if(p==='/api/facts'||p.startsWith('/api/facts/'))return await handleFacts(req,res,p,url);
 if(p==='/api/llm'||p.startsWith('/api/llm/'))return await handleLlm(req,res,p);
 if(req.method==='POST'&&p==='/api/chat'){try{return respond(res,200,await chat.reply(await body(req),chatContext))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
+// Самообучение: кандидаты в факты из текста заметки или чата (подтверждает пользователь в «Мозге»).
+if(req.method==='POST'&&p==='/api/learn'){try{return respond(res,200,await learn.extract(await body(req)))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
 // Быстрый ввод планера: «созвон завтра в 10 #работа !» → поля дела (тот же разбор, что у аватара).
 if(req.method==='POST'&&p==='/api/parse'){const input=await body(req);if(!input||typeof input.text!=='string'||!input.text.trim()||input.text.length>500)return respond(res,400,{error:'Invalid text'});return respond(res,200,chat.parseTask(input.text))}
 if(req.method==='GET'&&p==='/api/workspace')return respond(res,200,await storage.load());

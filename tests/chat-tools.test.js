@@ -34,7 +34,10 @@ test('avatar tools act through the chat API and respect disabled tools',async()=
   assert.match(done.reply,/выполненным/);
   const fact=await say('запомни Лиса | живёт в | Инари');
   assert.match(fact.reply,/Запомнила/);
-  assert.match((await say('найди Инари')).reply,/Лиса — живёт в → Инари/);
+  const found=await say('найди Инари');
+  assert.match(found.reply,/Лиса — живёт в → Инари/);
+  // Явный поиск тоже «вспоминание»: найденный факт уходит в recalled для «Мозга».
+  assert.equal(found.recalled.facts.length,1);
   const nav=await say('открой факты');
   assert.deepEqual(nav.actions,[{type:'navigate',page:'facts'}]);
   const blocked=await say('дело: нельзя',['clock']);
@@ -90,4 +93,27 @@ test('round limit reports real tool outcomes instead of claiming success',async(
   const r=await reply({message:'закрой все мои дела пожалуйста'},{addItem(){},setTaskDone(){}});
   assert.match(r.reply,/Не успела закончить/);assert.match(r.reply,/✗ Не нашла открытого дела/);assert.equal(r.changed,false);
  }finally{delete process.env.CHAT_URL;await new Promise(r=>fake.close(r))}
+});
+test('model failures are explained in the chat instead of a silent local answer',async()=>{
+ const http=require('node:http'),{reply,modelFailure}=require('../chat'),{messageText}=require('../llm');
+ assert.equal(messageText({content:'<think>долго думаю</think>Привет!'}),'Привет!');
+ assert.equal(messageText({content:[{type:'text',text:'При'},{type:'text',text:'вет'}]}),'Привет');
+ assert.match(modelFailure(Object.assign(Error('x'),{name:'TimeoutError'})),/60 секунд/);
+ let mode='401';
+ const fake=http.createServer((req,res)=>{req.resume();req.on('end',()=>{
+  if(mode==='401'){res.writeHead(401);return res.end('{}')}
+  res.writeHead(200,{'Content-Type':'application/json'});
+  if(mode==='think')return res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'<think>хм</think>Я тут!'}}]}));
+  res.end(JSON.stringify({choices:[{finish_reason:'length',message:{role:'assistant',content:'<think>очень долго'}}]}))})});
+ await new Promise(r=>fake.listen(0,'127.0.0.1',r));
+ process.env.CHAT_URL='http://127.0.0.1:'+fake.address().port+'/v1/chat/completions';
+ try{
+  let r=await reply({message:'как дела у тебя сегодня'});
+  assert.equal(r.fallback,true);assert.match(r.reply,/ключ API не подошёл/);
+  mode='think';r=await reply({message:'как дела у тебя сегодня'});
+  assert.equal(r.source,'model');assert.equal(r.reply,'Я тут!');
+  mode='length';r=await reply({message:'как дела у тебя сегодня'});
+  assert.match(r.reply,/лимит токенов/);
+ }finally{delete process.env.CHAT_URL;await new Promise(r=>fake.close(r))}
+ assert.match((await reply({message:'расскажи что-нибудь интересное'})).reply,/модель не подключена/i);
 });
