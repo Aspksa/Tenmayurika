@@ -10,6 +10,11 @@ const syncWorker=require('./sync-worker');
 const HOST='127.0.0.1',PORT=Number(process.env.PORT)||5173;
 if(!Number.isInteger(PORT)||PORT<1024||PORT>65535)throw Error('Invalid server port');
 const ROOT=__dirname;
+const BACKUP_INTERVAL_MS=5*60*60*1000;
+let backupTimer;
+async function scheduledBackup(){try{const result=await storage.backup();console.log('Резервная копия SQLite создана:',result.file);if(result.retentionWarnings?.length)console.warn('Не все старые копии удалось удалить')}catch(e){console.error('Автоматическое резервное копирование не выполнено:',e.code||e.name)}}
+function startBackupSchedule(){backupTimer=setInterval(()=>{void scheduledBackup()},BACKUP_INTERVAL_MS);backupTimer.unref()}
+
 const allowed=new Map([['/', 'index.html'],['/index.html','index.html'],['/styles.css','styles.css'],['/app.js','app.js']]);
 function respond(res,status,body,type='application/json; charset=utf-8'){res.writeHead(status,{'Content-Type':type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});res.end(typeof body==='string'?body:JSON.stringify(body))}
 async function body(req){let data='';for await(const part of req){data+=part;if(data.length>100000)throw Error('Request too large')}return JSON.parse(data||'{}')}
@@ -35,5 +40,5 @@ if(req.method==='GET'&&allowed.has(p)){const name=allowed.get(p),type=name.endsW
 return respond(res,404,{error:'Not found'})
 }catch(e){console.error('Request failed:',e.name,e.code||'',e instanceof SyntaxError?'invalid JSON':'request processing error');respond(res,e.message==='Request too large'?413:e instanceof SyntaxError?400:500,{error:e.message==='Request too large'?'Request too large':e instanceof SyntaxError?'Invalid JSON':'Internal server error'})}});
 server.on('error',e=>{console.error('Server error:',e.code||e.name);process.exitCode=1});
-if(require.main===module)Promise.resolve().then(()=>storage.connect()).then(()=>server.listen(PORT,HOST,()=>{console.log('Tenmayurika: http://'+HOST+':'+PORT);syncWorker.run().catch(console.error);const timer=setInterval(()=>syncWorker.run().catch(console.error),60000);timer.unref()})).catch(e=>{console.error('Database connection failed:',e.message);process.exitCode=1});
+if(require.main===module)Promise.resolve().then(()=>storage.connect()).then(()=>server.listen(PORT,HOST,()=>{console.log('Tenmayurika: http://'+HOST+':'+PORT);syncWorker.run().catch(console.error);const timer=setInterval(()=>syncWorker.run().catch(console.error),60000);timer.unref();startBackupSchedule()})).catch(e=>{console.error('Database connection failed:',e.message);process.exitCode=1});
 module.exports={server};
