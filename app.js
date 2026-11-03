@@ -508,7 +508,7 @@ function renderSettings(){
 }
 
 /* ---------- Факты ---------- */
-function factRow(fact){const row=element('div','','item'),detail=element('div');const subject=element('button',fact.subject,'link');subject.onclick=()=>loadFacts('/api/facts/relations?subject='+encodeURIComponent(fact.subject),'Связи: '+fact.subject);detail.append(subject,element('span',' — '+fact.predicate+' → '+fact.object),element('p','Источник: '+fact.source_id+' · уверенность '+fact.confidence+' · '+new Date(fact.observed_at).toLocaleString(),'muted'));row.append(detail);return row}
+function factRow(fact){const row=element('div','','item'),detail=element('div');const subject=element('button',fact.subject,'link');subject.onclick=()=>loadFacts('/api/facts/relations?subject='+encodeURIComponent(fact.subject),'Связи: '+fact.subject);detail.append(subject,element('span',' — '+fact.predicate+' → '+fact.object),element('p',(fact.valid_to?'В истории: отставлен '+new Date(fact.valid_to).toLocaleString()+' · ':'')+'Источник: '+fact.source_id+' · уверенность '+fact.confidence+' · '+new Date(fact.observed_at).toLocaleString(),'muted'));if(fact.valid_to)row.style.opacity='.55';row.append(detail);return row}
 let factList,factCaption;
 async function loadFacts(url,caption){factCaption.textContent=caption;factList.replaceChildren(element('p','Загрузка...','muted'));try{const facts=await request(url);factList.replaceChildren(...(facts.length?facts.map(factRow):[element('p','Фактов не найдено.','muted')]))}catch(e){factList.replaceChildren(element('p',e.message,'muted'))}}
 function renderFacts(){

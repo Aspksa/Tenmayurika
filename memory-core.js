@@ -46,7 +46,9 @@ function addFact(input){
   db.exec('BEGIN IMMEDIATE');
   try{
    const old=db.prepare('SELECT id,valid_to FROM memory_facts WHERE fingerprint=?').get(fingerprint);
-   if(old&&!old.valid_to){db.exec('COMMIT');return {id:old.id,duplicate:true,conflicts:0}}
+   // Отставленный факт возвращается только при явном добавлении (restore). Повторный разбор заметки
+   // (restore:false) не отменяет решение, принятое при разборе противоречия.
+   if(old&&(!old.valid_to||input.restore===false)){db.exec('COMMIT');return {id:old.id,duplicate:true,...(old.valid_to?{retired:true}:{}),conflicts:0}}
    // Факт был отставлен при разборе противоречия, а теперь добавлен снова — возвращаем его в память.
    const id=old?old.id:crypto.randomUUID();
    if(old)db.prepare('UPDATE memory_facts SET valid_to=NULL,observed_at=?,valid_from=?,confidence=? WHERE id=?').run(now,now,confidence,id);
@@ -71,7 +73,7 @@ function extractFacts(text,sourceId){
   if(parts.length!==3)continue;
   const [subject,predicate,object]=parts.map(x=>x.trim());
   if(!subject||!predicate||!object)continue;
-  results.push(addFact({subject,predicate,object,sourceId:source}));
+  results.push(addFact({subject,predicate,object,sourceId:source,restore:false}));
   if(results.length>=100)break;
  }
  return results;

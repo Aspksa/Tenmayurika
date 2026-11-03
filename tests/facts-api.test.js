@@ -41,6 +41,10 @@ test('facts API stores, searches, relates and reports conflicts',async()=>{
   assert.equal((await (await fetch(base+'/api/facts?q='+encodeURIComponent('пермь'))).json()).length,1);
   // Отставленный факт не попадает в «связи», а добавленный снова — возвращается в память.
   assert.equal((await (await fetch(base+'/api/facts/relations?subject='+encodeURIComponent('Анна'))).json()).some(f=>f.object==='Казань'),false);
+  // Повторный разбор заметки (FACT: …) не возвращает отставленный факт — только явное добавление.
+  const memory=require('../memory-core');
+  assert.equal(memory.extractFacts('FACT: Анна | живёт в | Казань','manual')[0].retired,true);
+  assert.equal((await (await fetch(base+'/api/facts?q='+encodeURIComponent('казань'))).json()).length,0);
   const back=await (await post({subject:'Анна',predicate:'живёт в',object:'Казань'})).json();
   assert.equal(back.duplicate,false);assert.equal(back.restored,true);assert.equal(back.conflicts,1);
   assert.equal((await (await fetch(base+'/api/facts?q='+encodeURIComponent('казань'))).json()).length,1);
