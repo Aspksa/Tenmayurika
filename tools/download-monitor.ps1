@@ -48,7 +48,7 @@ try {
     if(-not $append){$offset=0L}
     $expected=$response.Content.Headers.ContentLength
     if($null -ne $expected){$expected=[long]$expected+$offset}
-    if($expected -lt 0){throw 'Invalid content length'}
+    if($null -ne $expected -and $expected -lt 0){throw 'Invalid content length'}
     $drive=[IO.DriveInfo]::new([IO.Path]::GetPathRoot([IO.Path]::GetFullPath($Destination)))
     if($null -ne $expected -and $drive.AvailableFreeSpace -lt ($expected-$offset+64MB)){throw 'Insufficient disk space'}
     if($null -eq $expected -and $drive.AvailableFreeSpace -lt 128MB){throw 'Insufficient disk space'}
@@ -74,8 +74,7 @@ try {
      $actual=(Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash
      if($actual -ne $ExpectedSha256.ToUpperInvariant()){Remove-Item -LiteralPath $partial -Force;throw 'SHA256 mismatch'}
     }
-    if(Test-Path -LiteralPath $Destination){Remove-Item -LiteralPath $Destination -Force}
-    Move-Item -LiteralPath $partial -Destination $Destination
+    Move-Item -LiteralPath $partial -Destination $Destination -Force
     $success=$true
     Record-Event 'complete' $(if($ExpectedSha256){'SHA256 verified'}else{'No expected SHA256 supplied'}) (Get-Item -LiteralPath $Destination).Length $timer.Elapsed.TotalSeconds
     Write-Host ("  ✓ {0}: {1:N1} MB in {2:N1}s" -f $name,((Get-Item -LiteralPath $Destination).Length/1MB),$timer.Elapsed.TotalSeconds)
