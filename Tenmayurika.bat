@@ -44,9 +44,11 @@ if not exist "package.json" (
  pause
  exit /b 2
 )
-echo [INFO] Installing or updating Node.js dependencies...
-call "%NPM%" install --no-audit --no-fund
-if errorlevel 1 goto :failed
+if not exist "node_modules\@lancedb\lancedb" (
+ echo [INFO] Installing dependencies on SSD...
+ call "%NPM%" install --no-audit --no-fund
+ if errorlevel 1 goto :failed
+)
 "%NODE%" -e "const s=require('./package.json').scripts||{};process.exit(s.start?0:s.dev?1:2)"
 if errorlevel 1 goto :check_dev
 echo [INFO] Open http://127.0.0.1:5173 in your browser.
