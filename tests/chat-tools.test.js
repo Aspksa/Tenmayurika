@@ -65,3 +65,17 @@ test('completed tool work is reported when a later model round fails',async()=>{
   assert.equal('done' in r,false);
  }finally{delete process.env.CHAT_URL;await new Promise(r=>fake.close(r))}
 });
+test('extra tools: calculator, reminders, avatar look, fun',async()=>{
+ const {reply,parseCommand}=require('../chat');
+ assert.match((await reply({message:'посчитай (2+3)*4^2'})).reply,/= 80$/);
+ assert.match((await reply({message:'посчитай 1/0'})).reply,/ноль/);
+ const r=await reply({message:'напомни через 10 минут выпить чай'});
+ assert.equal(r.actions[0].type,'reminder');assert.equal(r.actions[0].text,'выпить чай');assert.ok(Math.abs(r.actions[0].at-Date.now()-600000)<5000);
+ assert.equal(parseCommand('помодоро').args.minutes,25);
+ assert.deepEqual((await reply({message:'эффект сакура'})).actions,[{type:'avatar',look:{particleType:'petals'}}]);
+ assert.deepEqual((await reply({message:'цвет синий'})).actions[0].look,{glowColor:'#6fd6ff'});
+ assert.deepEqual((await reply({message:'поза поклон'})).actions[0].look,{pose:'bow'});
+ assert.match((await reply({message:'брось кубик'})).reply,/Выпало [1-6]/);
+ assert.match((await reply({message:'монетка'})).reply,/Орёл|Решка/);
+ assert.match((await reply({message:'эффект сакура',tools:['notes']})).reply,/выключен/);
+});

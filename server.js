@@ -10,6 +10,7 @@ const syncWorker=require('./sync-worker');
 const maintenance=require('./tools/maintenance');
 const memory=require('./memory-core');
 const chat=require('./chat');
+const llm=require('./llm');
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
 const HOST='127.0.0.1',PORT=Number(process.env.PORT)||5173;
@@ -58,6 +59,23 @@ function addItem(collection,title,content){
  return item;
 }
 function updateItem(collection,id,done){return storage.mutate(data=>{const found=(data[collection]||[]).find(x=>x.id===id);if(!found)return null;if(typeof done==='boolean'&&collection==='tasks')found.done=done;return {...found}})}
+// Настройки языковой модели аватара. Ключ API сохраняется только на диске и в ответах не возвращается.
+async function handleLlm(req,res,p){
+ try{
+  if(req.method==='GET'&&p==='/api/llm')return respond(res,200,llm.view());
+  if(req.method==='POST'&&p==='/api/llm')return respond(res,200,llm.save(await body(req)));
+  if(req.method==='POST'&&p==='/api/llm/models')return respond(res,200,{models:await llm.listModels()});
+  if(req.method==='POST'&&p==='/api/llm/test')return respond(res,200,await llm.test());
+  return respond(res,404,{error:'Not found'});
+ }catch(e){
+  if(e instanceof SyntaxError)throw e;
+  if(e.name==='TimeoutError'||e.name==='AbortError')return respond(res,504,{error:'Сервис модели не ответил вовремя'});
+  if(e instanceof TypeError&&e.message!=='fetch failed')return respond(res,400,{error:e.message});
+  if(e instanceof TypeError)return respond(res,502,{error:'Не удалось подключиться к сервису модели'});
+  if(/^Chat API HTTP (\d+)/.test(e.message))return respond(res,502,{error:'Сервис модели ответил ошибкой: '+e.message.replace('Chat API ','')});
+  throw e;
+ }
+}
 const chatContext={addItem,setTaskDone:(id,done)=>updateItem('tasks',id,done)};
 const server=http.createServer(async(req,res)=>{try{
 const host=req.headers.host||'';if(host!=='127.0.0.1:'+String(server.address()?.port||PORT)&&host!=='localhost:'+String(server.address()?.port||PORT))return respond(res,403,{error:'Forbidden host'});
@@ -72,6 +90,7 @@ if(req.method==='POST'&&p==='/api/sync')return respond(res,200,await syncWorker.
 if(req.method==='GET'&&p==='/api/graph')return respond(res,200,storage.graph());
 if(req.method==='GET'&&p==='/api/search'){const query=url.searchParams.get('q')||'';if(!query.trim())return respond(res,400,{error:'Missing query'});return respond(res,200,await vectorStore.search(query));}
 if(p==='/api/facts'||p.startsWith('/api/facts/'))return handleFacts(req,res,p,url);
+if(p==='/api/llm'||p.startsWith('/api/llm/'))return handleLlm(req,res,p);
 if(req.method==='POST'&&p==='/api/chat'){try{return respond(res,200,await chat.reply(await body(req),chatContext))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
 if(req.method==='GET'&&p==='/api/workspace')return respond(res,200,await storage.load());
 if(req.method==='POST'&&p==='/api/items'){
