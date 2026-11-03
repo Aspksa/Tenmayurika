@@ -38,6 +38,13 @@ test('avatar remembers how she understood questions and learns from corrections'
   // На следующий похожий вопрос поправка звучит в ответе, а поправленный эпизод не подтягивает старые записи.
   const later=await say({message:'что любит кошка?'});
   assert.match(later.reply,/поправили: «нет, я про кошку соседки Люси»/);
+  // Отвергнутую запись не возвращает ни поиск, ни более ранний похожий эпизод.
+  assert.doesNotMatch(later.reply,/сметану/);
+  assert.deepEqual(later.recalled.facts,[]);
+  // Неудачное действие инструмента — неудачный опыт.
+  const miss=await say({message:'готово: несуществующее дело '+Date.now()});
+  const missEp=(await (await fetch(base+'/api/experience?limit=5')).json()).items.find(e=>e.id===miss.experience.id);
+  assert.equal(missEp.ok,false);
   // Явная оценка кнопкой и поправка следующим сообщением.
   const ok=await fetch(base+'/api/experience/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:first.experience.id,kind:'ok'})});
   assert.equal(ok.status,200);

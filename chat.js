@@ -398,7 +398,7 @@ async function modelReply(name,message,history,facts,notes,enabled,impl,result,p
  return result.outcomes.length?'Не успела закончить ответ. Результаты инструментов:\n'+result.outcomes.map(o=>(o.ok?'• ':'✗ ')+o.text).join('\n'):'Не удалось завершить ответ.';
 }
 const pub=({done,outcomes,secrets,...rest})=>secrets.length?{...rest,secret:true}:rest;
-function track(result,fn,out){result.tools.push(fn);result.outcomes.push({ok:out.ok!==false,text:out.text});if(out.ok!==false)result.done.push(out.text);if(out.secret)result.secrets.push(out.text);if(out.changed)result.changed=true;if(out.action)result.actions.push(out.action);
+function track(result,fn,out){result.tools.push(fn);if(out.ok===false)result.failed=true;result.outcomes.push({ok:out.ok!==false,text:out.text});if(out.ok!==false)result.done.push(out.text);if(out.secret)result.secrets.push(out.text);if(out.changed)result.changed=true;if(out.action)result.actions.push(out.action);
  // Явный поиск по памяти тоже «вспоминание»: «Мозг» подсвечивает найденное и считает его силу.
  if(out.recalled){const r=result.recalled||(result.recalled={facts:[],notes:[]});for(const k of ['facts','notes'])for(const id of out.recalled[k])if(!r[k].includes(id))r[k].push(id)}}
 
@@ -430,10 +430,10 @@ async function reply(input,ctx={}){
  // Каждый ответ — эпизод опыта: как поняла, что нашла, что сделала. Справка и ошибки ввода не в счёт.
  // «Спасибо», «верно» — это отклик на прошлый ответ, а не новый вопрос.
  if(out.understood&&experience.detect(message)!=='ok'){
-  let id=null;try{id=experience.record({question:message,understood:out.understood,recalled:out.recalled,tools:out.tools,answer:out.secret?'':out.reply,source:out.source,ok:!out.fallback})}catch(e){console.error('Experience record failed:',e.name)}
+  let id=null;try{id=experience.record({question:message,understood:out.understood,recalled:out.recalled,tools:out.tools,answer:out.secret?'':out.reply,source:out.source,ok:!out.fallback&&!out.failed})}catch(e){console.error('Experience record failed:',e.name)}
   if(id)out.experience={id,used:out.used||[]};
  }
- delete out.understood;delete out.used;
+ delete out.understood;delete out.used;delete out.failed;
  return out;
 }
 // Поправка или подтверждение прошлого ответа: явно (кнопка 👎 и следующее сообщение) или словами («нет, я имела в виду …», «верно»).
@@ -462,11 +462,14 @@ async function answer(input,message,ctx){
  // Опыт: на похожий вопрос раньше нашлись другие записи — вспоминаем их снова (кроме ответов, которые пользователь поправил).
  let past=[];try{past=experience.similar(message,3)}catch(e){console.error('Experience lookup failed:',e.name)}
  const useful=past.filter(e=>e.feedback!=='fix');
+ // Записи из поправленных ответов на похожий вопрос пользователь отверг: не вспоминаем их ни поиском, ни через другие эпизоды.
+ const rejected=new Set(past.filter(e=>e.feedback==='fix').flatMap(e=>[...e.recalled.facts,...e.recalled.notes]));
+ if(rejected.size){facts=facts.filter(f=>!rejected.has(f.id));notes=notes.filter(n=>!rejected.has(n.id))}
  if(useful.length){
   const have=new Set(facts.map(f=>f.id));
-  for(const f of memory.factsById(useful.flatMap(e=>e.recalled.facts)))if(facts.length<8&&!have.has(f.id)){facts.push(f);have.add(f.id)}
+  for(const f of memory.factsById(useful.flatMap(e=>e.recalled.facts)))if(facts.length<8&&!have.has(f.id)&&!rejected.has(f.id)){facts.push(f);have.add(f.id)}
   const ids=new Set(useful.flatMap(e=>e.recalled.notes)),haveN=new Set(notes.map(n=>n.id));
-  if(ids.size)for(const n of (await storage.load()).notes||[])if(ids.has(n.id)&&!haveN.has(n.id)&&notes.length<5){notes.push(n);haveN.add(n.id)}
+  if(ids.size)for(const n of (await storage.load()).notes||[])if(ids.has(n.id)&&!haveN.has(n.id)&&!rejected.has(n.id)&&notes.length<5){notes.push(n);haveN.add(n.id)}
  }
  // Сказанное раньше в чате — тоже память.
  let earlier=[];try{earlier=chatlog.search(message,3,ctx.said||0)}catch(e){console.error('Chat log search failed:',e.name)}
