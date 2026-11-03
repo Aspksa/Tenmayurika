@@ -95,8 +95,10 @@ void main(){float r=length(gl_PointCoord-.5)*2.;float k=1.-smoothstep(vS,1.,r);i
 void main(){vec3 c=(texture2D(t,v+px*vec2(-1.,-1.)).rgb+texture2D(t,v+px*vec2(1.,-1.)).rgb+texture2D(t,v+px*vec2(-1.,1.)).rgb+texture2D(t,v+px).rgb)*.25;gl_FragColor=vec4(max(c-th,0.)*k,1.);}`,['aq']);
   B=prog(VQ,`precision mediump float;uniform sampler2D t;uniform vec2 dir;varying vec2 v;
 void main(){vec3 c=texture2D(t,v).rgb*.2270;c+=(texture2D(t,v+dir*1.3846).rgb+texture2D(t,v-dir*1.3846).rgb)*.3162;c+=(texture2D(t,v+dir*3.2308).rgb+texture2D(t,v-dir*3.2308).rgb)*.0703;gl_FragColor=vec4(c,1.);}`,['aq']);
-  C=prog(VQ,`precision mediump float;uniform sampler2D s,b1,b2;uniform float k1,k2;varying vec2 v;
-void main(){vec3 c=texture2D(s,v).rgb+texture2D(b1,v).rgb*k1+texture2D(b2,v).rgb*k2;gl_FragColor=vec4(min(c,1.),1.);}`,['aq']);
+  // Сведение: сцена + два уровня свечения; к краям каналы R и B расходятся (хроматическая аберрация).
+  C=prog(VQ,`precision mediump float;uniform sampler2D s,b1,b2;uniform float k1,k2,ab;varying vec2 v;
+vec3 at(vec2 p){return texture2D(s,p).rgb+texture2D(b1,p).rgb*k1+texture2D(b2,p).rgb*k2;}
+void main(){vec2 d=v-.5;vec2 o=d*dot(d,d)*ab;vec3 c=vec3(at(v+o).r,at(v).g,at(v-o).b);gl_FragColor=vec4(min(c,1.),1.);}`,['aq']);
  }catch(e){console.warn('Мозг: WebGL недоступен, рисую в 2D:',e.message);return null}
  const tri=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,tri);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
  const targets={};let w=1,h=1;
@@ -146,7 +148,7 @@ void main(){vec3 c=texture2D(s,v).rgb+texture2D(b1,v).rgb*k1+texture2D(b2,v).rgb
     bindT(a2);gl.useProgram(Q.p);gl.uniform2f(Q.u.px,.5/h1w,.5/h1h);gl.uniform1f(Q.u.th,0);gl.uniform1f(Q.u.k,1);quad(Q,[a1]);
     gl.useProgram(B.p);for(let i=0;i<2;i++){bindT(b2);gl.uniform2f(B.u.dir,1/h2w,0);quad(B,[a2]);bindT(a2);gl.uniform2f(B.u.dir,0,1/h2h);quad(B,[b2])}
    }
-   bindT(null);gl.useProgram(C.p);gl.uniform1i(C.u.s,0);gl.uniform1i(C.u.b1,1);gl.uniform1i(C.u.b2,2);gl.uniform1f(C.u.k1,.9*bloom);gl.uniform1f(C.u.k2,1.1*bloom);quad(C,[s,a1,a2]);
+   bindT(null);gl.useProgram(C.p);gl.uniform1i(C.u.s,0);gl.uniform1i(C.u.b1,1);gl.uniform1i(C.u.b2,2);gl.uniform1f(C.u.k1,.9*bloom);gl.uniform1f(C.u.k2,1.1*bloom);gl.uniform1f(C.u.ab,.028);quad(C,[s,a1,a2]);
   },
   destroy(){for(const b of bufs)gl.deleteBuffer(b);bufs.clear();for(const k in targets){gl.deleteTexture(targets[k].tex);gl.deleteFramebuffer(targets[k].fb);delete targets[k]}}
  };
@@ -308,7 +310,7 @@ function mount(host){
  let simT=0,last=performance.now(),raf=0,dirty=true,pinned=null,hover=null,stars=[],spikes=[],linkCount=new Map();
  // Камера: поворот (yaw/pitch), приближение и сдвиг. В плоском режиме всё стремится к нулю.
  const cam={yaw:0,pitch:0,zoom:1,px:0,py:0,depth:0},camT={yaw:0,pitch:0,zoom:1,px:0,py:0};
- let view0={cx:0,cy:0},focusZ=0,idleT=0,focusQ='',focusLobes=new Set(),focusItems=new Set(),thinking=false,thinkT=0,seeds=[];
+ let view0={cx:0,cy:0},focusZ=0,focusN=null,idleT=0,focusQ='',focusLobes=new Set(),focusItems=new Set(),thinking=false,thinkT=0,seeds=[];
  // Сила памяти: сколько раз и когда запись вспоминали (хранится в этом браузере).
  let recall=readRecall();
  const still=()=>cfg.paused||reduceQuery.matches;
@@ -342,7 +344,7 @@ function mount(host){
  };
  const onFsChange=()=>setFs();document.addEventListener('fullscreenchange',onFsChange);
  btn3d.onclick=()=>{cfg.mode3d=!cfg.mode3d;write(CFG_KEY,cfg);if(cfg.mode3d){camT.pitch=-.35;camT.yaw=.5}set3d()};
- viewBtn.onclick=()=>{find.value='';setFocus('');Object.assign(camT,{yaw:cfg.mode3d?.5:0,pitch:cfg.mode3d?-.35:0,zoom:1,px:0,py:0});dirty=true};
+ viewBtn.onclick=()=>{focusN=null;find.value='';setFocus('');Object.assign(camT,{yaw:cfg.mode3d?.5:0,pitch:cfg.mode3d?-.35:0,zoom:1,px:0,py:0});dirty=true};
  find.addEventListener('input',()=>setFocus(find.value));
  find.addEventListener('keydown',e=>{if(e.key==='Escape'){find.value='';setFocus('');e.stopPropagation()}if(e.key==='Enter'&&focusItems.size===1){const n=neurons.get([...focusItems][0]);if(n){pinned={type:'neuron',n};showTip(pinned,n.sx,n.sy,true)}}});
  function setFocus(q){
@@ -355,6 +357,12 @@ function mount(host){
   }
   if(!focusLobes.size){camT.zoom=1;camT.px=0;camT.py=0}
   find.classList.toggle('miss',!!focusQ&&!focusLobes.size);dirty=true;
+ }
+ // Рост: каждое вспоминание добавляет нейрону ветку (до +10). animate — новая ветка прорастает на глазах.
+ const GROUP_AT=40;
+ function grow(n,animate){
+  const r=recall[n.item.id],want=n.base+Math.min(10,r?r.n:0);
+  while(n.den.length<want){const q=rng(hash(n.item.id)+n.den.length*7919);n.den.push({a:TAU*q(),l:.5+.9*q(),c:(q()-.5)*.9,kids:q()<.5?[{at:.5+.3*q(),a:(q()-.5)*1.4,l:.3+.4*q()}]:[],born:animate?performance.now():0})}
  }
  function strength(it){
   const r=recall[it.id],t=Math.max(it.ts||0,r?r.t:0),age=t?(Date.now()-t)/DAY:30;
@@ -399,15 +407,22 @@ function mount(host){
     let nn=neurons.get(it.id);
     if(!nn){const q=rng(hash(it.id)),d=unit(q),k=.15+.6*Math.cbrt(q());nn={ox:d[0]*k,oy:d[1]*k,oz:d[2]*k,flash:0,sx:0,sy:0,vis:0,ph:TAU*q(),
       // Отростки: 3–6 ветвей-дендритов, у части — по 1–2 веточки, на концах синапсы.
-      den:Array.from({length:3+Math.floor(q()*4)},()=>({a:TAU*q(),l:.7+.9*q(),c:(q()-.5)*.9,kids:Array.from({length:Math.floor(q()*3)},()=>({at:.45+.35*q(),a:(q()-.5)*1.6,l:.3+.4*q()}))}))};neurons.set(it.id,nn)}
-    nn.item=it;nn.lobe=l;alive.add(it.id);it.str=strength(it);
-    if(!seen.has(it.id)){seen.add(it.id);if(!firstVisit){impulses.push({lobe:l,item:it,u:0,f:Math.floor(Math.random()*l.state.fil.length),big:true});coreText=it.title;coreKind=l.label;coreTextT=4.5}}
+      den:Array.from({length:3+Math.floor(q()*4)},()=>({a:TAU*q(),l:.7+.9*q(),c:(q()-.5)*.9,kids:Array.from({length:Math.floor(q()*3)},()=>({at:.45+.35*q(),a:(q()-.5)*1.6,l:.3+.4*q()}))}))};nn.base=nn.den.length;neurons.set(it.id,nn)}
+    nn.item=it;nn.lobe=l;alive.add(it.id);it.str=strength(it);grow(nn,false);
+    if(!seen.has(it.id)){seen.add(it.id);if(!firstVisit&&impulses.length<24){impulses.push({lobe:l,item:it,u:0,f:Math.floor(Math.random()*l.state.fil.length),big:true});coreText=it.title;coreKind=l.label;coreTextT=4.5}}
    }
   }
   for(const k of [...lobeState.keys()])if(!alive.has(k)){glr?.free(lobeState.get(k).parts);lobeState.delete(k)}
   for(const k of [...neurons.keys()])if(!alive.has(k))neurons.delete(k);
-  // Соседи внутри зоны — для связей «вблизи» (детализация при приближении).
-  for(const l of model.lobes){const ns=l.items.map(it=>neurons.get(it.id)).filter(Boolean);for(const n of ns){n.near=ns.filter(o=>o!==n).map(o=>[o,(o.ox-n.ox)**2+(o.oy-n.oy)**2+(o.oz-n.oz)**2]).sort((a,b)=>a[1]-b[1]).slice(0,2).map(x=>x[0])}}
+  // Большие зоны (больше 40 записей) делятся на группы по направлению от центра зоны.
+  for(const l of model.lobes){const s=l.state,ns=l.items.map(it=>neurons.get(it.id)).filter(Boolean);
+   if(ns.length>GROUP_AT){const K=clamp(Math.round(Math.sqrt(ns.length)),8,24),dirs=Array.from({length:K},(_,i)=>{const y=1-2*(i+.5)/K,r=Math.sqrt(1-y*y),a=i*2.39996;return [Math.cos(a)*r,y,Math.sin(a)*r]});
+    const gs=dirs.map(()=>({ids:[],ox:0,oy:0,oz:0,kinds:{}}));
+    for(const n of ns){let bi=0,bd=-9;dirs.forEach((d,i)=>{const v=d[0]*n.ox+d[1]*n.oy+d[2]*n.oz;if(v>bd){bd=v;bi=i}});const g=gs[bi];g.ids.push(n.item.id);g.ox+=n.ox;g.oy+=n.oy;g.oz+=n.oz;const k=kindOf(n.item.id);g.kinds[k]=(g.kinds[k]||0)+1;n.group=g}
+    s.groups=gs.filter(g=>g.ids.length).map(g=>Object.assign(g,{ox:g.ox/g.ids.length,oy:g.oy/g.ids.length,oz:g.oz/g.ids.length,kind:Object.entries(g.kinds).sort((a,b)=>b[1]-a[1])[0][0]}));
+   }else{s.groups=null;for(const n of ns)n.group=null}
+   // Соседи внутри зоны (или группы — чтобы тысячи записей не считались вечность) — для связей «вблизи».
+   for(const n of ns){const pool=n.group?n.group.ids.map(id=>neurons.get(id)):ns;n.near=pool.filter(o=>o&&o!==n).map(o=>[o,(o.ox-n.ox)**2+(o.oy-n.oy)**2+(o.oz-n.oz)**2]).sort((a,b)=>a[1]-b[1]).slice(0,2).map(x=>x[0])}}
   linkCount=new Map();for(const [a,b] of model.links){linkCount.set(a,(linkCount.get(a)||0)+1);linkCount.set(b,(linkCount.get(b)||0)+1)}
   if(seen.size>4000)seen=new Set([...neurons.keys()]);
   write(SEEN_KEY,[...seen]);
@@ -494,7 +509,20 @@ function mount(host){
  }
 
  /* ---------- Отрисовка ---------- */
- let sprite=null,spriteBad=null,spriteCold=null,spriteSeed=null;
+ let sprite=null,spriteBad=null,spriteSeed=null,shapes=null;
+ // Формы нейронов: дело — звезда, заметка — капля, факт — кристалл. Свечение вокруг + сама форма.
+ function shapeSprite(kind,glow,core,edge){
+  const c=document.createElement('canvas');c.width=c.height=64;const g=c.getContext('2d');
+  const gr=g.createRadialGradient(32,32,0,32,32,32);gr.addColorStop(0,glow[1]);gr.addColorStop(.45,glow[2]);gr.addColorStop(1,'rgba(0,0,0,0)');g.fillStyle=gr;g.fillRect(0,0,64,64);
+  g.beginPath();
+  if(kind==='star'){for(let i=0;i<8;i++){const a=-Math.PI/2+i*Math.PI/4,r=i%2?5:15;g.lineTo(32+Math.cos(a)*r,32+Math.sin(a)*r)}}
+  else if(kind==='drop'){g.moveTo(32,16);g.bezierCurveTo(38,25,43,31,43,37);g.arc(32,37,11,0,Math.PI);g.bezierCurveTo(21,31,26,25,32,16)}
+  else{for(let i=0;i<6;i++){const a=-Math.PI/2+i*TAU/6,r=i%3?11:15;g.lineTo(32+Math.cos(a)*r,32+Math.sin(a)*r)}}
+  g.closePath();const fg=g.createRadialGradient(32,30,0,32,32,16);fg.addColorStop(0,glow[0]);fg.addColorStop(1,core);g.fillStyle=fg;g.fill();g.lineWidth=1.4;g.strokeStyle=edge;g.stroke();
+  if(kind==='crystal'){g.beginPath();g.moveTo(32,17);g.lineTo(32,47);g.moveTo(22,26);g.lineTo(42,38);g.moveTo(42,26);g.lineTo(22,38);g.strokeStyle='rgba(255,255,255,.35)';g.lineWidth=.8;g.stroke()}
+  return c;
+ }
+ const kindOf=id=>id.startsWith('t:')?'star':id.startsWith('n:')?'drop':'crystal';
  function glowSprite(c1,c2,c3){const c=document.createElement('canvas');c.width=c.height=64;const g=c.getContext('2d'),gr=g.createRadialGradient(32,32,0,32,32,32);gr.addColorStop(0,c1);gr.addColorStop(.2,c2);gr.addColorStop(.55,c3);gr.addColorStop(1,'rgba(0,0,0,0)');g.fillStyle=gr;g.fillRect(0,0,64,64);return c}
  function cloud(parts,x,y,r,rot,pal,inten,hazeA,count,blur=0){
   rot+=cam.yaw;const tilt=.38+cam.pitch*cam.depth;
@@ -516,8 +544,11 @@ function mount(host){
   }
   ctx.globalAlpha=1;
  }
+ let now=0;
  function draw(dt){
-  if(!sprite){sprite=glowSprite(...PAL.glow);spriteBad=glowSprite('rgba(255,255,255,1)','rgba(230,230,240,.7)','rgba(180,180,190,.15)');spriteCold=glowSprite(...PAL.cold);spriteSeed=glowSprite('rgba(255,255,255,1)','rgba(255,230,190,.6)','rgba(255,200,140,.12)')}
+  if(!sprite){sprite=glowSprite(...PAL.glow);spriteBad=glowSprite('rgba(255,255,255,1)','rgba(230,230,240,.7)','rgba(180,180,190,.15)');spriteSeed=glowSprite('rgba(255,255,255,1)','rgba(255,230,190,.6)','rgba(255,200,140,.12)');
+   shapes={};for(const k of ['star','drop','crystal'])shapes[k]={warm:shapeSprite(k,PAL.glow,PAL.accent,PAL.hot),cold:shapeSprite(k,PAL.cold,PAL.cold[1],PAL.cold[0])}}
+  now=performance.now();
   const G=layout(simT,dt),pal=l=>l.bad?PALE:EMBER,focusing=focusLobes.size>0,dimOf=l=>focusing&&!focusLobes.has(l.id)?.16:1;
   ctx.setTransform(1,0,0,1,0,0);ctx.globalCompositeOperation='source-over';
   if(glr){ctx.clearRect(0,0,canvas.width,canvas.height);glr.begin()}else{ctx.fillStyle='#000';ctx.fillRect(0,0,canvas.width,canvas.height)}
@@ -547,6 +578,8 @@ function mount(host){
   for(const l of order)if(l.state.depth<0)drawLobe(l,G,pal(l),dimOf(l),dt);
   drawCore(G,dt,focusing);
   for(const l of order)if(l.state.depth>=0)drawLobe(l,G,pal(l),dimOf(l),dt);
+  // Уровень 3: камера держит выбранный нейрон в центре, хотя зона вращается.
+  if(focusN){if(!neurons.has(focusN.item.id)||!focusN.lobe.state)focusN=null;else{camT.px=-((focusN.sx-view0.cx)/cam.zoom-cam.px);camT.py=-((focusN.sy-view0.cy)/cam.zoom-cam.py)}}
   ctx.globalAlpha=1;
   // Связи факт→факт.
   // Связи между фактами через зоны: «объект → субъект» сплошной нитью, общий объект — пунктиром.
@@ -576,6 +609,7 @@ function mount(host){
   if(glr)glr.end(1);
   details(G,dimOf);
   labels(G,dimOf);
+  levelUi();
   // Подпись внутри ядра — как «тикет → решён» в ролике.
   const txt=coreTextT>0?trim(coreKind,16)+' → '+trim(coreText,W<520?18:30):thinking?'думаю…':'';
   if(coreTextT>0)coreTextT-=dt;
@@ -592,37 +626,85 @@ function mount(host){
  const blurOf=(depth,G)=>cam.depth*clamp(Math.abs(depth-focusZ)/G.m*9-.35,0,7);
  function drawLobe(l,G,P,dim,dt){
   const s=l.state;s.pulse=Math.max(0,s.pulse-dt*1.4);
-  const rot=simT*(.18+(s.seed%5)*.02)+s.seed,wob=still()?0:simT,warm=.55+.45*Math.min(1,l.str??1),blur=blurOf(s.depth,G),bz=1+blur*.12,ba=1/(1+blur*.35);
+  // Вращение зоны замедляется при приближении, чтобы запись можно было поймать курсором.
+  if(s.ang==null)s.ang=s.seed%1000;if(!still())s.ang+=dt*(.18+(s.seed%5)*.02)/(1+(s.det||0)*6+(focusN&&focusN.lobe===l?20:0));
+  const rot=s.ang,wob=still()?0:simT,warm=.55+.45*Math.min(1,l.str??1),blur=blurOf(s.depth,G),bz=1+blur*.12,ba=1/(1+blur*.35);
   for(const sat of s.sats){const a=sat.a+wob*sat.sp,sx=s.x+Math.cos(a)*s.r*sat.d,sy=s.y+Math.sin(a)*s.r*sat.d;
    ctx.strokeStyle=rgba(l.bad?[200,200,210]:l.color,.18*G.b*dim*ba);ctx.lineWidth=dpr*.7;ctx.beginPath();ctx.moveTo(s.x*dpr,s.y*dpr);ctx.lineTo(sx*dpr,sy*dpr);ctx.stroke();
    cloud(satParts,sx,sy,s.r*sat.k,rot*1.3+sat.a,P,.95*G.b*dim*warm,.9*G.b*dim*warm,Math.round(satParts.length*quality),blur)}
   cloud(s.parts,s.x,s.y,s.r*(1+s.pulse*.15),rot,P,((l.bad?1.05:1)*warm+s.pulse)*dim,(1+s.pulse*1.5)*dim*warm,Math.round(s.parts.length*quality),blur);
   // Детализация: чем крупнее зона на экране, тем больше видно (связи соседей, названия записей).
   s.det=dim<.5?0:clamp((s.r/G.m-.11)/.09,0,1);
-  const ca=Math.cos(rot+cam.yaw),sa=Math.sin(rot+cam.yaw),list=[];
+  const ca=Math.cos(rot+cam.yaw),sa=Math.sin(rot+cam.yaw),list=[],zf=Math.min(1.6,Math.sqrt(s.k||1)*Math.sqrt(G.Z));
+  const place=o=>{const x1=o.ox*ca+o.oz*sa,z1=-o.ox*sa+o.oz*ca;return [s.x+x1*s.r,s.y+o.oy*s.r,(z1+1.2)/2.4]};
+  const margin=60,onScreen=(x,y)=>x>-margin&&x<W+margin&&y>-margin&&y<H+margin;
+  // Тысячи записей: пока зона далеко, записи собраны в группы; при приближении группы раскрываются.
+  const grouped=s.groups&&s.det<.55;s.groupHits=[];
+  if(grouped){
+   for(const g of s.groups){const [gx,gy,d]=place(g);g.sx=gx;g.sy=gy;
+    for(const id of g.ids){const n=neurons.get(id);if(n){n.sx=gx;n.sy=gy;n.vis=0;n.flash=Math.max(0,n.flash-dt*.45)}}
+    const size=ui*dpr*(7+2.2*Math.sqrt(g.ids.length))*(.7+.5*d)*zf*bz,spr=shapes[g.kind].warm;
+    ctx.globalAlpha=clamp(.3*d*dim*warm+.12,0,1)*G.b*ba;ctx.drawImage(spr,gx*dpr-size/2,gy*dpr-size/2,size,size);
+    ctx.globalAlpha=.25*G.b*dim;ctx.strokeStyle=rgba(l.color,1);ctx.lineWidth=dpr*.8;ctx.setLineDash([2*dpr,3*dpr]);ctx.beginPath();ctx.arc(gx*dpr,gy*dpr,size*.62,0,TAU);ctx.stroke();ctx.setLineDash([]);
+    if(dim>.5&&G.b>.8&&!cfg.clean&&s.det>.12){lctx.globalAlpha=G.b*clamp((s.det-.12)/.15,0,1);lctx.font='600 '+Math.round(9*ui*dpr)+'px '+MONO;lctx.textAlign='center';lctx.textBaseline='middle';lctx.fillStyle='rgba(255,246,230,.85)';lctx.fillText(String(g.ids.length),gx*dpr,gy*dpr+size*.62+7*dpr*ui);lctx.globalAlpha=1}
+    if(dim>.5)s.groupHits.push(g)}
+   ctx.globalAlpha=1;return;
+  }
   for(const it of l.items){const n=neurons.get(it.id);if(!n)continue;n.flash=Math.max(0,n.flash-dt*.45);
-   const x1=n.ox*ca+n.oz*sa,z1=-n.ox*sa+n.oz*ca,d=(z1+1.2)/2.4,str=Math.min(1.2,it.str??1),lit=focusItems.has(it.id);
-   n.sx=s.x+x1*s.r;n.sy=s.y+n.oy*s.r;n.vis=G.b*(dim>.5||lit?1:0);n.d=d;
-   n.size=ui*dpr*(5+3*it.weight+(it.hot?3:0)+n.flash*22)*(.7+.5*d)*(.65+.45*str)*(hover&&hover.id===it.id?1.6:1)*(lit?1.5:1)*Math.min(1.6,Math.sqrt(s.k||1)*Math.sqrt(G.Z))*bz;
+   const [nx,ny,d]=place(n),str=Math.min(1.2,it.str??1),lit=focusItems.has(it.id);
+   n.sx=nx;n.sy=ny;n.d=d;n.vis=onScreen(nx,ny)?G.b*(dim>.5||lit?1:0):0;if(!n.vis&&!lit)continue;
+   n.size=ui*dpr*(5+3*it.weight+(it.hot?3:0)+n.flash*22)*(.7+.5*d)*(.65+.45*str)*(hover&&hover.id===it.id?1.6:1)*(lit?1.5:1)*(focusN===n?1.8:1)*zf*bz;
    n.alpha=clamp(((it.dim?.3:.65)*d*(.35+.65*str)+n.flash)*(lit?1.6:dim),0,1)*G.b*(lit?1:ba);list.push([n,it,str,lit])}
-  // Отростки нейронов — одной кистью на зону; на концах синапсы.
-  const col=l.bad?[210,210,220]:l.color,denA=.34*G.b*dim*warm*ba,tw=still()?0:1,tips=[];
+  // Отростки нейронов — одной кистью на зону; на концах синапсы. Новые ветки (от вспоминаний) прорастают.
+  // У нейрона под курсором (или выбранного) по отросткам бегут микроимпульсы.
+  const col=l.bad?[210,210,220]:l.color,denA=.34*G.b*dim*warm*ba,tw=still()?0:1,tips=[],sparks=[];
+  const act=n=>(hover&&hover.id===n.item.id)||focusN===n||(pinned?.type==='neuron'&&pinned.n===n);
   if(denA>.02&&list.length){ctx.strokeStyle=rgba(col,denA);ctx.lineWidth=dpr*(.6+.25*s.det);ctx.beginPath();
-   for(const [n] of list){const L=Math.max(5*dpr*ui,n.size*(.62+.5*s.det)),X=n.sx*dpr,Y=n.sy*dpr;
-    for(const b of n.den){const a=b.a+tw*Math.sin(simT*.5+n.ph+b.a)*.07,len=b.l*L,ex=X+Math.cos(a)*len,ey=Y+Math.sin(a)*len,qx=(X+ex)/2-Math.sin(a)*b.c*len*.45,qy=(Y+ey)/2+Math.cos(a)*b.c*len*.45;
-     ctx.moveTo(X,Y);ctx.quadraticCurveTo(qx,qy,ex,ey);tips.push(ex,ey);
-     for(const k of b.kids){const sx=X+(ex-X)*k.at+(qx-(X+ex)/2)*.5,sy=Y+(ey-Y)*k.at+(qy-(Y+ey)/2)*.5,ka=a+k.a,kl=k.l*len,kx=sx+Math.cos(ka)*kl,ky=sy+Math.sin(ka)*kl;ctx.moveTo(sx,sy);ctx.lineTo(kx,ky);tips.push(kx,ky)}}}
+   for(const [n] of list){const L=Math.max(5*dpr*ui,n.size*(.62+.5*s.det)),X=n.sx*dpr,Y=n.sy*dpr,on=act(n);
+    for(const b of n.den){const gr=b.born?ease((now-b.born)/1600):1;if(gr<=0)continue;
+     const a=b.a+tw*Math.sin(simT*.5+n.ph+b.a)*.07,len=b.l*L*gr,ex=X+Math.cos(a)*len,ey=Y+Math.sin(a)*len,qx=(X+ex)/2-Math.sin(a)*b.c*len*.45,qy=(Y+ey)/2+Math.cos(a)*b.c*len*.45;
+     ctx.moveTo(X,Y);ctx.quadraticCurveTo(qx,qy,ex,ey);tips.push(ex,ey,gr<1?1:0);
+     if(on){for(let j=0;j<2;j++){const u=(simT*.9+b.a+j*.5)%1,v=1-u;sparks.push(v*v*X+2*v*u*qx+u*u*ex,v*v*Y+2*v*u*qy+u*u*ey)}}
+     for(const k of b.kids){const sx=X+(ex-X)*k.at+(qx-(X+ex)/2)*.5,sy=Y+(ey-Y)*k.at+(qy-(Y+ey)/2)*.5,ka=a+k.a,kl=k.l*len,kx=sx+Math.cos(ka)*kl,ky=sy+Math.sin(ka)*kl;ctx.moveTo(sx,sy);ctx.lineTo(kx,ky);tips.push(kx,ky,0);
+      if(on){const u=(simT*1.1+k.a+b.a)%1;sparks.push(sx+(kx-sx)*u,sy+(ky-sy)*u)}}}}
    ctx.stroke();
-   ctx.fillStyle=rgba(col,Math.min(1,denA*1.8));const ts=Math.max(1,dpr*ui*(1+.6*s.det));for(let i=0;i<tips.length;i+=2)ctx.fillRect(tips[i]-ts/2,tips[i+1]-ts/2,ts,ts)}
+   const ts=Math.max(1,dpr*ui*(1+.6*s.det));ctx.fillStyle=rgba(col,Math.min(1,denA*1.8));for(let i=0;i<tips.length;i+=3)ctx.fillRect(tips[i]-ts/2,tips[i+1]-ts/2,ts,ts);
+   // Кончик растущей ветки светится.
+   for(let i=0;i<tips.length;i+=3)if(tips[i+2]){const z=dpr*ui*10;ctx.globalAlpha=.9;ctx.drawImage(spriteSeed,tips[i]-z/2,tips[i+1]-z/2,z,z)}
+   ctx.globalAlpha=1;for(let i=0;i<sparks.length;i+=2){const z=dpr*ui*(7+3*s.det);ctx.drawImage(sprite,sparks[i]-z/2,sparks[i+1]-z/2,z,z)}}
   // Вблизи: синаптические связи с двумя ближайшими соседями.
-  if(s.det>0){ctx.strokeStyle=rgba(col,.3*s.det*G.b);ctx.lineWidth=dpr*.8;ctx.beginPath();for(const [n] of list)for(const o of n.near||[]){if(o.lobe!==l)continue;ctx.moveTo(n.sx*dpr,n.sy*dpr);ctx.lineTo(o.sx*dpr,o.sy*dpr)}ctx.stroke()}
-  for(const [n,,str,lit] of list){
-   const spr=l.bad?spriteBad:str<.35?spriteCold:sprite,size=n.size;
+  if(s.det>0){ctx.strokeStyle=rgba(col,.3*s.det*G.b);ctx.lineWidth=dpr*.8;ctx.beginPath();for(const [n] of list)for(const o of n.near||[]){if(o.lobe!==l||!o.vis)continue;ctx.moveTo(n.sx*dpr,n.sy*dpr);ctx.lineTo(o.sx*dpr,o.sy*dpr)}ctx.stroke()}
+  for(const [n,it,str,lit] of list){
+   const spr=l.bad?spriteBad:shapes[kindOf(it.id)][str<.35?'cold':'warm'],size=n.size;
    ctx.globalAlpha=n.alpha;ctx.drawImage(spr,n.sx*dpr-size/2,n.sy*dpr-size/2,size,size);
    if(n.flash>0){ctx.globalAlpha=n.flash*.8;ctx.strokeStyle=rgba(l.color,1);ctx.lineWidth=dpr*1.2;ctx.beginPath();ctx.arc(n.sx*dpr,n.sy*dpr,dpr*(6+(1-n.flash)*40),0,TAU);ctx.stroke()}
-   if(lit){ctx.globalAlpha=.6+.3*Math.sin(simT*4);ctx.strokeStyle='#ffe2b8';ctx.lineWidth=dpr;ctx.beginPath();ctx.arc(n.sx*dpr,n.sy*dpr,size*.7,0,TAU);ctx.stroke()}
+   if(lit||focusN===n){ctx.globalAlpha=.6+.3*Math.sin(simT*4);ctx.strokeStyle='#ffe2b8';ctx.lineWidth=dpr;ctx.beginPath();ctx.arc(n.sx*dpr,n.sy*dpr,size*.7,0,TAU);ctx.stroke()}
   }
   ctx.globalAlpha=1;
+ }
+ // Уровень и «хлебные крошки» под панелью кнопок; на уровне 3 — карточка записи прямо в сцене.
+ function wrap(c,text,maxW,maxLines){const words=String(text).split(/\s+/),out=[];let line='';for(const w of words){const t=line?line+' '+w:w;if(c.measureText(t).width>maxW&&line){out.push(line);line=w;if(out.length>=maxLines)break}else line=t}if(out.length<maxLines&&line)out.push(line);if(out.length===maxLines&&words.join(' ').length>out.join(' ').length)out[maxLines-1]=out[maxLines-1].slice(0,-1)+'…';return out}
+ function levelUi(){
+  const c=lctx,zl=focusN?3:cam.zoom>1.6?2:1;if(cfg.clean)return;
+  const d2=l=>(l.state.x-W/2)**2+(l.state.y-H/2)**2,zone=focusN?focusN.lobe:model.lobes.filter(l=>l.state.det>.3).sort((a,b)=>d2(a)-d2(b))[0];
+  if(zl>1){const crumbs=['мозг',zone?trim(zone.label,18):'',focusN?trim(focusN.item.title,26):''].filter(Boolean).join(' › ');
+   const y=((top.offsetTop||0)+(top.offsetHeight||0)+10)*dpr;c.font='600 '+Math.round(9.5*ui*dpr)+'px '+MONO;c.textAlign='left';c.textBaseline='top';
+   c.fillStyle='rgba(0,0,0,.55)';const t='УРОВЕНЬ '+zl+'/3 · '+crumbs,w=c.measureText(t).width+12*dpr;c.fillRect(12*dpr,y,w,16*dpr*ui);c.fillStyle=PAL.hot;c.fillText(t,18*dpr,y+3*dpr*ui)}
+  if(!focusN||cam.zoom<4)return;
+  const n=focusN,it=n.item,r=recall[it.id],a=clamp((cam.zoom-4)/3,0,1),lk=model.links.filter(([x,y])=>x===it.id||y===it.id).map(([x,y])=>neurons.get(x===it.id?y:x)?.item?.title).filter(Boolean).slice(0,4);
+  const fs=Math.round(11*ui*dpr),fm=Math.round(9.5*ui*dpr),pad=12*dpr,w=Math.min(340*dpr*ui,lab.width*.42);
+  c.font='600 '+fs+'px '+MONO;const lines=wrap(c,it.title,w-pad*2,3);
+  const rows=[it.meta,'сила памяти '+Math.round(Math.min(1,it.str??1)*100)+'%'+(r?' · вспоминала '+r.n+' '+plural(r.n,'раз','раза','раз'):''),'отростков '+n.den.length+(lk.length?' · связей '+(linkCount.get(it.id)||lk.length):'')];
+  const h=pad*2+lines.length*fs*1.35+rows.length*fm*1.5+(lk.length?(lk.length+1)*fm*1.45:0)+fm;
+  let x=n.sx*dpr+n.size*1.2+24*dpr,y=n.sy*dpr-h/2;if(x+w>lab.width-8*dpr)x=n.sx*dpr-n.size*1.2-24*dpr-w;y=clamp(y,8*dpr,lab.height-h-8*dpr);
+  c.globalAlpha=a;c.fillStyle='rgba(6,4,2,.86)';c.fillRect(x,y,w,h);c.strokeStyle=rgba(n.lobe.bad?[255,74,56]:n.lobe.color,.6);c.lineWidth=dpr;c.strokeRect(x+.5,y+.5,w-1,h-1);
+  c.strokeStyle='rgba(255,255,255,.5)';c.beginPath();c.moveTo(x,y+10*dpr);c.lineTo(x,y);c.lineTo(x+10*dpr,y);c.moveTo(x+w,y+h-10*dpr);c.lineTo(x+w,y+h);c.lineTo(x+w-10*dpr,y+h);c.stroke();
+  c.beginPath();c.moveTo(n.sx*dpr,n.sy*dpr);c.lineTo(x<n.sx*dpr?x+w:x,y+h/2);c.strokeStyle=rgba(n.lobe.color,.5);c.stroke();
+  let yy=y+pad;c.textAlign='left';c.textBaseline='top';c.font=Math.round(8.5*ui*dpr)+'px '+MONO;c.fillStyle=PAL.accent;c.fillText(('нейрон // '+n.lobe.label).toUpperCase(),x+pad,yy);yy+=fm*1.3;
+  c.font='600 '+fs+'px '+MONO;c.fillStyle='#f4efe6';for(const t of lines){c.fillText(t,x+pad,yy);yy+=fs*1.35}
+  c.font=fm+'px '+MONO;c.fillStyle='rgba(200,190,175,.85)';for(const t of rows){c.fillText(trim(t,46),x+pad,yy);yy+=fm*1.5}
+  if(lk.length){c.fillStyle=PAL.accent;c.fillText('связи:',x+pad,yy);yy+=fm*1.45;c.fillStyle='rgba(230,222,208,.9)';for(const t of lk){c.fillText('→ '+trim(t,40),x+pad,yy);yy+=fm*1.45}}
+  c.globalAlpha=1;c.textBaseline='alphabetic';
  }
  // Названия записей у крупных (приближенных) зон; без наложений, не больше 48 на кадр.
  function details(G,dimOf){
@@ -671,6 +753,7 @@ function mount(host){
   for(const sd of seeds){if(sd.sx==null)continue;const d=(sd.sx-x)**2+(sd.sy-y)**2;if(d<bd)return {type:'seed',sd}}
   for(const n of neurons.values()){if(!n.vis)continue;const d=(n.sx-x)**2+(n.sy-y)**2;if(d<bd){bd=d;best=n}}
   if(best)return {type:'neuron',n:best};
+  for(const l of model.lobes)for(const g of l.state.groupHits||[]){const d=(g.sx-x)**2+(g.sy-y)**2;if(d<(W<640?26:20)**2)return {type:'group',g,l}}
   for(const l of model.lobes){const s=l.state;if((s.x-x)**2+(s.y-y)**2<(s.r*1.1)**2)return {type:'lobe',l}}
   return null;
  }
@@ -680,7 +763,8 @@ function mount(host){
   if(hit.type==='seed'){const f=hit.sd.f;tip.append(el('div','brain-tip-k','предлагаю запомнить'),el('div','brain-tip-t',f.subject+' — '+f.predicate+' → '+f.object),el('div','brain-tip-m',(String(f.source||'').startsWith('note:')?'из заметки':'из чата')+(f.via==='model'?' · нашла модель':' · по правилам')));
    if(withButton){const row=el('div','brain-row'),ok=el('button','brain-btn','✓ Запомнить'),no=el('button','brain-btn','✗');ok.type=no.type='button';ok.onclick=()=>acceptSeed(f.id);no.onclick=()=>{TenmaLearn.reject(f.id);tip.hidden=true;pinned=null};row.append(ok,no);tip.append(row)}}
   else if(hit.type==='neuron'){const it=hit.n.item,r=recall[it.id];tip.append(el('div','brain-tip-k',hit.n.lobe.label),el('div','brain-tip-t',trim(it.title,140)),el('div','brain-tip-m',it.meta+' · сила памяти '+Math.round(Math.min(1,it.str??1)*100)+'%'+(r?' · вспоминала '+r.n+' '+plural(r.n,'раз','раза','раз'):'')+(linkCount.get(it.id)?' · связей '+linkCount.get(it.id):'')));
-   if(withButton){const b=el('button','brain-btn','Открыть');b.type='button';b.onclick=()=>{recordRecall([it.id]);recall=readRecall();it.open()};tip.append(b)}}
+   if(withButton){const b=el('button','brain-btn','Открыть');b.type='button';b.onclick=()=>{recordRecall([it.id]);recall=readRecall();grow(hit.n,true);it.open()};tip.append(b)}}
+  else if(hit.type==='group'){const g=hit.g,ks={star:'дел',drop:'заметок',crystal:'фактов'};tip.append(el('div','brain-tip-k',hit.l.label+' · группа'),el('div','brain-tip-t',g.ids.length+' '+plural(g.ids.length,'запись','записи','записей')),el('div','brain-tip-m',Object.entries(g.kinds).map(([k,v])=>v+' '+ks[k]).join(' · ')+' · двойной щелчок — раскрыть'))}
   else{const l=hit.l;tip.append(el('div','brain-tip-k','зона'),el('div','brain-tip-t',l.label),el('div','brain-tip-m',l.items.length+' '+plural(l.items.length,'запись','записи','записей')));
    if(withButton){const b=el('button','brain-btn','Открыть раздел');b.type='button';b.onclick=()=>l.open();tip.append(b)}}
   tip.hidden=false;tip.classList.toggle('pinned',!!withButton);
@@ -702,14 +786,17 @@ function mount(host){
  canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
  canvas.addEventListener('pointerleave',()=>{if(!pinned){tip.hidden=true;hover=null;dirty=true}});
  // Приближение к точке под курсором: в 3D, на весь экран или с Ctrl (щипок на тачпаде); иначе колесо листает страницу.
- function zoomAt(x,y,z){const Z0=camT.zoom,Z1=clamp(z,.45,5),qx=(x-view0.cx)/Z0-camT.px,qy=(y-view0.cy)/Z0-camT.py;camT.zoom=Z1;camT.px=(x-view0.cx)/Z1-qx;camT.py=(y-view0.cy)/Z1-qy;if(Z1<=1.001&&!cfg.mode3d){camT.px=0;camT.py=0}idleT=0;dirty=true}
+ function zoomAt(x,y,z){if(focusN&&z<6){focusN=null}const Z0=camT.zoom,Z1=clamp(z,.45,focusN?12:5),qx=(x-view0.cx)/Z0-camT.px,qy=(y-view0.cy)/Z0-camT.py;camT.zoom=Z1;camT.px=(x-view0.cx)/Z1-qx;camT.py=(y-view0.cy)/Z1-qy;if(Z1<=1.001&&!cfg.mode3d){camT.px=0;camT.py=0}idleT=0;dirty=true}
  canvas.addEventListener('wheel',e=>{if(!cfg.mode3d&&!isFs()&&!e.ctrlKey)return;e.preventDefault();const [x,y]=local(e);zoomAt(x,y,camT.zoom*Math.exp(-e.deltaY*.0015))},{passive:false});
  // Двойной щелчок по зоне — подлететь к ней и рассмотреть записи; по пустому месту — вернуть вид.
  canvas.addEventListener('dblclick',e=>{const [x,y]=local(e),hit=pick(x,y),l=hit&&(hit.l||hit.n?.lobe);tip.hidden=true;pinned=null;
-  if(l){camT.zoom=clamp(Math.min(W,H)*.32/Math.max(8,l.state.r/cam.zoom),2,5);camT.px=-l.state.qx;camT.py=-l.state.qy}else Object.assign(camT,{zoom:1,px:0,py:0});idleT=0;dirty=true});
+  // Три уровня: мозг → зона (двойной щелчок по зоне или группе) → нейрон (двойной щелчок по записи в приближенной зоне).
+  if(hit&&hit.type==='neuron'&&(l.state.det>.3||focusN)){focusN=hit.n;camT.zoom=Math.max(camT.zoom,9);recordRecall([hit.n.item.id]);recall=readRecall();grow(hit.n,true)}
+  else if(l){focusN=null;zoomLobe(l)}else{focusN=null;Object.assign(camT,{zoom:1,px:0,py:0})}idleT=0;dirty=true});
+ function zoomLobe(l){camT.zoom=clamp(Math.min(W,H)*.32/Math.max(8,l.state.r/cam.zoom),2,5);camT.px=-l.state.qx;camT.py=-l.state.qy}
  canvas.addEventListener('click',e=>{if(moved){moved=false;return}const [x,y]=local(e),hit=pick(x,y);pinned=hit;hover=hit&&hit.type==='neuron'?hit.n.item:null;showTip(hit,x,y,true);if(hit&&hit.type==='lobe'){hit.l.state.pulse=1;if(hit.l.bad){tip.hidden=true;pinned=null;fixBox.hidden=false;renderFix()}}dirty=true});
  document.addEventListener('keydown',onKey);
- function onKey(e){if(e.key!=='Escape')return;if(!fixBox.hidden){fixBox.hidden=true;return}if(isFs()){if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});stage.classList.remove('fs');setFs();return}if(pinned){pinned=null;tip.hidden=true;hover=null;dirty=true}}
+ function onKey(e){if(e.key!=='Escape')return;if(!fixBox.hidden){fixBox.hidden=true;return}if(focusN){const l=focusN.lobe;focusN=null;zoomLobe(l);dirty=true;return}if(isFs()){if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});stage.classList.remove('fs');setFs();return}if(pinned){pinned=null;tip.hidden=true;hover=null;dirty=true}}
 
  /* ---------- Обучение: новый факт прямо отсюда ---------- */
  teach.onsubmit=async e=>{
@@ -734,6 +821,7 @@ function mount(host){
   // Счётчики уже записал общий слушатель выше — здесь только перечитываем и анимируем.
   recall=readRecall();const ids=recallIds(e.detail).filter(id=>neurons.has(id));
   if(!ids.length)return;
+  for(const id of ids)grow(neurons.get(id),true);
   ids.slice(0,12).forEach((id,i)=>{const n=neurons.get(id);setTimeout(()=>{if(n.lobe.state)impulses.push({lobe:n.lobe,item:n.item,u:0,f:Math.floor(Math.random()*n.lobe.state.fil.length),recall:true})},i*140)});
   const first=neurons.get(ids[0]);coreKind='вспоминаю';coreText=first.item.title;coreTextT=3.5;
   for(const l of model.lobes)for(const it of l.items)it.str=strength(it);dirty=true;

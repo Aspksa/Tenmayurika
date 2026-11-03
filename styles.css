@@ -746,7 +746,7 @@ html.brain-fs-lock,html.brain-fs-lock body{overflow:hidden}
 .brain-stage:not(.gl)>canvas.brain-gl{display:none}
 .brain-stage.gl>canvas.brain-fx{mix-blend-mode:screen}
 .brain-grain{position:absolute;inset:0;z-index:3;pointer-events:none;overflow:hidden;
- background:repeating-linear-gradient(0deg,rgba(255,255,255,.028) 0 1px,transparent 1px 3px)}
+ background:radial-gradient(ellipse 75% 70% at 50% 50%,transparent 55%,rgba(0,0,0,.5) 100%),repeating-linear-gradient(0deg,rgba(255,255,255,.028) 0 1px,transparent 1px 3px)}
 .brain-grain::before{content:"";position:absolute;inset:-50%;opacity:.09;
  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
  animation:brain-grain .9s steps(6) infinite}
