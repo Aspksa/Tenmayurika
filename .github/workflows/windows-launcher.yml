@@ -24,6 +24,8 @@ jobs:
           node --check tools/backup-complete.js
           node --check tools/maintenance.js
           node --check tools/progress.js
+          node --check tools/run-npm.js
+          node tools/run-npm.js --version
           node tools/progress.js 3
           node --check memory-core.js
           node --check vector-store.js
@@ -62,4 +64,17 @@ jobs:
           try {
             & cmd.exe /d /c 'call Tenmayurika.bat doctor'
             if ($LASTEXITCODE -ne 0) { throw "BAT doctor failed: $LASTEXITCODE" }
+          } finally { Pop-Location }
+      - name: Test Windows BAT dependency install in Cyrillic path with spaces
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:RUNNER_TEMP 'Рабочий стол\Tenmayurika (копия) & тест'
+          New-Item -ItemType Directory -Path $target -Force | Out-Null
+          Get-ChildItem -Force -Path . | Where-Object { $_.Name -notin @('node_modules','.git') } | Copy-Item -Destination $target -Recurse -Force
+          if (Test-Path (Join-Path $target 'node_modules')) { throw 'node_modules must be absent before the BAT run' }
+          Push-Location $target
+          try {
+            & cmd.exe /d /c 'call Tenmayurika.bat doctor < nul'
+            if ($LASTEXITCODE -ne 0) { throw "BAT dependency install failed: $LASTEXITCODE" }
+            if (-not (Test-Path (Join-Path $target 'node_modules\@lancedb\lancedb'))) { throw 'Dependencies were not installed by BAT' }
           } finally { Pop-Location }

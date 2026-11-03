@@ -1,15 +1,16 @@
-param()
+param([switch]$RequireNpm)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $runtime = Join-Path $root 'runtime\node'
 $node = Join-Path $runtime 'node.exe'
 if (-not [Environment]::Is64BitOperatingSystem) { throw '64-bit Windows required' }
-if (Test-Path $node) {
+$npmCli = Join-Path $runtime 'node_modules\npm\bin\npm-cli.js'
+if ((Test-Path $node) -and (-not $RequireNpm -or (Test-Path $npmCli))) {
   & $node -e "process.exit(Number(process.versions.node.split('.')[0])>=24?0:1)"
   if ($LASTEXITCODE -eq 0) { exit 0 }
 }
 $systemNode = Get-Command node.exe -ErrorAction SilentlyContinue
-if ($systemNode) {
+if ($systemNode -and -not $RequireNpm) {
   & $systemNode.Source -e "process.exit(Number(process.versions.node.split('.')[0])>=24?0:1)"
   if ($LASTEXITCODE -eq 0) { exit 0 }
 }
@@ -30,6 +31,7 @@ try {
   Expand-Archive $zip -DestinationPath $temp -Force
   $source = Join-Path $temp ($name.Substring(0,$name.Length - 4))
   if (-not (Test-Path (Join-Path $source 'node.exe'))) { throw 'Archive invalid' }
+  if (-not (Test-Path (Join-Path $source 'node_modules\npm\bin\npm-cli.js'))) { throw 'Archive has no npm' }
   New-Item -ItemType Directory -Path (Split-Path $runtime -Parent) -Force | Out-Null
   if (Test-Path $runtime) { Remove-Item $runtime -Recurse -Force }
   Move-Item $source $runtime
