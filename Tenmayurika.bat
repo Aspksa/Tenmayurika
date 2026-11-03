@@ -19,7 +19,7 @@ if not exist "node_modules\dotenv" (
  call "%NPM%" install --no-audit --no-fund
  if errorlevel 1 goto :dependencies
 )
-"%NODE%" "tools\launcher.js" %*
+"%NODE%" "tools\launcher.js" "%~1"
 set "RESULT=%ERRORLEVEL%"
 if not "%RESULT%"=="0" pause
 exit /b %RESULT%
