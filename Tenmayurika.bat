@@ -1,79 +1,37 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
 chcp 65001 >nul
-title Tenmayurika - Launcher
-cd /d "%~dp0" || (echo [ERROR] Cannot open project directory.& pause & exit /b 1)
-echo ==========================================
-echo        TENMAYURIKA - START
-echo ==========================================
-echo Directory: "%CD%"
+title Tenmayurika - Portable Launcher
+cd /d "%~dp0" || exit /b 1
 set "NODE=node.exe"
 set "NPM=npm.cmd"
-if exist "%~dp0runtime\node\node.exe" (
- set "NODE=%~dp0runtime\node\node.exe"
- set "NPM=%~dp0runtime\node\npm.cmd"
- set "PATH=%~dp0runtime\node;%PATH%"
-)
-"%NODE%" --version >nul 2>&1
-if errorlevel 1 (
- echo [ERROR] Node.js not found. Put portable Node.js 24+ in runtime\node.
- pause
- exit /b 1
+if exist "runtime\node\node.exe" (
+ set "NODE=%CD%\runtime\node\node.exe"
+ set "NPM=%CD%\runtime\node\npm.cmd"
+ set "PATH=%CD%\runtime\node;%PATH%"
 )
 "%NODE%" -e "process.exit(Number(process.versions.node.split('.')[0])>=24?0:1)"
-if errorlevel 1 (
- echo [ERROR] Node.js 24 or newer is required for built-in SQLite.
- pause
- exit /b 1
+if errorlevel 1 goto :node_error
+if not exist "tools\launcher.js" goto :missing
+if not exist "node_modules\dotenv" (
+ if /i not "%~1"=="start" if not "%~1"=="" goto :dependencies
+ echo Installing dependencies once...
+ call "%NPM%" install --no-audit --no-fund
+ if errorlevel 1 goto :dependencies
 )
-if not exist "%~dp0runtime\node\node.exe" (
- where npm.cmd >nul 2>&1
- if errorlevel 1 goto :no_npm
-) else (
- if not exist "%NPM%" goto :no_npm
-)
-goto :npm_ready
-:no_npm
-echo [ERROR] npm.cmd not found. Put full portable Node.js distribution in runtime\node.
+"%NODE%" "tools\launcher.js" %*
+set "RESULT=%ERRORLEVEL%"
+if not "%RESULT%"=="0" pause
+exit /b %RESULT%
+:node_error
+echo Node.js 24 or newer required. Put portable Node.js in runtime\node.
 pause
 exit /b 1
-:npm_ready
-if not exist "package.json" (
- echo [INFO] This repository has no application yet.
- echo [INFO] Add package.json with a start or dev script, then run this BAT again.
- pause
- exit /b 2
-)
-if not exist "node_modules\@lancedb\lancedb" (
- echo [INFO] Installing dependencies on SSD...
- call "%NPM%" install --no-audit --no-fund
- if errorlevel 1 goto :failed
-)
-"%NODE%" -e "const s=require('./package.json').scripts||{};process.exit(s.start?0:s.dev?1:2)"
-if errorlevel 1 goto :check_dev
-echo [INFO] Open http://127.0.0.1:5173 in your browser.
-start "" "http://127.0.0.1:5173"
-echo [INFO] Starting application with npm start...
-call "%NPM%" start
-goto :finished
-:check_dev
-"%NODE%" -e "const s=require('./package.json').scripts||{};process.exit(s.dev?0:1)"
-if errorlevel 1 (
- echo [ERROR] package.json needs scripts.start or scripts.dev
- pause
- exit /b 3
-)
-echo [INFO] Open http://127.0.0.1:5173 in your browser.
-start "" "http://127.0.0.1:5173"
-echo [INFO] Starting application with npm run dev...
-call "%NPM%" run dev
-goto :finished
-:failed
-echo [ERROR] Dependency installation failed.
+:missing
+echo tools\launcher.js is missing.
+pause
+exit /b 2
+:dependencies
+echo Dependencies missing or npm install failed.
 pause
 exit /b 4
-:finished
-set "RESULT=%ERRORLEVEL%"
-if not "%RESULT%"=="0" echo [ERROR] Application exited with code %RESULT%.
-pause
-exit /b %RESULT%
