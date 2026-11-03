@@ -212,18 +212,21 @@ function buildModel(ws,facts,conflicts){
 
 /* ---------- Самообучение: кандидаты в факты из чата и заметок ---------- */
 // Очередь хранится в этом браузере; факт попадает в память только после «✓».
-const LEARN_Q='tenma.learn.queue.v1',LEARN_CHAT='tenma.learn.chat',LEARN_SCANNED='tenma.learn.scanned.v1';
+const LEARN_MAX=60,LEARN_Q='tenma.learn.queue.v1',LEARN_CHAT='tenma.learn.chat',LEARN_SCANNED='tenma.learn.scanned.v1';
 const TenmaLearn={
  fromChat:()=>read(LEARN_CHAT,true)!==false,
  setFromChat(v){write(LEARN_CHAT,!!v)},
  queue:()=>{const q=read(LEARN_Q,[]);return Array.isArray(q)?q:[]},
- save(q){write(LEARN_Q,q.slice(-60));window.dispatchEvent(new CustomEvent('tenma:learn'))},
+ full:()=>TenmaLearn.queue().length>=LEARN_MAX,
+ save(q){write(LEARN_Q,q.slice(-LEARN_MAX));window.dispatchEvent(new CustomEvent('tenma:learn'))},
  // Возвращает число новых кандидатов или null, если разобрать не удалось (сеть, ошибка сервера).
  async learn(text,source){
   try{const r=await fetch('/api/learn',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,source})});if(!r.ok)return null;
-   const data=await r.json(),q=TenmaLearn.queue(),key=f=>(f.subject+'|'+f.predicate+'|'+f.object).toLocaleLowerCase();let added=0;
-   for(const f of data.facts||[]){if(q.some(x=>key(x)===key(f)))continue;q.push({id:'q'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),subject:f.subject,predicate:f.predicate,object:f.object,source,via:data.source,at:Date.now()});added++}
-   if(added)TenmaLearn.save(q);return added}catch{return null}
+   const data=await r.json(),q=TenmaLearn.queue(),key=f=>(f.subject+'|'+f.predicate+'|'+f.object).toLocaleLowerCase();let added=0,dropped=0;
+   for(const f of data.facts||[]){if(q.some(x=>key(x)===key(f)))continue;if(q.length>=LEARN_MAX){dropped++;continue}q.push({id:'q'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),subject:f.subject,predicate:f.predicate,object:f.object,source,via:data.source,at:Date.now()});added++}
+   if(added)TenmaLearn.save(q);
+   // Очередь полна: часть кандидатов не поместилась — заметку не помечаем, её разберут снова после чистки очереди.
+   return dropped?{added,full:true}:added}catch{return null}
  },
  async accept(id){
   const q=TenmaLearn.queue(),f=q.find(x=>x.id===id);if(!f)return;
@@ -235,11 +238,11 @@ const TenmaLearn={
  reject(id){TenmaLearn.save(TenmaLearn.queue().filter(x=>x.id!==id))},
  // Заметки, изменённые после прошлого разбора; за раз — не больше limit.
  async scanNotes(limit=5){
-  const notes=(window.TenmaApp?.workspace?.notes||[]),done=read(LEARN_SCANNED,{});let n=0,found=0,failed=0;
-  for(const note of notes){const ver=note.updatedAt||note.createdAt||'';if(done[note.id]===ver)continue;if(n>=limit)break;n++;
+  const notes=(window.TenmaApp?.workspace?.notes||[]),done=read(LEARN_SCANNED,{});let n=0,ok=0,found=0,failed=0,full=false;
+  for(const note of notes){const ver=note.updatedAt||note.createdAt||'';if(done[note.id]===ver)continue;if(n>=limit)break;if(TenmaLearn.full()){full=true;break}n++;
    // Неудачный разбор не помечаем — заметка останется в очереди на следующую попытку.
-   const r=await TenmaLearn.learn(note.title+'. '+(note.content||''),'note:'+note.id);if(r===null){failed++;continue}found+=r;done[note.id]=ver}
-  write(LEARN_SCANNED,done);return {scanned:n-failed,found,failed,left:notes.filter(x=>done[x.id]!==(x.updatedAt||x.createdAt||'')).length};
+   const r=await TenmaLearn.learn(note.title+'. '+(note.content||''),'note:'+note.id);if(r===null){failed++;continue}if(r.full){found+=r.added;full=true;break}found+=r;ok++;done[note.id]=ver}
+  write(LEARN_SCANNED,done);return {full,scanned:ok,found,failed,left:notes.filter(x=>done[x.id]!==(x.updatedAt||x.createdAt||'')).length};
  }
 };
 window.TenmaLearn=TenmaLearn;
@@ -895,7 +898,7 @@ function mount(host){
  async function acceptSeed(id){try{await TenmaLearn.accept(id);learnMsg.textContent='Запомнила.';learnMsg.classList.remove('err');tip.hidden=true;pinned=null;core.pulse=1}catch(e){learnMsg.textContent=e.message;learnMsg.classList.add('err')}}
  allBtn.onclick=async()=>{allBtn.disabled=true;for(const f of TenmaLearn.queue())await acceptSeed(f.id);allBtn.disabled=false};
  scanBtn.onclick=async()=>{scanBtn.disabled=true;learnMsg.classList.remove('err');learnMsg.textContent='Читаю заметки…';
-  try{const r=await TenmaLearn.scanNotes(5);learnMsg.textContent=r.failed?'Не удалось разобрать заметок: '+r.failed+' — сервер не ответил. Попробуйте ещё раз.':r.scanned?'Прочитала заметок: '+r.scanned+', нашла фактов: '+r.found+(r.left?'. Осталось заметок: '+r.left+' — нажмите ещё раз.':'.'):'Новых заметок нет — все уже разобраны.';learnMsg.classList.toggle('err',!!r.failed)}catch(e){learnMsg.textContent=e.message;learnMsg.classList.add('err')}
+  try{const r=await TenmaLearn.scanNotes(5);learnMsg.textContent=r.full?'Очередь кандидатов заполнена ('+LEARN_MAX+'). Подтвердите или отклоните часть, потом нажмите ещё раз'+(r.found?' (найдено сейчас: '+r.found+')':'')+'.':r.failed?'Не удалось разобрать заметок: '+r.failed+' — сервер не ответил. Попробуйте ещё раз.':r.scanned?'Прочитала заметок: '+r.scanned+', нашла фактов: '+r.found+(r.left?'. Осталось заметок: '+r.left+' — нажмите ещё раз.':'.'):'Новых заметок нет — все уже разобраны.';learnMsg.classList.toggle('err',!!r.failed)}catch(e){learnMsg.textContent=e.message;learnMsg.classList.add('err')}
   scanBtn.disabled=false};
  const onLearn=()=>renderLearn();
  window.addEventListener('tenma:thinking',onThinking);window.addEventListener('tenma:recall',onRecall);window.addEventListener('tenma:learn',onLearn);

@@ -34,7 +34,10 @@ test('avatar tools act through the chat API and respect disabled tools',async()=
   assert.match(done.reply,/выполненным/);
   const fact=await say('запомни Лиса | живёт в | Инари');
   assert.match(fact.reply,/Запомнила/);
-  assert.match((await say('найди Инари')).reply,/Лиса — живёт в → Инари/);
+  const found=await say('найди Инари');
+  assert.match(found.reply,/Лиса — живёт в → Инари/);
+  // Явный поиск тоже «вспоминание»: найденный факт уходит в recalled для «Мозга».
+  assert.equal(found.recalled.facts.length,1);
   const nav=await say('открой факты');
   assert.deepEqual(nav.actions,[{type:'navigate',page:'facts'}]);
   const blocked=await say('дело: нельзя',['clock']);

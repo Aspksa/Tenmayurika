@@ -151,7 +151,7 @@ function makeTools(ctx){
    const q=String(query||'').trim();if(!q)return {ok:false,text:'Что поискать?'};
    const facts=findFacts(q),notes=await findNotes(q);
    if(!facts.length&&!notes.length)return {ok:true,text:'По запросу «'+q+'» ничего не нашла.'};
-   return {ok:true,text:[facts.length?'Факты:\n'+facts.map(factLine).join('\n'):'',notes.length?'Заметки:\n'+notes.map(noteLine).join('\n'):''].filter(Boolean).join('\n\n')};
+   return {ok:true,recalled:{facts:facts.map(f=>f.id),notes:notes.map(n=>n.id)},text:[facts.length?'Факты:\n'+facts.map(factLine).join('\n'):'',notes.length?'Заметки:\n'+notes.map(noteLine).join('\n'):''].filter(Boolean).join('\n\n')};
   },
   async open_page({page}){const id=pageFrom(page);if(!id)return {ok:false,text:'Не знаю такого раздела. Есть: '+Object.values(PAGES).join(', ')+'.'};return {ok:true,text:'Открываю «'+PAGES[id]+'».',action:{type:'navigate',page:id}}},
   async create_backup(){const r=await storage.backup();return {ok:true,text:'Резервная копия SQLite создана: '+require('node:path').basename(r.file||'')+'. Векторы LanceDB в неё не входят.'}},
@@ -384,7 +384,9 @@ async function modelReply(name,message,history,facts,notes,enabled,impl,result){
  return result.outcomes.length?'Не успела закончить ответ. Результаты инструментов:\n'+result.outcomes.map(o=>(o.ok?'• ':'✗ ')+o.text).join('\n'):'Не удалось завершить ответ.';
 }
 const pub=({done,outcomes,secrets,...rest})=>secrets.length?{...rest,secret:true}:rest;
-function track(result,fn,out){result.tools.push(fn);result.outcomes.push({ok:out.ok!==false,text:out.text});if(out.ok!==false)result.done.push(out.text);if(out.secret)result.secrets.push(out.text);if(out.changed)result.changed=true;if(out.action)result.actions.push(out.action)}
+function track(result,fn,out){result.tools.push(fn);result.outcomes.push({ok:out.ok!==false,text:out.text});if(out.ok!==false)result.done.push(out.text);if(out.secret)result.secrets.push(out.text);if(out.changed)result.changed=true;if(out.action)result.actions.push(out.action);
+ // Явный поиск по памяти тоже «вспоминание»: «Мозг» подсвечивает найденное и считает его силу.
+ if(out.recalled){const r=result.recalled||(result.recalled={facts:[],notes:[]});for(const k of ['facts','notes'])for(const id of out.recalled[k])if(!r[k].includes(id))r[k].push(id)}}
 
 // Понятная причина, почему модель не ответила (показывается в чате и в окне сервера).
 function modelFailure(e){

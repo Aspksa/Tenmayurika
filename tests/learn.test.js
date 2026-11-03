@@ -9,6 +9,8 @@ test('rules find simple Russian facts without a model',()=>{
  const f=byRules('Кстати, Анна любит зелёный чай. У мамы день рождения 12 марта! Я живу в Казани. Погода хорошая.');
  assert.deepEqual(f,[{subject:'Анна',predicate:'любит',object:'зелёный чай'},{subject:'Мамы',predicate:'день рождения',object:'12 марта'},{subject:'Я',predicate:'живу в',object:'Казани'}]);
  assert.deepEqual(byRules('Анна живёт в Казани? Пётр живёт в Перми!'),[{subject:'Пётр',predicate:'живёт в',object:'Перми'}]);
+ // Отрицание остаётся в связи, а не прилипает к субъекту.
+ assert.deepEqual(byRules('Анна не живёт в Казани.'),[{subject:'Анна',predicate:'не живёт в',object:'Казани'}]);
  assert.deepEqual(byRules('Меня зовут Анна.'),[{subject:'Я',predicate:'зовут',object:'Анна'}]);
  assert.deepEqual(parseLines('FACT: Анна | любит | чай\n- FACT: | Кот | зовут | Мурзик\nNONE'),[{subject:'Анна',predicate:'любит',object:'чай'},{subject:'Кот',predicate:'зовут',object:'Мурзик'}]);
 });
