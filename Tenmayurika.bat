@@ -22,20 +22,20 @@ if errorlevel 1 (
  )
 )
 
-if not exist "runtime\python\python.exe" (
+if not exist "%~dp0runtime\python\python.exe" (
  echo [INFO] Checking portable Python...
  powershell.exe -NoProfile -NonInteractive -File "tools\bootstrap-python.ps1"
  if errorlevel 1 (
   echo [WARN] Python setup failed; core Node.js app can still start.
  )
 )
-if not exist "tools\launcher.js" goto :missing
-if not exist "node_modules\@lancedb\lancedb" (
+if not exist "%~dp0tools\launcher.js" goto :missing
+if not exist "%~dp0node_modules\@lancedb\lancedb" (
  echo Installing dependencies once...
  call "%NPM%" install --no-audit --no-fund
  if errorlevel 1 goto :dependencies
 )
-"%NODE%" "tools\launcher.js" "%~1"
+"%NODE%" "%~dp0tools\launcher.js" "%~1"
 set "RESULT=%ERRORLEVEL%"
 if not "%RESULT%"=="0" pause
 popd
