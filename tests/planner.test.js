@@ -159,3 +159,21 @@ test('planner quick entry parse and day notes',async()=>{
   assert.equal((await post('/api/items',{collection:'notes',title:'x',day:'03.11'})).status,400);
  }finally{await new Promise(r=>server.close(r))}
 });
+test('review fixes: month words and deleting a note during indexing',async()=>{
+ assert.deepEqual(planner.parseWhen('купить 2 майки',NOW),{due:null,time:null,rest:'купить 2 майки'});
+ assert.equal(planner.parseWhen('отпуск 5 мая',NOW).due,'2027-05-05');
+ const storage=require('../storage'),vectors=require('../vector-store'),worker=require('../sync-worker');
+ const saved={syncNote:vectors.syncNote,removeNote:vectors.removeNote,indexedIds:vectors.indexedIds},removed=[];let release;
+ const id='00000000-0000-4000-8000-0000000000ee';
+ storage.mutate(d=>{d.notes.unshift({id,title:'Секрет',content:'удалить'})});storage.syncNode({id,title:'Секрет',content:'удалить'});
+ vectors.indexedIds=async()=>new Set();vectors.removeNote=async x=>{removed.push(x);return {removed:true}};
+ vectors.syncNote=async n=>{if(n.id===id)await new Promise(r=>{release=r});return {enabled:true}};
+ process.env.EMBEDDING_URL='http://127.0.0.1:9/embed';
+ try{
+  const run=worker.run();
+  while(!release)await new Promise(r=>setImmediate(r));
+  storage.mutate(d=>{d.notes=d.notes.filter(n=>n.id!==id)});storage.removeNode(id);
+  release();await run;
+  assert.ok(removed.includes(id),'vector written after delete is removed again');
+ }finally{Object.assign(vectors,saved);delete process.env.EMBEDDING_URL}
+});

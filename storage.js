@@ -23,7 +23,10 @@ async function load(){ensure();return JSON.parse(db.prepare('SELECT payload FROM
 async function save(data){ensure();db.prepare('UPDATE workspace SET payload=? WHERE id=1').run(JSON.stringify(data))}
 function mutate(change){ensure();db.exec('BEGIN IMMEDIATE');try{const data=JSON.parse(db.prepare('SELECT payload FROM workspace WHERE id=1').get().payload);const result=change(data);db.prepare('UPDATE workspace SET payload=? WHERE id=1').run(JSON.stringify(data));db.exec('COMMIT');return result}catch(e){db.exec('ROLLBACK');throw e}}
 function syncNode(note){ensure();db.exec('BEGIN IMMEDIATE');try{db.prepare("INSERT INTO knowledge_nodes(id,title,content) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,content=excluded.content").run(note.id,note.title,note.content||'');db.prepare("INSERT INTO vector_queue(id,attempts,last_error,next_retry_at) VALUES(?,0,NULL,0) ON CONFLICT(id) DO UPDATE SET attempts=0,last_error=NULL,next_retry_at=0,version=version+1").run(note.id);db.exec('COMMIT')}catch(e){db.exec('ROLLBACK');throw e}}
-function removeNode(id){ensure();db.exec('BEGIN IMMEDIATE');try{db.prepare('DELETE FROM knowledge_nodes WHERE id=?').run(id);db.prepare('DELETE FROM vector_queue WHERE id=?').run(id);db.prepare('DELETE FROM knowledge_edges WHERE source=? OR target=?').run(id,id);db.exec('COMMIT')}catch(e){db.exec('ROLLBACK');throw e}}
+// deleted: заметки, удалённые в этом процессе, — индексатор не воссоздаёт их векторы.
+const deleted=new Set();
+function wasDeleted(id){return deleted.has(id)}
+function removeNode(id){ensure();deleted.add(id);db.exec('BEGIN IMMEDIATE');try{db.prepare('DELETE FROM knowledge_nodes WHERE id=?').run(id);db.prepare('DELETE FROM vector_queue WHERE id=?').run(id);db.prepare('DELETE FROM knowledge_edges WHERE source=? OR target=?').run(id,id);db.exec('COMMIT')}catch(e){db.exec('ROLLBACK');throw e}}
 function graph(){ensure();return {nodes:db.prepare('SELECT * FROM knowledge_nodes').all(),edges:db.prepare('SELECT * FROM knowledge_edges').all()}}
 function pending(){ensure();return db.prepare('SELECT id,attempts,version FROM vector_queue WHERE attempts<5 AND next_retry_at<=? ORDER BY attempts,id LIMIT 20').all(Date.now())}
 function indexed(id,version){ensure();if(version===undefined)db.prepare('DELETE FROM vector_queue WHERE id=?').run(id);else db.prepare('DELETE FROM vector_queue WHERE id=? AND version=?').run(id,version)}
@@ -68,4 +71,4 @@ function backup(){
 function enqueueMissing(ids){ensure();const stmt=db.prepare('INSERT OR IGNORE INTO vector_queue(id) VALUES(?)');let added=0;db.exec('BEGIN IMMEDIATE');try{for(const id of ids){if(typeof id==='string'&&id&&stmt.run(id).changes)added++}db.exec('COMMIT')}catch(e){db.exec('ROLLBACK');throw e}return added}
 function reindexAll(){ensure();db.exec('BEGIN IMMEDIATE');try{db.exec('INSERT OR IGNORE INTO vector_queue(id) SELECT id FROM knowledge_nodes');db.exec('UPDATE vector_queue SET attempts=0,last_error=NULL,next_retry_at=0');const count=db.prepare('SELECT COUNT(*) AS count FROM vector_queue').get().count;db.exec('COMMIT');return count}catch(error){db.exec('ROLLBACK');throw error}}
 function close(){if(db){db.close();db=undefined}}
-module.exports={connect,load,save,mutate,syncNode,removeNode,graph,pending,indexed,failed,backup,reindexAll,enqueueMissing,close};
+module.exports={connect,load,save,mutate,syncNode,removeNode,wasDeleted,graph,pending,indexed,failed,backup,reindexAll,enqueueMissing,close};
