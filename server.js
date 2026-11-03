@@ -20,10 +20,11 @@ function startBackupSchedule(){backupTimer=setInterval(()=>{void scheduledBackup
 
 const allowed=new Map([['/', 'index.html'],['/index.html','index.html'],['/styles.css','styles.css'],['/app.js','app.js']]);
 function respond(res,status,body,type='application/json; charset=utf-8'){res.writeHead(status,{'Content-Type':type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});res.end(typeof body==='string'?body:JSON.stringify(body))}
-async function body(req){let data='';for await(const part of req){data+=part;if(data.length>100000)throw Error('Request too large')}return JSON.parse(data||'{}')}
+async function body(req){const chunks=[];let bytes=0;for await(const part of req){bytes+=part.length;if(bytes>100000)throw Error('Request too large');chunks.push(part)}return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}')}
 const server=http.createServer(async(req,res)=>{try{
 const host=req.headers.host||'';if(host!=='127.0.0.1:'+String(server.address()?.port||PORT)&&host!=='localhost:'+String(server.address()?.port||PORT))return respond(res,403,{error:'Forbidden host'});
 const url=new URL(req.url,'http://localhost');const p=url.pathname;
+if(req.method==='OPTIONS')return respond(res,204,'');
 if(!['GET','HEAD','OPTIONS'].includes(req.method)){const origin=req.headers.origin;if(origin){let parsed;try{parsed=new URL(origin)}catch{return respond(res,403,{error:'Forbidden origin'})}if(parsed.protocol!=='http:'||!['127.0.0.1','localhost'].includes(parsed.hostname)||Number(parsed.port||80)!==Number(server.address()?.port||PORT))return respond(res,403,{error:'Forbidden origin'})}}
 if(req.method==='GET'&&p==='/api/health'){try{ensureDisk()}catch{}return respond(res,diskHealthy?200:503,{ok:diskHealthy,version:'0.3.0',database:'connected',disk:diskHealthy?'ok':'unavailable'});}
 if(!['GET','HEAD','OPTIONS'].includes(req.method))ensureDisk();
