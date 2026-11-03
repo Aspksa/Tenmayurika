@@ -25,6 +25,7 @@ jobs:
           node --check tools/maintenance.js
           node --check tools/progress.js
           node tools/progress.js 3
+          node --check memory-core.js
           node --check vector-store.js
           node --check tools/verify-complete.js
       - name: Validate PowerShell download scripts
@@ -44,6 +45,11 @@ jobs:
           $rejected=$false
           try { & ./tools/download-monitor.ps1 -Url 'https://example.com/file' -Destination (Join-Path $env:RUNNER_TEMP 'invalid.zip') -MaxAttempts 0 } catch { $rejected=$true }
           if (-not $rejected) { throw 'Expected invalid retry count rejection' }
+      - name: Verify memory core startup
+        shell: pwsh
+        run: |
+          node memory-core.js diagnostics
+          node memory-core.js facts
       - name: Run tests
         run: npm test
       - name: Test Windows BAT doctor in Cyrillic path
