@@ -21,6 +21,7 @@ function open(){
  detected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
  UNIQUE(earlier_id,newer_id)
  );
+ CREATE INDEX IF NOT EXISTS memory_facts_observed ON memory_facts(observed_at); 
  CREATE TABLE IF NOT EXISTS memory_events(
  id INTEGER PRIMARY KEY AUTOINCREMENT, fact_id TEXT NOT NULL, action TEXT NOT NULL,
  occurred_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -82,6 +83,17 @@ function queryFacts({subject,limit=50}={}){
   return db.prepare('SELECT * FROM memory_facts ORDER BY observed_at DESC LIMIT ?').all(limit);
  }finally{db.close()}
 }
+function relations(subject,limit=100){
+ const key=normalize(subject,'subject',300);
+ if(!Number.isInteger(limit)||limit<1||limit>500)throw new TypeError('Invalid limit');
+ const db=open();
+ try{return db.prepare('SELECT id,subject,predicate,object,source_id,confidence,observed_at FROM memory_facts WHERE subject=? OR object=? ORDER BY observed_at DESC LIMIT ?').all(key,key,limit)}finally{db.close()}
+}
+function conflicts(limit=100){
+ if(!Number.isInteger(limit)||limit<1||limit>500)throw new TypeError('Invalid limit');
+ const db=open();
+ try{return db.prepare('SELECT c.id,c.detected_at,a.subject,a.predicate,a.object AS earlier,b.object AS newer,a.source_id AS earlier_source,b.source_id AS newer_source FROM memory_conflicts c JOIN memory_facts a ON a.id=c.earlier_id JOIN memory_facts b ON b.id=c.newer_id ORDER BY c.detected_at DESC LIMIT ?').all(limit)}finally{db.close()}
+}
 function diagnostics(){
  const db=open();
  try{
@@ -92,13 +104,15 @@ function diagnostics(){
    pendingVectors:db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='vector_queue'").get()?db.prepare('SELECT COUNT(*) AS n FROM vector_queue').get().n:0};
  }finally{db.close()}
 }
-module.exports={addFact,extractFacts,queryFacts,searchFacts,diagnostics};
+module.exports={addFact,extractFacts,queryFacts,searchFacts,relations,conflicts,diagnostics};
 if(require.main===module){
  try{
   const command=process.argv[2];
   if(command==='diagnostics')console.log(JSON.stringify(diagnostics(),null,2));
   else if(command==='facts')console.log(JSON.stringify(queryFacts({subject:process.argv[3]}),null,2));
   else if(command==='search')console.log(JSON.stringify(searchFacts(process.argv.slice(3).join(' ')),null,2));
+  else if(command==='relations')console.log(JSON.stringify(relations(process.argv.slice(3).join(' ')),null,2));
+  else if(command==='conflicts')console.log(JSON.stringify(conflicts(),null,2));
   else if(command==='ingest'){const [source,filename]=process.argv.slice(3);if(!source||!filename)throw Error('Usage: ingest source file');console.log(JSON.stringify(extractFacts(fs.readFileSync(filename,'utf8'),source),null,2))}
   else throw Error('Usage: node memory-core.js diagnostics|facts [subject]');
  }catch(e){console.error(e.message);process.exitCode=1}
