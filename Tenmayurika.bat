@@ -22,7 +22,7 @@ set "NODE=%~dp0runtime\node\node.exe"
 set "NPM=%~dp0runtime\node\npm.cmd"
 set "PATH=%~dp0runtime\node;%PATH%"
 :python_check
-if /i "%~1"=="doctor" goto :dependencies
+if /i "%~1"=="doctor" goto :check_files
 if not exist "%~dp0runtime\python\python.exe" (
  echo [INFO] Проверка переносного Python...
  powershell.exe -NoProfile -NonInteractive -File "%~dp0tools\bootstrap-python.ps1"
@@ -30,6 +30,7 @@ if not exist "%~dp0runtime\python\python.exe" (
   echo [WARN] Python не установлен. Основное приложение продолжит запуск.
  )
 )
+:check_files
 if not exist "%~dp0tools\launcher.js" goto :missing
 if not exist "%~dp0node_modules\@lancedb\lancedb" (
  echo [INFO] Установка зависимостей...
