@@ -9,6 +9,8 @@ function connect(){
  db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS workspace(id INTEGER PRIMARY KEY CHECK(id=1),payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS knowledge_nodes(id TEXT PRIMARY KEY,title TEXT NOT NULL,content TEXT NOT NULL DEFAULT ''); CREATE TABLE IF NOT EXISTS vector_queue(id TEXT PRIMARY KEY,attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT); CREATE TABLE IF NOT EXISTS knowledge_edges(source TEXT NOT NULL,target TEXT NOT NULL,relation TEXT NOT NULL,PRIMARY KEY(source,target,relation));");
  const prior=db.prepare('SELECT payload FROM workspace WHERE id=1').get();
  if(!prior){let data=empty();const old=path.join(dir,'workspace.json');if(fs.existsSync(old))data=JSON.parse(fs.readFileSync(old,'utf8'));db.prepare('INSERT INTO workspace(id,payload) VALUES(1,?)').run(JSON.stringify(data));}
+ const snapshot=JSON.parse(db.prepare('SELECT payload FROM workspace WHERE id=1').get().payload);
+ for(const note of snapshot.notes||[]){if(!note.id||!note.title)continue;const known=db.prepare('SELECT id FROM knowledge_nodes WHERE id=?').get(note.id);if(!known){db.prepare('INSERT INTO knowledge_nodes(id,title,content) VALUES(?,?,?)').run(note.id,note.title,note.content||'');db.prepare('INSERT OR IGNORE INTO vector_queue(id) VALUES(?)').run(note.id)}}
 }
 function ensure(){if(!db)connect()}
 async function load(){ensure();return JSON.parse(db.prepare('SELECT payload FROM workspace WHERE id=1').get().payload)}
