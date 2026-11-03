@@ -32,11 +32,14 @@ if not exist "%~dp0runtime\python\python.exe" (
 )
 :check_files
 if not exist "%~dp0tools\launcher.js" goto :missing
-if not exist "%~dp0node_modules\@lancedb\lancedb" (
- echo [INFO] Установка зависимостей...
- call "%NPM%" install --no-audit --no-fund
- if errorlevel 1 goto :dependencies
-)
+"%NODE%" -e "require('dotenv');import('@lancedb/lancedb').then(()=>process.exit(0),()=>process.exit(1))" >nul 2>nul
+if not errorlevel 1 goto :deps_ready
+echo [INFO] Восстановление зависимостей...
+call "%NPM%" install --no-audit --no-fund
+if errorlevel 1 goto :dependencies
+"%NODE%" -e "require('dotenv');import('@lancedb/lancedb').then(()=>process.exit(0),()=>process.exit(1))" >nul 2>nul
+if errorlevel 1 goto :dependencies
+:deps_ready
 "%NODE%" "%~dp0tools\launcher.js" "%~1"
 set "RESULT=%ERRORLEVEL%"
 if not "%RESULT%"=="0" pause
