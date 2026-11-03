@@ -23,6 +23,8 @@ jobs:
           node --check tools/verify-backup.js
           node --check tools/backup-complete.js
           node --check tools/maintenance.js
+          node --check tools/progress.js
+          node tools/progress.js 3
           node --check vector-store.js
           node --check tools/verify-complete.js
       - name: Run tests
