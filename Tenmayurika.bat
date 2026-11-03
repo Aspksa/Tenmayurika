@@ -9,12 +9,9 @@ echo ==========================================
 echo Directory: "%CD%"
 set "NODE=node.exe"
 set "NPM=npm.cmd"
-if exist "%~dp0runtime\node
-ode.exe" (
- set "NODE=%~dp0runtime\node
-ode.exe"
- set "NPM=%~dp0runtime\node
-pm.cmd"
+if exist "%~dp0runtime\node\node.exe" (
+ set "NODE=%~dp0runtime\node\node.exe"
+ set "NPM=%~dp0runtime\node\npm.cmd"
  set "PATH=%~dp0runtime\node;%PATH%"
 )
 "%NODE%" --version >nul 2>&1
@@ -29,8 +26,7 @@ if errorlevel 1 (
  pause
  exit /b 1
 )
-if not exist "%~dp0runtime\node
-ode.exe" (
+if not exist "%~dp0runtime\node\node.exe" (
  where npm.cmd >nul 2>&1
  if errorlevel 1 goto :no_npm
 ) else (
