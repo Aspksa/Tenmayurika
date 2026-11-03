@@ -290,6 +290,7 @@
    // Только ближайшие сутки; уже показанные не повторяем. Пропущенные за последние 30 минут покажем сразу.
    if(fired[key]||at-now>86400000||now-at>1800000)continue;
    taskTimers.set(key,setTimeout(()=>{
+    if(!cfg.taskAlerts||!cfg.tools.tasks)return;
     const f=load(ALERT_KEY,{});f[key]=Date.now();for(const k of Object.keys(f))if(Date.now()-f[k]>7*86400000)delete f[k];store(ALERT_KEY,f);
     fireReminder({id:'task-'+key,text:(lead&&at>now-60000?'Через '+cfg.taskLead+' мин: ':'Пора: ')+t.title+' ('+t.time+(t.category==='work'?', 💼 работа':'')+')'});
    },Math.max(1000,at-now)));
@@ -351,13 +352,14 @@
  const settings=h('section',{class:'avatar-menu',role:'dialog','aria-modal':'false','aria-label':'Меню аватара',hidden:true});
  document.body.append(backdrop,settings);
  let anchor=null,tab=load(TAB_KEY,'look');
- const refreshAll=()=>{save();applyLook();spawnParticles();scheduleBehaviour();renderQuick()};
+ // Таймеры дел пересчитываются сразу: выключение напоминаний или смена «заранее» действуют немедленно.
+ const refreshAll=()=>{save();applyLook();spawnParticles();scheduleBehaviour();renderQuick();scheduleTaskAlerts(window.TenmaApp?.workspace?.tasks||[])};
  function range(label,key,min,max,step,fmt,hint){
   const out=h('output',{text:fmt(cfg[key])});
   const r=h('input',{type:'range',min,max,step,value:cfg[key],'aria-label':label});
   const fill=()=>r.style.setProperty('--fill',((r.value-min)/(max-min)*100)+'%');fill();
   r.addEventListener('input',()=>{cfg[key]=Number(r.value);out.textContent=fmt(cfg[key]);fill();save();applyLook();if(/^particle/.test(key))spawnParticles()});
-  r.addEventListener('change',()=>{if(/Interval$/.test(key))scheduleBehaviour()});
+  r.addEventListener('change',()=>{if(/Interval$/.test(key))scheduleBehaviour();if(key==='taskLead')scheduleTaskAlerts(window.TenmaApp?.workspace?.tasks||[])});
   return h('label',{class:'field'},h('span',{text:label}),out,r,hint?h('small',{class:'hint',text:hint}):null);
  }
  // Переключатель в виде золотого «тумблера».
