@@ -9,14 +9,22 @@ echo ==========================================
 echo Directory: "%CD%"
 set "NODE=node.exe"
 set "NPM=npm.cmd"
-if exist "%~dp0runtime\node\node.exe" (
- set "NODE=%~dp0runtime\node\node.exe"
- set "NPM=%~dp0runtime\node\npm.cmd"
- set "PATH=%~dp0runtime\node;%PATH%"
+if exist "%~dp0runtime
+ode
+ode.exe" (
+ set "NODE=%~dp0runtime
+ode
+ode.exe"
+ set "NPM=%~dp0runtime
+ode
+pm.cmd"
+ set "PATH=%~dp0runtime
+ode;%PATH%"
 )
 "%NODE%" --version >nul 2>&1
 if errorlevel 1 (
- echo [ERROR] Node.js not found. Put portable Node.js 24+ in runtime\node.
+ echo [ERROR] Node.js not found. Put portable Node.js 24+ in runtime
+ode.
  pause
  exit /b 1
 )
@@ -26,7 +34,9 @@ if errorlevel 1 (
  pause
  exit /b 1
 )
-if not exist "%~dp0runtime\node\node.exe" (
+if not exist "%~dp0runtime
+ode
+ode.exe" (
  where npm.cmd >nul 2>&1
  if errorlevel 1 goto :no_npm
 ) else (
@@ -34,7 +44,8 @@ if not exist "%~dp0runtime\node\node.exe" (
 )
 goto :npm_ready
 :no_npm
-echo [ERROR] npm.cmd not found. Put full portable Node.js distribution in runtime\node.
+echo [ERROR] npm.cmd not found. Put full portable Node.js distribution in runtime
+ode.
 pause
 exit /b 1
 :npm_ready
@@ -44,7 +55,10 @@ if not exist "package.json" (
  pause
  exit /b 2
 )
-echo [INFO] Installing or updating Node.js dependencies...\ncall "%NPM%" install --no-audit --no-fund\nif errorlevel 1 goto :failed\n"%NODE%" -e "const s=require('./package.json').scripts||{};process.exit(s.start?0:s.dev?1:2)"
+echo [INFO] Installing or updating Node.js dependencies...
+call "%NPM%" install --no-audit --no-fund
+if errorlevel 1 goto :failed
+"%NODE%" -e "const s=require('./package.json').scripts||{};process.exit(s.start?0:s.dev?1:2)"
 if errorlevel 1 goto :check_dev
 echo [INFO] Open http://127.0.0.1:5173 in your browser.
 start "" "http://127.0.0.1:5173"
