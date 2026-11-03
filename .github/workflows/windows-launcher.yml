@@ -27,6 +27,17 @@ jobs:
           node tools/progress.js 3
           node --check vector-store.js
           node --check tools/verify-complete.js
+      - name: Validate PowerShell download scripts
+        shell: pwsh
+        run: |
+          foreach ($file in @('tools/download-monitor.ps1','tools/bootstrap-node.ps1','tools/bootstrap-python.ps1')) {
+            $tokens=$null; $errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) { throw "PowerShell parse failed: $file : $errors" }
+          }
+          $rejected=$false
+          try { & ./tools/download-monitor.ps1 -Url 'http://example.com/file' -Destination (Join-Path $env:RUNNER_TEMP 'invalid.zip') } catch { $rejected=$true }
+          if (-not $rejected) { throw 'Expected insecure URL rejection' }
       - name: Run tests
         run: npm test
       - name: Test Windows BAT doctor in Cyrillic path
