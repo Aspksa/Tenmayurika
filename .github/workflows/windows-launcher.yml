@@ -24,6 +24,8 @@ jobs:
           node --check tools/backup-complete.js
           node --check tools/maintenance.js
           node --check tools/progress.js
+          node --check tools/run-npm.js
+          node tools/run-npm.js --version
           node tools/progress.js 3
           node --check memory-core.js
           node --check vector-store.js
