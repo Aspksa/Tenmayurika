@@ -4,6 +4,8 @@
 //  • check — неуверенный факт («Ты всё ещё работаешь в студии?»);
 //  • stale — давнее меняющееся («ты живёшь в Казани» сказано полгода назад: это ещё так?);
 //  • guess — проверка догадки (guesses.js);
+//  • conflict — две версии одного («жила в Москве» и «живёт в Казани»): ответ сам решает спор;
+//  • plan — срок плана прошёл (plans.js): сбылось ли;
 //  • с моделью — до двух своих вопросов по блоку «Кто ты».
 // Вопрос задаётся не чаще раза в EVERY сообщений, по одному, в конце ответа и только если к месту.
 // Ответ человека разбирается: «да»/«нет» подтверждают или отменяют догадку и проверяемый факт,
@@ -14,6 +16,7 @@ const predicates=require('./predicates');
 const usefulness=require('./usefulness');
 const guesses=require('./guesses');
 const thoughts=require('./thoughts');
+const plans=require('./plans');
 const {use,state,setState}=require('./brain-db');
 const EVERY=Number(process.env.TENMAYURIKA_ASK_EVERY)||4,MAX_OPEN=15,STALE_DAYS=180;
 const YES=/^(да|ага|угу|верно|точно|конечно|так и есть|именно|правда|ну да|yes|ок|ага,)(?=[\s,.!)]|$)/i;
@@ -50,6 +53,10 @@ async function generate({complete=null}={}){
  // Давнее меняющееся: где живёт, где работает, сказано давно.
  for(const f of facts.filter(f=>['живёт в','работает в','учится в'].includes(f.relation)&&f.polarity>0&&now-Date.parse(f.observed_at)>STALE_DAYS*864e5).slice(0,1))
   push({text:(predicates.entityKey(f.subject)==='я'?'Ты всё ещё ':f.subject+' всё ещё ')+f.predicate+' '+f.object+'?',about:f.subject,reason:'сказано давно, могло измениться',kind:'stale',ref:f.id,weight:.4});
+ // Противоречия спрашиваются в разговоре: ответ сам решает спор (старое уходит в историю).
+ try{for(const c of memory.conflicts(5).slice(0,2))push({text:conflictText(c),about:c.subject,reason:'в памяти две версии',kind:'conflict',ref:c.id,weight:.75})}catch(e){console.error('Conflict questions failed:',e.name)}
+ // Планы, у которых прошёл срок: сбылось ли?
+ try{for(const p of plans.due().slice(0,2)){const f=memory.factsById([p.fact_id])[0];if(f)push({text:'Помню план: «'+f.subject+' — '+f.predicate+' '+f.object+'» ('+p.phrase+'). Получилось?',about:f.subject,reason:'срок прошёл',kind:'plan',ref:f.id,weight:.7});else plans.setStatus(p.fact_id,'missed')}}catch(e){console.error('Plan questions failed:',e.name)}
  // Догадки с достаточной уверенностью проверяются вопросом.
  for(const g of guesses.list('open',10).filter(g=>g.confidence>=.5).slice(0,2))push({text:'Есть догадка: «'+g.subject+' — '+g.predicate+' '+g.object+'». Я угадала?',about:g.subject,reason:'догадка: '+(g.why||''),kind:'guess',ref:g.id,weight:.3+.5*g.confidence});
  if(complete&&made.length<2){try{
@@ -60,13 +67,25 @@ async function generate({complete=null}={}){
  }catch(e){console.error('Curiosity model failed:',e.name)}}
  return made;
 }
+function conflictText(c){
+ return 'У меня записано по-разному: сначала «'+c.subject+' — '+c.predicate+' '+c.earlier+'», потом «'+c.subject+' — '+(c.newer_predicate||c.predicate)+' '+c.newer+'». Сейчас верно второе?';
+}
+// Вопрос ещё к месту: противоречие не разобрано, план не закрыт, факт на месте.
+function stillValid(q){
+ try{
+  if(q.kind==='conflict')return memory.conflicts(500).some(c=>c.id===q.ref);
+  if(q.kind==='plan'){const p=plans.get([q.ref]).get(q.ref);return !!(p&&p.status==='open'&&memory.factsById([q.ref]).length)}
+  if((q.kind==='check'||q.kind==='stale')&&q.ref)return memory.factsById([q.ref]).length>0;
+ }catch{return true}
+ return true;
+}
 const read=()=>{const s=state('curiosity',null);return s&&typeof s==='object'?s:{turns:0,lastAsk:-99,pending:null}};
 // Ход разговора: подсказка модели с одним вопросом или пустая строка.
 function turn({busy=false,conversation=null}={}){
  const s=read();s.turns=(s.turns||0)+1;
  let text='';
  if(!busy&&s.turns-(s.lastAsk??-99)>=EVERY){
-  const q=list('open',1)[0];
+  let q=null;for(const c of list('open',6)){if(stillValid(c)){q=c;break}dismiss(c.id)}
   if(q){s.lastAsk=s.turns;s.pending=q.id;s.conv=conversation||null;use(db=>db.prepare("UPDATE memory_questions SET status='asked',asked_at=? WHERE id=?").run(new Date().toISOString(),q.id));
    text='\nЛюбопытство: тебе правда интересно узнать: «'+q.text+'»'+(q.reason?' (почему: '+q.reason+')':'')+'. Если это к месту и не мешает ответу, в самом конце мягко спроси ОДНО это, своими словами. Сначала ответь на то, что спросили.'}
  }
@@ -93,13 +112,19 @@ function onMessage(message,{conversation=null,fresh=false}={}){
  use(db=>db.prepare("UPDATE memory_questions SET status='answered',answer=?,done_at=? WHERE id=?").run(m.slice(0,500),new Date().toISOString(),q.id));
  let effect=null;
  try{
-  if(q.kind==='guess'&&(yes||no))effect=guesses.answer(q.ref,yes)?(yes?'guess-confirmed':'guess-rejected'):null;
+  const both=/^(оба|обе|и то,? и (?:то|другое)|оба верны|обе верны|и так,? и так)/i.test(m);
+  if(q.kind==='conflict'&&(yes||no||both)){const r=memory.resolveConflict(q.ref,both?'both':yes?'newer':'earlier');effect=r?(both?'conflict-both':yes?'conflict-newer':'conflict-earlier'):null}
+  else if(q.kind==='plan'&&(yes||no)){
+   if(yes){const f=memory.factsById([q.ref])[0];if(f){memory.setConfidence(f.id,Math.min(1,Number(f.confidence)+.2));usefulness.rate({facts:[f.id]},{ok:1})}plans.setStatus(q.ref,'done');effect='plan-done'}
+   else{memory.retireFact(q.ref,'outdated');plans.setStatus(q.ref,'missed');effect='plan-missed'}
+  }
+  else if(q.kind==='guess'&&(yes||no))effect=guesses.answer(q.ref,yes)?(yes?'guess-confirmed':'guess-rejected'):null;
   else if((q.kind==='check'||q.kind==='stale')&&q.ref){
    if(no){memory.retireFact(q.ref,'outdated');effect='fact-retired'}
    else if(yes){const f=memory.factsById([q.ref])[0];if(f){memory.setConfidence(f.id,Math.min(1,Number(f.confidence)+.25));usefulness.rate({facts:[f.id]},{ok:1});effect='fact-confirmed'}}
   }
  }catch(e){console.error('Answer handling failed:',e.name)}
- thoughts.add('ask','Получила ответ на «'+q.text+'»: '+m.slice(0,120)+(effect?' → '+{'guess-confirmed':'догадка подтвердилась','guess-rejected':'догадка отвергнута','fact-retired':'убрала устаревшее','fact-confirmed':'теперь уверена'}[effect]:''),{id:q.id,effect});
+ thoughts.add('ask','Получила ответ на «'+q.text+'»: '+m.slice(0,120)+(effect?' → '+{'guess-confirmed':'догадка подтвердилась','guess-rejected':'догадка отвергнута','fact-retired':'убрала устаревшее','fact-confirmed':'теперь уверена','conflict-newer':'спор решён: верно новое','conflict-earlier':'спор решён: верно прежнее','conflict-both':'верно и то, и другое','plan-done':'план сбылся','plan-missed':'план не сбылся, убрала'}[effect]:''),{id:q.id,effect});
  return {question:q,effect};
 }
 function dismiss(id){return use(db=>db.prepare("UPDATE memory_questions SET status='dropped',done_at=? WHERE id=? AND status IN ('open','asked')").run(new Date().toISOString(),String(id||'')).changes>0)}
