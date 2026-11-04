@@ -174,14 +174,44 @@ async function indexWorkspace(){const ws=await storage.load();memory.syncRecords
 function ingestNoteFacts(item){if(!item.content||!item.content.includes('FACT:'))return;try{memory.extractFacts(item.content,'note:'+item.id)}catch(e){console.error('Fact ingestion failed:',e.name)}}
 // Общие операции с записями: используются API и инструментами аватара.
 // Дела: category (personal|work), due (ГГГГ-ММ-ДД), time (ЧЧ:ММ), priority (low|normal|high). Заметки: category и pinned.
+// Категория — это список планера: встроенные «Личное» (personal) и «Дела» (work) или свой список из workspace.lists.
 const CATEGORIES=['personal','work'],PRIORITIES=['low','normal','high'];
+const LIST_COLOR=/^#[0-9a-f]{6}$/i,MAX_LISTS=50;
+function knownCategory(id){return CATEGORIES.includes(id)||(typeof id==='string'&&(storage.peek().lists||[]).some(l=>l.id===id&&!CATEGORIES.includes(l.id)))}
+function listFields(input){
+ const out={};
+ if('title' in input){if(typeof input.title!=='string'||!input.title.trim()||input.title.trim().length>40)throw new TypeError('Название списка: от 1 до 40 символов');out.title=input.title.trim()}
+ if('color' in input){if(typeof input.color!=='string'||!LIST_COLOR.test(input.color))throw new TypeError('Цвет: #RRGGBB');out.color=input.color.toLowerCase()}
+ return out;
+}
+// Списки: свои создаются и удаляются; встроенные можно только переименовать и перекрасить.
+function addList(input){
+ const fields=listFields(input);if(!fields.title)throw new TypeError('Название списка: от 1 до 40 символов');
+ return storage.mutate(data=>{data.lists??=[];
+  if(data.lists.filter(l=>!CATEGORIES.includes(l.id)).length>=MAX_LISTS)throw new TypeError('Не больше '+MAX_LISTS+' списков');
+  const item={id:'l-'+require('node:crypto').randomUUID().slice(0,8),color:'#ee8a3c',...fields,createdAt:new Date().toISOString()};
+  data.lists.push(item);return item});
+}
+function updateList(id,input){
+ const fields=listFields(input);
+ return storage.mutate(data=>{data.lists??=[];let found=data.lists.find(l=>l.id===id);
+  if(!found&&CATEGORIES.includes(id)){found={id};data.lists.unshift(found)}
+  if(!found)return null;Object.assign(found,fields);found.updatedAt=new Date().toISOString();return {...found}});
+}
+// Удаление своего списка: его дела и заметки переходят в «Личное», ничего не теряется.
+function removeList(id){
+ if(CATEGORIES.includes(id))throw new TypeError('Встроенный список нельзя удалить');
+ return storage.mutate(data=>{const list=data.lists||[],i=list.findIndex(l=>l.id===id);if(i<0)return null;
+  let moved=0;for(const c of ['tasks','notes'])for(const x of data[c]||[])if(x.category===id){x.category='personal';moved++}
+  list.splice(i,1);return {ok:true,id,moved}});
+}
 function validDate(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return false;const d=new Date(v+'T00:00:00Z');return !Number.isNaN(d.getTime())&&d.toISOString().slice(0,10)===v}
 // Проверяет и возвращает только разрешённые поля; бросает TypeError с понятным текстом.
 function itemFields(collection,input){
  const out={};
  if('title' in input){if(typeof input.title!=='string'||!input.title.trim()||input.title.length>200)throw new TypeError('Название: от 1 до 200 символов');out.title=input.title.trim()}
  if('content' in input){if(input.content!=null&&typeof input.content!=='string')throw new TypeError('Invalid content');out.content=String(input.content||'').slice(0,20000)}
- if('category' in input){if(!CATEGORIES.includes(input.category))throw new TypeError('Категория: personal или work');out.category=input.category}
+ if('category' in input){if(!knownCategory(input.category))throw new TypeError('Категория: personal, work или id своего списка');out.category=input.category}
  if(collection==='tasks'){
   if('done' in input){if(typeof input.done!=='boolean')throw new TypeError('Invalid done');out.done=input.done}
   if('due' in input){if(input.due===null||input.due==='')out.due=null;else if(typeof input.due==='string'&&validDate(input.due))out.due=input.due;else throw new TypeError('Дата: ГГГГ-ММ-ДД')}
@@ -285,8 +315,14 @@ if(req.method==='POST'&&p==='/api/parse'){const input=await body(req);if(!input|
 if(req.method==='GET'&&p==='/api/workspace')return respond(res,200,await storage.load());
 if(p==='/api/items'&&['POST','PATCH','DELETE'].includes(req.method)){
 const input=await body(req);
-if(!input||typeof input!=='object'||Array.isArray(input)||!['notes','tasks'].includes(input.collection))return respond(res,400,{error:'Invalid collection'});
+if(!input||typeof input!=='object'||Array.isArray(input)||!['notes','tasks','lists'].includes(input.collection))return respond(res,400,{error:'Invalid collection'});
 try{
+ if(input.collection==='lists'){
+  if(req.method==='POST')return respond(res,201,addList(input));
+  if(typeof input.id!=='string')return respond(res,400,{error:'Invalid id'});
+  const out=req.method==='DELETE'?removeList(input.id):updateList(input.id,input);
+  return out?respond(res,200,out):respond(res,404,{error:'Not found'});
+ }
  if(req.method==='POST'){const {collection,title,content,id:_id,createdAt:_c,...extra}=input;if(typeof title!=='string')return respond(res,400,{error:'Invalid item'});return respond(res,201,addItem(collection,title,content,extra))}
  if(typeof input.id!=='string')return respond(res,400,{error:'Invalid id'});
  if(req.method==='DELETE'){const removed=removeItem(input.collection,input.id);return removed?respond(res,200,{ok:true,id:input.id}):respond(res,404,{error:'Not found'})}
