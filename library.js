@@ -61,3 +61,15 @@ async function searchText(query){
  return {results,scanned,truncated:pending.length>0||scanned>5000||results.length>=100};
 }
 module.exports.searchText=searchText;
+
+// Одинаковые файлы группируются по размеру и SHA-256 без загрузки целиком в память.
+async function duplicates(){
+ const crypto=require('node:crypto'),pending=[''],sizes=new Map();let scanned=0,truncated=false;
+ while(pending.length&&scanned<5000){const dir=pending.pop();for(const entry of await list(dir)){if(++scanned>5000){truncated=true;break}if(entry.type==='folder'){pending.push(entry.path);continue}const group=sizes.get(entry.size)||[];group.push(entry);sizes.set(entry.size,group)}}
+ const hashes=new Map(),errors=[];
+ for(const group of sizes.values())if(group.length>1)for(const entry of group){
+  try{const hash=crypto.createHash('sha256');for await(const chunk of fs.createReadStream(await filePath(entry.path)))hash.update(chunk);const digest=entry.size+':'+hash.digest('hex'),matches=hashes.get(digest)||[];matches.push(entry);hashes.set(digest,matches)}catch{errors.push(entry.path)}
+ }
+ return {groups:[...hashes.values()].filter(g=>g.length>1),scanned,truncated:truncated||pending.length>0,errors};
+}
+module.exports.duplicates=duplicates;

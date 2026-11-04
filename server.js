@@ -230,6 +230,7 @@ if(p.startsWith('/api/library/')){
   if(req.method==='GET'&&p==='/api/library/list')return respond(res,200,{items:await library.list(url.searchParams.get('path')||'')});
   if(req.method==='GET'&&p==='/api/library/search')return respond(res,200,await library.search(url.searchParams.get('q')||''));
   if(req.method==='GET'&&p==='/api/library/search-text')return respond(res,200,await library.searchText(url.searchParams.get('q')||''));
+  if(req.method==='GET'&&p==='/api/library/duplicates')return respond(res,200,await library.duplicates());
   if(req.method==='POST'&&p==='/api/library/folder'){const input=await body(req);await library.mkdir(input?.path);return respond(res,201,{ok:true})}
   if(req.method==='PUT'&&p==='/api/library/upload')return respond(res,201,await library.upload(url.searchParams.get('path')||'',req));
   if(req.method==='GET'&&p==='/api/library/download'){
