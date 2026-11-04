@@ -25,8 +25,9 @@ const clean=s=>String(s||'').toLocaleLowerCase().replace(/ё/g,'е').replace(/[�
 function classify(predicate){
  const p=clean(predicate);
  for(const t of TYPES)if(t.re.test(p))return {relation:t.relation,polarity:t.polarity||1,single:!!t.single};
- const neg=/^не\s+/.test(p),base=neg?p.slice(3):p;
- return {relation:base||p,polarity:neg?-1:1,single:!MULTI.test(base)};
+ // «Не живёт в» — то же, что «живёт в», с обратным знаком: основа проходит то же сведение к типу.
+ if(/^не\s+\S/.test(p)){const k=classify(p.slice(3));return {relation:k.relation,polarity:-k.polarity,single:k.single}}
+ return {relation:p,polarity:1,single:!MULTI.test(p)};
 }
 // Сущность для сравнения: регистр, «ё», кавычки и «г.»/«город» не важны.
 function entityKey(s){return clean(s).replace(/^(г|город|гор|пос|с|д)\s+/,'').trim()}

@@ -58,7 +58,9 @@ async function recall(text,{factLimit=8,noteLimit=5,ws,diversify=true,topic=true
  if(!notes.size){const ws=[...new Set(query.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w=>w.length>=3))].slice(0,8);
   if(ws.length)(data.notes||[]).map(n=>{const hay=(n.title+' '+(n.content||'')).toLocaleLowerCase();return {n,c:ws.filter(w=>hay.includes(w)).length}}).filter(x=>x.c>0).sort((a,b)=>b.c-a.c).slice(0,10).forEach((x,i)=>add(notes,x.n.id,'слова',W.text*rrf(i)*6))}
  // Часть слова, которой нет в индексе («зань»): старый поиск по подстроке.
- if(!facts.size)try{memory.searchFacts(query,20).forEach((f,i)=>add(facts,f.id,'слова',W.text*rrf(i)*6))}catch(e){if(!(e instanceof TypeError))throw e}
+ // По всей фразе и по каждому слову отдельно; чем больше слов совпало, тем выше.
+ if(!facts.size){const hit=new Map();for(const t of [query,...new Set(query.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w=>w.length>=3))].slice(0,9)){try{for(const f of memory.searchFacts(t,20))hit.set(f.id,(hit.get(f.id)||0)+1)}catch(e){if(!(e instanceof TypeError))throw e}}
+  [...hit].sort((x,y)=>y[1]-x[1]).slice(0,20).forEach(([id],i)=>add(facts,id,'слова',W.text*rrf(i)*6))}
  // Смысл.
  (await vectorNotes(query)).forEach((id,i)=>add(notes,id,'смысл',W.vector*rrf(i)*8));
  // Связи: сущности лучших фактов и сущности, названные в вопросе.
@@ -73,7 +75,8 @@ async function recall(text,{factLimit=8,noteLimit=5,ws,diversify=true,topic=true
   const seeds=[...[...facts.values()].sort((a,b)=>b.score-a.score).slice(0,3).map(x=>({kind:'fact',ref:x.id,score:x.score})),...[...notes.values()].sort((a,b)=>b.score-a.score).slice(0,2).map(x=>({kind:'note',ref:x.id,score:x.score}))];
   for(const sd of seeds)for(const l of links.of(sd.kind,sd.ref,8)){const map=l.kind==='fact'?facts:l.kind==='note'?notes:null;if(map&&!(l.kind===sd.kind&&l.ref===sd.ref))add(map,l.ref,l.type,W.cause*Math.min(1,sd.score))}
  }catch(e){console.error('Link recall failed:',e.name)}
- const rows=memory.factsById([...facts.keys()]),now=Date.now();
+ // factsById берёт не больше 50 id за раз — грузим всех кандидатов пачками, чтобы порядок решал итоговый балл.
+ const ids=[...facts.keys()],rows=[];for(let i=0;i<ids.length;i+=50)rows.push(...memory.factsById(ids.slice(i,i+50)));const now=Date.now();
  const useF=usefulness.get('fact',rows.map(f=>f.id));
  const allFacts=rows.map(f=>{const e=facts.get(f.id),age=(now-Date.parse(f.observed_at||0))/864e5,u=useF.get(f.id);
    const score=(e.score+W.fresh*Math.exp(-Math.max(0,age)/30))*(.6+.4*(Number(f.confidence)||0))*usefulness.factor(u);
