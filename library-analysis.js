@@ -2,6 +2,7 @@
 const library=require('./library');
 const docs=require('./library-documents');
 const collections=require('./library-collections');
+const guardian=require('./guardian-memory');
 const STOP=new Set('это как что для или при где когда если этот эта эти его её его она они как был была были будет также который которая которые свой свои the and for with from that this are was have'.split(' '));
 function terms(value){return String(value||'').toLocaleLowerCase('ru').replace(/ё/g,'е').match(/[\p{L}\p{N}]{4,}/gu)?.filter(w=>!STOP.has(w))||[]}
 function summarize(text){
@@ -20,9 +21,10 @@ async function similar(file){
 }
 function suggestFolder(filename){const name=String(filename||'').toLocaleLowerCase('ru');if(/\.(jpg|jpeg|png|webp|gif)$/.test(name))return 'Изображения';if(/\.(xlsx|xls|csv)$/.test(name))return 'Таблицы';if(/\.(pdf|docx|txt|md)$/.test(name))return 'Документы';return 'Другие файлы'}
 async function suggestFileFolder(file){await library.filePath(file);let text=file.toLocaleLowerCase('ru');if(/\.(txt|md|csv|json|docx|xlsx|pdf)$/i.test(file)){try{text+=' '+(await docs.read(file)).text.slice(0,8000).toLocaleLowerCase('ru')}catch{}}
+ const rule=await guardian.choose(file,text);if(rule)return {folder:rule.folder,reason:rule.learned?'Вы раньше перемещали файл с таким названием':'Ваше правило: «'+rule.keyword+'»'};
  const topics=[[/договор|контракт|соглашени/iu,'Договоры'],[/инструкц|руководств|инсталляц/iu,'Инструкции'],[/отч[её]т|реестр|ведомост/iu,'Отчёты']];for(const [pattern,folder] of topics)if(pattern.test(text))return {folder,reason:'По словам в названии или начале документа'};return {folder:suggestFolder(file),reason:'По типу файла'};
 }
-async function suggestName(file){const d=await docs.read(file),extension=file.split('.').pop().toLowerCase(),original=file.split('/').pop();const first=d.text.split(/\r?\n/).map(x=>x.trim()).find(x=>x.length>=6&&!/^\[.*\]$/.test(x));if(!first)return {name:original,reason:'Не удалось выделить заголовок'};let name=[...first].map(c=>c.charCodeAt(0)<32?' ':c).join('').replace(/[<>:"/\\|?*]/g,' ').replace(/\s+/g,' ').trim().slice(0,70).replace(/[. ]+$/,'');if(!name||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name))name='Документ';return {name:name+'.'+extension,reason:'По первой содержательной строке'};}
+async function suggestName(file){const learned=await guardian.learnedName(file);if(learned){await library.filePath(file);return {name:learned,reason:'Вы раньше переименовали файл с таким названием'}}const d=await docs.read(file),extension=file.split('.').pop().toLowerCase(),original=file.split('/').pop();const first=d.text.split(/\r?\n/).map(x=>x.trim()).find(x=>x.length>=6&&!/^\[.*\]$/.test(x));if(!first)return {name:original,reason:'Не удалось выделить заголовок'};let name=[...first].map(c=>c.charCodeAt(0)<32?' ':c).join('').replace(/[<>:"/\\|?*]/g,' ').replace(/\s+/g,' ').trim().slice(0,70).replace(/[. ]+$/,'');if(!name||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name))name='Документ';return {name:name+'.'+extension,reason:'По первой содержательной строке'};}
 module.exports={summarize,analyze,similar,suggestFolder,suggestName,suggestFileFolder};
 
 // Local extractive answers: only quotes from source files, never model-generated claims.
@@ -46,12 +48,18 @@ async function answer(question,selectedFile=''){
 }
 module.exports.answer=answer;
 
-async function proposeFacts(file){
- const d=await docs.read(file),out=[],seen=new Set();let lineNo=0;
- for(const raw of d.text.slice(0,16000).split(/\r?\n/)){lineNo++;for(const sentence of raw.match(/[^.!?;]+[.!?;]?/g)||[]){if(sentence.includes('?'))continue;const value=sentence.trim().replace(/[.!;]+$/,'').trim();const m=value.match(/^(.{1,70}?)\s+(не любит|любит|жив[её]т в|работает в|находится в|состоит из|содержит|принадлежит|предпочитает|создан[ао]? в)\s+(.{2,160})$/iu);if(!m)continue;const item={subject:m[1].trim(),predicate:m[2].toLocaleLowerCase('ru'),object:m[3].trim(),quote:value.slice(0,500),line:lineNo},key=[item.subject,item.predicate,item.object].join('|').toLocaleLowerCase('ru');if(!seen.has(key)){seen.add(key);out.push(item)}if(out.length>=8)return {source:file,items:out,truncated:true}}}
+function extractProposals(file,text){
+ const d={text},out=[],seen=new Set();let lineNo=0,page=null;
+ for(const raw of d.text.slice(0,16000).split(/\r?\n/)){lineNo++;const pm=raw.match(/^\[Страница (\d+)\]$/);if(pm){page=Number(pm[1]);continue}for(const sentence of raw.match(/[^.!?;]+[.!?;]?/g)||[]){if(sentence.includes('?'))continue;const value=sentence.trim().replace(/[.!;]+$/,'').trim();const m=value.match(/^(.{1,70}?)\s+(не любит|любит|жив[её]т в|работает в|находится в|состоит из|содержит|принадлежит|предпочитает|создан[ао]? в)\s+(.{2,160})$/iu);if(!m)continue;const item={subject:m[1].trim(),predicate:m[2].toLocaleLowerCase('ru'),object:m[3].trim(),quote:value.slice(0,500),line:lineNo,...(page?{page}:{}),confidence:'требует проверки'},key=[item.subject,item.predicate,item.object].join('|').toLocaleLowerCase('ru');if(!seen.has(key)){seen.add(key);out.push(item)}if(out.length>=8)return {source:file,items:out,truncated:true}}}
  return {source:file,items:out,truncated:d.text.length>16000};
 }
+async function proposeFacts(file){const d=await docs.read(file);return extractProposals(file,d.text)}
 module.exports.proposeFacts=proposeFacts;
+module.exports.extractProposals=extractProposals;
+// Lightweight local suggestions from the text already extracted by the queue.
+async function proposeMetadata(file,text){const first=String(text).split(/\r?\n/).map(x=>x.trim()).find(x=>x.length>=6&&!/^\[.*\]$/.test(x));const extension=file.split('.').pop().toLowerCase();let name=first?[...first].map(c=>c.charCodeAt(0)<32?' ':c).join('').replace(/[<>:"/\\|?*]/g,' ').replace(/\s+/g,' ').trim().slice(0,70).replace(/[. ]+$/,''):'';if(!name||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name))name=file.split('/').pop().replace(/\.[^.]+$/,'');const sample=file+' '+String(text).slice(0,8000),rule=await guardian.choose(file,text);let folder=rule?.folder;if(!folder)folder=/договор|контракт|соглашени/iu.test(sample)?'Договоры':/инструкц|руководств|инсталляц/iu.test(sample)?'Инструкции':/отч[её]т|реестр|ведомост/iu.test(sample)?'Отчёты':suggestFolder(file);const learnedName=await guardian.learnedName(file);return {name:learnedName||name+'.'+extension,folder,reason:rule||learnedName?'По сохранённому правилу или предыдущему решению':'По типу и словам документа'};}
+module.exports.proposeMetadata=proposeMetadata;
+
 
 // Excel preview is extractive: stored/cached values are shown with file, sheet and cell addresses.
 async function tables(files){
