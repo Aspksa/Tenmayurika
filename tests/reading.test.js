@@ -79,6 +79,19 @@ test('quote matches the relation; deleted file is not listed as read',async()=>{
  await queue.scan();reading.readPending();
 });
 
+test('«Перечитать» reindexes the chosen file from disk first',async()=>{
+ const f=path.join(LIB,'пере.txt');await fsp.writeFile(f,'Анна работает в больнице.');await queue.scan();await queue.run(10);reading.readPending();
+ await fsp.writeFile(f,'Анна работает в школе.');await fsp.utimes(f,new Date(),new Date(Date.now()+5000));
+ const {server}=require('../server');await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ try{
+  const base='http://127.0.0.1:'+server.address().port,post=(u,b)=>fetch(base+u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+  assert.equal((await post('/api/brain/reading/reread',{path:'пере.txt'})).status,200);
+  assert.equal((await post('/api/brain/reading/run',{path:'пере.txt'})).status,200);
+  assert.ok(reading.doc('пере.txt').facts.some(x=>x.object==='школе'));
+ }finally{await new Promise(r=>server.close(r))}
+ await fsp.unlink(f);await queue.scan();reading.readPending();
+});
+
 test('excerpt keeps the matching line even after a long paragraph',async()=>{
  await fsp.mkdir(LIB,{recursive:true});
  await fsp.writeFile(path.join(LIB,'вступление.txt'),'Вступление '.repeat(60).trim()+'\nПлатёж за парковку вносится до десятого числа.');
