@@ -81,9 +81,10 @@ function copyTree(from,to){
 function runTests(dir){
  const cmd=process.env.TENMAYURIKA_SELFCODE_TEST_CMD;
  const [bin,args]=cmd?['/bin/sh',['-c',cmd]]:[process.execPath,['--test']];
- const shell=cmd&&process.platform==='win32'?['cmd.exe',['/d','/s','/c',cmd]]:[bin,args];
+ // В Windows команда целиком в кавычках и без переразбора аргументов: cmd /s снимает только внешние кавычки.
+ const win=cmd&&process.platform==='win32',shell=win?[process.env.ComSpec||'cmd.exe',['/d','/s','/c','"'+cmd+'"']]:[bin,args];
  return new Promise(resolve=>{
-  execFile(shell[0],shell[1],{cwd:dir,timeout:TEST_TIMEOUT,maxBuffer:32*1024*1024,windowsHide:true,
+  execFile(shell[0],shell[1],{cwd:dir,timeout:TEST_TIMEOUT,maxBuffer:32*1024*1024,windowsHide:true,windowsVerbatimArguments:!!win,
    env:{...process.env,TENMAYURIKA_DATA_DIR:path.join(dir,'data'),TENMAYURIKA_MEMORY_DB:path.join(dir,'data','facts.sqlite'),TENMAYURIKA_SELFCODE_SANDBOX:'1',TENMAYURIKA_SELFCODE_ROOT:dir,NODE_TEST_CONTEXT:''}},
    (err,stdout)=>{
     const out=String(stdout||'');

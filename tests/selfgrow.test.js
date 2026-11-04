@@ -10,6 +10,8 @@ delete process.env.CHAT_URL;delete process.env.EMBEDDING_URL;
 const proj=path.join(dir,'proj');fs.mkdirSync(proj);
 fs.writeFileSync(path.join(proj,'greet.js'),"'use strict';\nconst hello=()=>'Привет';\nmodule.exports={hello};\n");
 fs.writeFileSync(path.join(proj,'safety.js'),'// закрыт\n');
+// Поддельный прогон тестов песочницы (одинаково в Linux и Windows): «ломается», если в greet.js есть «Сломано».
+fs.writeFileSync(path.join(proj,'check.cjs'),"const t=require('fs').readFileSync('greet.js','utf8');if(t.includes('Сломано')){console.log('not ok 1 - greet works');console.log('# pass 2');process.exitCode=1}else console.log('# pass 3');\n");
 process.env.TENMAYURIKA_SELFCODE_ROOT=proj;
 const soul=require('../soul');
 const psyche=require('../psyche');
@@ -120,7 +122,7 @@ test('own tools: a safe formula language, no eval, template answer',()=>{
 });
 
 test('code changes: blocked files and dangerous code refused, sandbox test, apply only on approval, rollback',async()=>{
- process.env.TENMAYURIKA_SELFCODE_TEST_CMD='node -e "console.log(\'# pass 3\')"';
+ process.env.TENMAYURIKA_SELFCODE_TEST_CMD='node check.cjs';
  assert.throws(()=>selfcode.propose({file:'safety.js',find:'закрыт',replace:'открыт',reason:'хочу'}),/нельзя/);
  assert.throws(()=>selfcode.propose({file:'../x.js',find:'a',replace:'b',reason:'r'}),/нельзя/);
  assert.throws(()=>selfcode.propose({file:'greet.js',find:"'Привет'",replace:"require('child_process')",reason:'r'}),/не разрешаю/);
@@ -138,13 +140,13 @@ test('code changes: blocked files and dangerous code refused, sandbox test, appl
  selfcode.rollback(p.id);
  assert.match(fs.readFileSync(path.join(proj,'greet.js'),'utf8'),/'Привет'/);
  // Правка, ломающая тесты, не годится.
- process.env.TENMAYURIKA_SELFCODE_TEST_CMD='if grep -q Сломано greet.js; then echo "not ok 1 - greet works"; echo "# pass 2"; exit 1; else echo "# pass 3"; fi';
+ 
  const bad=selfcode.propose({file:'greet.js',find:"'Привет'",replace:"'Сломано'",reason:'проверка'});
  const failed=await waitFor(()=>{const x=selfcode.proposals().find(y=>y.id===bad.id);return x.status!=='testing'&&x});
  assert.equal(failed.status,'failed');assert.deepEqual(failed.result.failed,['greet works']);
  assert.equal(selfcode.reject(bad.id).status,'rejected');
  // Откат не затирает чужую правку файла.
- process.env.TENMAYURIKA_SELFCODE_TEST_CMD='node -e "console.log(\'# pass 3\')"';
+ process.env.TENMAYURIKA_SELFCODE_TEST_CMD='node check.cjs';
  const q=selfcode.propose({file:'greet.js',find:"'Привет'",replace:"'Привет, хозяин'",reason:'ласковее'});
  await waitFor(()=>selfcode.proposals().find(y=>y.id===q.id).status==='ready');
  selfcode.apply(q.id);fs.appendFileSync(path.join(proj,'greet.js'),'// руками\n');
