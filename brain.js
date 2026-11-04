@@ -1226,7 +1226,7 @@ function mount(host){
   for(const [k,v] of Object.entries(TABS)){const b=el('button','brain-tab'+(k===tab?' on':''),v);b.type='button';b.setAttribute('role','tab');b.setAttribute('aria-selected',String(k===tab));b.onclick=()=>{cfg.diaTab=k;write(CFG_KEY,cfg);void renderDiary()};tabBar.append(b)}
   let body=[];
   if(tab==='mind')body=[status,...await mindSecs(sec,row)];
-  else if(tab==='self')body=[...(m.core?[coreSec(m.core,sec)]:[]),...(m.onboarding?.active?[onboardSec(m.onboarding,sec,row)]:[]),...(m.review?[reviewRow(m.review)]:[]),
+  else if(tab==='self')body=[...(m.soul?[soulSec(m.soul,sec)]:[]),...(m.core?[coreSec(m.core,sec)]:[]),...(m.onboarding?.active?[onboardSec(m.onboarding,sec,row)]:[]),...(m.review?[reviewRow(m.review)]:[]),
    sec('как вы просили отвечать',...m.preferences.map(p=>row(p.text,()=>postJson('/api/brain/preferences/remove',{id:p.id}),'Убрать предпочтение')),prefForm)];
   else if(tab==='memory')body=[sec('дневник',...(m.diary.length?m.diary.slice(0,8).map(d=>row(atText(d.at)+' · '+d.text)):[el('div','brain-fix-ok','Пока пусто.')])),
    ...(m.insights.length?[sec('выводы',...m.insights.slice(0,6).map(i=>row(i.text)))]:[]),
@@ -1326,8 +1326,25 @@ function mount(host){
   const step=Math.max(1,Math.ceil(max/60));tmPlay.textContent='❚❚';tmPlay.setAttribute('aria-label','Пауза');
   tmTimer=setInterval(()=>{const v=Math.min(max,+tmRange.value+step);tmRange.value=String(v);setDay(v);if(v>=max)stopPlay()},reduceQuery.matches?900:420);
  };
- // Сердцевина: три блока, которые всегда в подсказке. Можно поправить руками и вернуть прежнюю версию.
- const srcName={seed:'начальное',chat:'сама в разговоре',reflect:'пересмотрела',review:'из разбора',user:'вы',rules:'из фактов'};
+ // Душа: ступень роста, черты характера, настроение и дорогие моменты (soul.js).
+ function soulSec(v,sec){
+  const kids=[];
+  if(!v.on)kids.push(el('div','brain-fix-ok','Рост души выключен в настройках мышления.'));
+  const lv=el('div','brain-soul-level');lv.append(el('span','brain-soul-name','«'+v.level+'» · ступень '+(v.levelIndex+1)+' из '+v.levels),
+   el('span','brain-fix-ok',v.next?'до «'+v.next.name+'»: '+Math.max(0,Math.ceil(v.next.at-v.xp))+' опыта':'высшая ступень'));
+  const bar=el('div','brain-soul-bar');const fill=el('i','');fill.style.width=Math.round(v.progress*100)+'%';bar.append(fill);bar.setAttribute('role','progressbar');bar.setAttribute('aria-valuenow',String(Math.round(v.progress*100)));bar.setAttribute('aria-label','Рост души');
+  kids.push(lv,bar,el('div','brain-fix-ok','Настроение: '+v.mood.label+(v.mood.why?' · после «'+trim(v.mood.why,60)+'»':'')));
+  const traits=el('div','brain-soul-traits');
+  for(const t of v.traits){const r=el('div','brain-soul-trait');const b=el('div','brain-soul-bar small');const f=el('i','');f.style.width=t.value+'%';b.append(f);r.append(el('span','',t.label),b,el('span','brain-fix-ok',String(t.value)));traits.append(r)}
+  kids.push(traits);
+  if(v.moments.length)kids.push(el('div','brain-fix-q','дорогие моменты'),...v.moments.slice(0,5).map(x=>el('div','brain-fix-ok','♡ '+atText(x.at)+' · «'+trim(x.text,120)+'»')));
+  const reset=el('button','brain-btn','Начать рост заново');reset.type='button';
+  reset.onclick=async()=>{if(!confirm('Сбросить ступень, черты и моменты души? Блок «Моя душа» останется.'))return;reset.disabled=true;try{await postJson('/api/brain/soul/reset',{})}catch{}void renderDiary()};
+  const row=el('div','brain-dia-row');row.append(reset);kids.push(row);
+  return sec('душа',...kids);
+ }
+ // Сердцевина: блоки, которые всегда в подсказке. Можно поправить руками и вернуть прежнюю версию.
+ const srcName={persona:'стартовая личность',seed:'начальное',chat:'сама в разговоре',reflect:'пересмотрела',review:'из разбора',user:'вы',rules:'из фактов'};
  function coreSec(blocks,sec){
   const kids=[el('div','brain-fix-ok','Это всегда у меня перед глазами. Я переписываю это сама, когда узнаю важное; поправить можно и вам.')];
   for(const b of blocks){
