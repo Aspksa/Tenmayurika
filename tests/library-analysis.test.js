@@ -1,6 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os');
 const dir=require('node:fs').mkdtempSync(path.join(os.tmpdir(),'tenma-analysis-'));process.env.TENMAYURIKA_LIBRARY_DIR=path.join(dir,'library');
+process.env.TENMAYURIKA_LIBRARY_COLLECTIONS=path.join(dir,'collections.json');
 const analysis=require('../library-analysis');
 test('summaries quote source and similarity does not change files',async()=>{try{
  await fs.mkdir(process.env.TENMAYURIKA_LIBRARY_DIR,{recursive:true});const a='Договор перевозки щебня. Перевозка щебня выполняется автомобилем каждый рабочий день.';const b='Перевозка щебня осуществляется автомобилем. Договор предусматривает рабочий день.';

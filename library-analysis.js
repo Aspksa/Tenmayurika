@@ -1,6 +1,7 @@
 'use strict';
 const library=require('./library');
 const docs=require('./library-documents');
+const collections=require('./library-collections');
 const STOP=new Set('это как что для или при где когда если этот эта эти его её его она они как был была были будет также который которая которые свой свои the and for with from that this are was have'.split(' '));
 function terms(value){return String(value||'').toLocaleLowerCase('ru').replace(/ё/g,'е').match(/[\p{L}\p{N}]{4,}/gu)?.filter(w=>!STOP.has(w))||[]}
 function summarize(text){
@@ -39,7 +40,9 @@ async function answer(question,selectedFile=''){
   if(item.type==='folder'){pending.push(item.path);continue}if(!/\.(txt|md|csv|json|docx|xlsx|pdf)$/i.test(item.name))continue;if(++scanned>200){truncated=true;break}
   try{await inspect(item.path)}catch{unreadable++}
  }}
- return {items:matches.sort((a,b)=>b.score-a.score).slice(0,10),scanned:Math.min(scanned,200),unreadable,truncated:truncated||pending.length>0,method:'extractive'};
+ const factItems=await collections.factsWithStatus();let outdatedFacts=0;
+ for(const fact of factItems){if(selectedFile&&fact.source!==selectedFile)continue;const found=new Set(terms([fact.subject,fact.predicate,fact.object].join(' '))),score=wanted.filter(w=>found.has(w)).length;if(!score)continue;if(fact.sourceState!=='current'){outdatedFacts++;continue}matches.push({path:fact.source,kind:'fact',excerpt:fact.subject+' — '+fact.predicate+' → '+fact.object,score})}
+ return {items:matches.sort((a,b)=>b.score-a.score).slice(0,10),scanned:Math.min(scanned,200),unreadable,outdatedFacts,truncated:truncated||pending.length>0,method:'extractive'};
 }
 module.exports.answer=answer;
 

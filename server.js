@@ -269,7 +269,7 @@ if(p.startsWith('/api/library/')){
   if(req.method==='GET'&&p==='/api/library/memos')return respond(res,200,{items:await libraryCollections.memos()});
   if(req.method==='POST'&&p==='/api/library/memos'){const input=await body(req);return respond(res,201,await libraryCollections.addMemo(input?.source,input?.kind,input?.text,input?.due,input?.time))}
   if(req.method==='POST'&&p==='/api/library/memos/change'){const input=await body(req);return respond(res,200,await libraryCollections.changeMemo(input?.id,input?.action))}
-  if(req.method==='GET'&&p==='/api/library/facts')return respond(res,200,{items:await libraryCollections.facts()});
+  if(req.method==='GET'&&p==='/api/library/facts')return respond(res,200,{items:await libraryCollections.factsWithStatus()});
   if(req.method==='POST'&&p==='/api/library/facts'){const input=await body(req);return respond(res,201,await libraryCollections.addFact(input?.source,input?.subject,input?.predicate,input?.object,input?.quote))}
   if(req.method==='POST'&&p==='/api/library/facts/delete'){const input=await body(req);return respond(res,200,await libraryCollections.deleteFact(input?.id))}
   if(req.method==='GET'&&p==='/api/library/journal')return respond(res,200,{items:await libraryJournal.recent()});

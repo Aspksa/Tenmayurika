@@ -273,7 +273,7 @@
   const gen=conversation,fixFor=pendingFix;pendingFix=null;input.placeholder=BASE_PLACEHOLDER;
    if(!history.length)log.replaceChildren();
    log.classList.remove('is-empty');
-   history.push({role:'user',text,...(/^(?:(?:найди|поищи|поиск)\s+(?:в библиотеке|по библиотеке)|спроси библиотеку|ответь по документам)\s*[:—–-]?\s*\S/iu.test(text)?{private:true}:{})});bubble('user',text);quick.hidden=true;
+   history.push({role:'user',text,...(/^(?:(?:найди|поищи|поиск)\s+(?:в библиотеке|по библиотеке)|спроси библиотеку|спроси файл|ответь по документам)\s*[:—–-]?\s*\S/iu.test(text)?{private:true}:{})});bubble('user',text);quick.hidden=true;
   const typing=h('div',{class:'msg assistant typing','aria-label':cfg.name+' думает'},h('span',{text:'•'}),h('span',{text:'•'}),h('span',{text:'•'}));
   log.append(typing);log.scrollTop=log.scrollHeight;state('think');
   window.dispatchEvent(new CustomEvent('tenma:thinking',{detail:{on:true,text}}));

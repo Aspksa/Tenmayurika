@@ -212,9 +212,9 @@ function makeTools(ctx){
    const result=[files.length?'По названию:\n'+files.join('\n'):'',fragments.length?'В содержимом:\n'+fragments.join('\n'):''].filter(Boolean);
    return {ok:true,text:(result.length?result.join('\n\n'):'В библиотеке по запросу «'+q+'» ничего не нашла.')+(names.truncated||content.truncated?'\nПоиск ограничен, показаны не все результаты.':'')+(content.unreadable?'\nНе удалось прочитать файлов: '+content.unreadable+'.':'')};
   },
-  async answer_library({query}){
-   const data=await libraryAnalysis.answer(String(query||''));const rows=data.items.map(x=>'• '+x.path+(x.page?', страница '+x.page:x.sheet?', '+x.sheet:', строка '+x.line)+': '+x.excerpt);
-   return {ok:true,text:(rows.length?'Нашла фрагменты документов (проверьте контекст):\n'+rows.join('\n'):'Подходящих фрагментов не нашла.')+(data.truncated?'\nПроверена только часть библиотеки.':'')+(data.unreadable?'\nНе удалось прочитать файлов: '+data.unreadable+'.':'')};
+  async answer_library({query,path}){
+   const data=await libraryAnalysis.answer(String(query||''),typeof path==='string'?path:'');const rows=data.items.map(x=>'• '+x.path+(x.kind==='fact'?', подтверждённый факт':x.page?', страница '+x.page:x.sheet?', '+x.sheet:', строка '+x.line)+': '+x.excerpt);
+   return {ok:true,text:(rows.length?'Нашла фрагменты документов (проверьте контекст):\n'+rows.join('\n'):'Подходящих фрагментов не нашла.')+(data.truncated?'\nПроверена только часть библиотеки.':'')+(data.unreadable?'\nНе удалось прочитать файлов: '+data.unreadable+'.':'')+(data.outdatedFacts?'\nФактов требуют перепроверки: '+data.outdatedFacts+'.':'')};
   },
   // Самоправка памяти прямо в разговоре (идея самоправки из letta-code).
   async correct_fact({subject,predicate,object,new_object}){
@@ -439,6 +439,7 @@ const pick=(map,text)=>Object.keys(map).find(k=>new RegExp(map[k]).test(text));
 function parseCommand(text){
  const t=text.trim(),low=t.toLocaleLowerCase();
  let m;
+ if((m=t.match(/^спроси\s+файл\s+([^:]+):\s*(.+?)\??$/iu)))return {fn:'answer_library',args:{path:m[1].trim(),query:m[2]}};
  if((m=t.match(/^(?:спроси библиотеку|ответь по документам)\s*[:—–-]?\s*(.+?)\??$/iu)))return {fn:'answer_library',args:{query:m[1]}};
  if((m=t.match(/^(?:найди|поищи|поиск)\s+(?:в библиотеке|по библиотеке)\s*[:—–-]?\s*(.+?)\??$/iu)))return {fn:'search_library',args:{query:m[1]}};
  if(/^(помощь|справка|команды|что (ты )?умеешь|инструменты)\??!?$/.test(low))return {help:true};
