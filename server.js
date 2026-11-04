@@ -39,6 +39,7 @@ const libraryDocuments=require('./library-documents');
 const libraryQueue=require('./library-queue');
 const libraryCollections=require('./library-collections');
 const libraryAnalysis=require('./library-analysis');
+const libraryOcr=require('./library-ocr');
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
 const HOST='127.0.0.1',PORT=Number(process.env.PORT)||5173;
@@ -239,6 +240,7 @@ if(p.startsWith('/api/library/')){
   if(req.method==='GET'&&p==='/api/library/summary')return respond(res,200,await libraryAnalysis.analyze(url.searchParams.get('path')||''));
   if(req.method==='GET'&&p==='/api/library/similar')return respond(res,200,await libraryAnalysis.similar(url.searchParams.get('path')||''));
   if(req.method==='GET'&&p==='/api/library/suggest-folder')return respond(res,200,{folder:libraryAnalysis.suggestFolder(url.searchParams.get('name')||'')});
+  if(req.method==='POST'&&p==='/api/library/ocr'){const input=await body(req);return respond(res,200,await libraryOcr.recognize(input?.path))}
   if(req.method==='POST'&&p==='/api/library/compare'){const input=await body(req);return respond(res,200,await libraryDocuments.compare(input?.left,input?.right))}
   if(req.method==='GET'&&p==='/api/library/queue')return respond(res,200,await libraryQueue.status());
   if(req.method==='POST'&&p==='/api/library/queue/scan'){const result=await libraryQueue.scan();await libraryQueue.run();return respond(res,200,result)}
