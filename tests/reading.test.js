@@ -62,6 +62,16 @@ test('long paragraph is split at sentence boundaries',()=>{
  assert.ok(c.every(x=>/[.!?…]$/.test(x.text)));
 });
 
+test('many pages are all read; search looks past rejected candidates',async()=>{
+ const pages=Array.from({length:81},(_,i)=>'[Страница '+(i+1)+']\nСтраница номер '+(i+1)+'.').join('\n')+'\nГалина любит сирень.';
+ const c=reading.chunks(pages);assert.equal(c.length,81);assert.ok(c[80].text.includes('Галина любит сирень'));
+ for(let i=0;i<9;i++)await fsp.writeFile(path.join(LIB,'кор'+i+'.txt'),'Договор\nаренды\nквартиры');
+ await fsp.writeFile(path.join(LIB,'длинный.txt'),'Вступление и прочие слова. '.repeat(20)+'\nДоговор аренды квартиры.');
+ await queue.scan();await queue.run(20);reading.readPending({limit:100});
+ assert.equal(reading.find('договор аренды квартиры')[0].path,'длинный.txt');
+ for(let i=0;i<9;i++)await fsp.unlink(path.join(LIB,'кор'+i+'.txt'));await fsp.unlink(path.join(LIB,'длинный.txt'));await queue.scan();reading.readPending();
+});
+
 test('excerpt keeps the matching line even after a long paragraph',async()=>{
  await fsp.mkdir(LIB,{recursive:true});
  await fsp.writeFile(path.join(LIB,'вступление.txt'),'Вступление '.repeat(60).trim()+'\nПлатёж за парковку вносится до десятого числа.');
