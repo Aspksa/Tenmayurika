@@ -672,6 +672,9 @@
    const saveBtn=h('button',{type:'button',class:'primary',text:'Сохранить',onclick:async()=>{try{const nv=await api('/api/llm',collect());key.value='';key.placeholder=nv.hasKey?'Ключ сохранён '+nv.keyHint+' — введите новый, чтобы заменить':'Вставьте ключ API';say_('Сохранено ✓',true);status.className='model-status'+(nv.active?' on':'');status.lastChild.textContent=nv.active?'Подключено · '+nv.activeModel:'Модель не подключена — отвечаю локально'}catch(e){say_(e.message,false)}}});
    const loadBtn=h('button',{type:'button',text:'Загрузить список моделей',onclick:async()=>{loadBtn.disabled=true;say_('Запрашиваю список…',true);try{await api('/api/llm',collect());key.value='';const {models:list}=await api('/api/llm/models',{});models.replaceChildren(...list.map(id=>h('option',{value:id})));modelSelect.replaceChildren(h('option',{value:'',text:'— выберите модель ('+list.length+') —'}),...list.map(id=>h('option',{value:id,text:id,selected:id===model.value})));modelSelect.hidden=!list.length;say_(list.length?'Найдено моделей: '+list.length:'Сервис не вернул список — впишите имя модели вручную',!!list.length)}catch(e){say_(e.message,false)}loadBtn.disabled=false}});
    const testBtn=h('button',{type:'button',text:'Проверить связь',onclick:async()=>{testBtn.disabled=true;say_('Проверяю…',true);try{await api('/api/llm',collect());key.value='';const t=await api('/api/llm/test',{});say_('✓ '+t.model+' ответила за '+t.ms+' мс: «'+t.reply+'»',true)}catch(e){say_(e.message,false)}testBtn.disabled=false}});
+   const usageList=h('div',{'aria-live':'polite'},h('p',{class:'hint',text:'Загрузка учёта…'}));
+   const usageButton=h('button',{type:'button',text:'Обновить данные',onclick:()=>void loadUsage()});
+   async function loadUsage(){usageButton.disabled=true;try{const data=await api('/api/cloud-usage'),rows=Array.isArray(data.items)?data.items:[];usageList.replaceChildren(h('p',{class:'hint',text:'Дата указана по UTC. История начинается после установки учёта. Суммы токенов указаны только для ответов, где сервис их вернул; точную стоимость смотрите в Cloud.ru.'}),...(rows.length?rows.slice(0,30).map(x=>h('div',{class:'item'},h('strong',{text:String(x.day)+' · '+String(x.kind==='embedding'?'Поиск по смыслу':x.kind==='chat'?'Модель':x.kind==='models'?'Список моделей':x.kind)}),h('p',{class:'hint',text:String(x.purpose)+' · '+(x.model||x.service)+' · статус: '+x.status}),h('p',{text:'Запросов: '+x.requests+' · токены (вход): '+(x.input_tokens==null?'нет данных':x.input_tokens)+' · выход: '+(x.output_tokens==null?'нет данных':x.output_tokens)+' · запросов с данными: '+x.measured}))):[h('p',{class:'hint',text:'Записанных запросов пока нет.'})]));}catch(e){usageList.replaceChildren(h('p',{class:'model-msg err',text:'Не удалось загрузить учёт: '+e.message}))}finally{usageButton.disabled=false}}
    const clearBtn=h('button',{type:'button',class:'ghost',text:'Удалить ключ',onclick:async()=>{if(!confirm('Удалить сохранённый ключ API?'))return;try{const nv=await api('/api/llm',{clearKey:true});key.placeholder='Вставьте ключ API';say_('Ключ удалён',true);status.className='model-status'+(nv.active?' on':'')}catch(e){say_(e.message,false)}}});
    const swRow=(label,input,desc)=>h('label',{class:'switch-row'},h('span',{class:'switch-text'},h('span',{text:label}),desc?h('small',{text:desc}):null),input,h('span',{class:'switch','aria-hidden':'true'}));
    wrap.replaceChildren(status,
@@ -692,8 +695,10 @@
       h('label',{class:'field'},h('span',{text:'Модель эмбеддингов'}),h('span'),embModel,embHints),
       h('small',{class:'hint',text:'По ней Юрика находит факты и заметки по смыслу: «машина» найдёт «автомобиль». Пусто — только по словам.'+(v.embeddingSource==='env'?' Сейчас работает из .env.':'')}),
       h('div',{class:'row'},embTest))),
+    card('Расход запросов',usageButton,usageList),
     card('Характер',persona,h('small',{class:'hint',text:'Пусто — стартовая личность: личная преданная кицунэ, любит вас и зовёт «хозяин». Её же можно поправить в «Мозге» → «Дневник» (блоки «Кто я» и «Как мы общаемся»).'})),
     h('div',{class:'menu-actions'},saveBtn,testBtn,clearBtn),msg);
+   void loadUsage();
   }).catch(e=>wrap.replaceChildren(h('p',{class:'model-msg err',text:'Не удалось загрузить настройки: '+e.message})));
   return [wrap];
  }
@@ -898,6 +903,7 @@
  applyLook();spawnParticles();scheduleBehaviour();readSoul();setInterval(readSoul,15*60e3);
  if(cfg.phrases&&cfg.visible)setTimeout(()=>say(phrase()),2500);
 })();
+
 
 
 
