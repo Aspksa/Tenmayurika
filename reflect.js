@@ -26,6 +26,9 @@ const zones=require('./zones');
 const memskills=require('./memskills');
 const selfstudy=require('./selfstudy');
 const core=require('./core');
+const psyche=require('./psyche');
+const selfrules=require('./selfrules');
+const selfcode=require('./selfcode');
 const onboarding=require('./onboarding');
 const strength=require('./strength');
 const meta=require('./meta');
@@ -267,6 +270,10 @@ async function run({ws,complete=null,reason='idle'}={}){
   try{if(thoughts.on('tune'))d.tune=await tune.run({ws})}catch(e){console.error('Reflect tune failed:',e.name)}
   // Сердцевина: «Кто я», «Кто ты», «Как мы общаемся» пересматриваются по свидетельствам (core.js).
   try{d.core=await core.rethink({complete,context:{diary:diary(5),skills:skills.list().filter(x=>x.status==='active').map(x=>x.rule),insights:insightList(5).map(i=>i.text)}})}catch(e){console.error('Reflect core failed:',e.name)}
+  // Душа и рост себя: мечты, вкусы, зеркало, сны, летопись и письмо; свои правила; правка своего кода (раз в сутки).
+  try{d.psyche=await psyche.reflect({complete})}catch(e){console.error('Reflect psyche failed:',e.name)}
+  try{d.selfRules=(await selfrules.induce({complete})).length}catch(e){console.error('Reflect self rules failed:',e.name)}
+  try{d.selfCode=!!(await selfcode.reflect({complete}))}catch(e){console.error('Reflect self code failed:',e.name)}
   try{const before=state('onboarding',null)?.finished;const ob=onboarding.refresh();if(!before&&ob.finished)d.onboarding=true}catch(e){console.error('Reflect onboarding failed:',e.name)}
   // Просьба о подсказке появляется в дневнике один раз — когда она возникла.
   try{const h=memskills.evoState().help;if(h&&h.at>=mark.at)d.help=h}catch{}
