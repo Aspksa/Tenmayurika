@@ -4,10 +4,12 @@
 // их живой лентой в панели «Мысли». Хранится последнее KEEP записей.
 // Здесь же настройки мышления: каждую способность можно выключить.
 const {use,parse,state,setState}=require('./brain-db');
+const owner=require('./owner');
 const KEEP=400;
 const KINDS={plan:'план',split:'подвопросы',check:'сверка',guess:'догадка',ask:'вопрос',offer:'предложение',reflect:'размышление',review:'разбор',forget:'забывание',wake:'проснулось',learn:'выучила',answer:'ответ',context:'контекст',infer:'вывод',unknown:'не знаю',confirm:'подтверждение',future:'планы',tune:'настройка',dream:'сон',self:'о себе'};
 function add(kind,text,details={}){
- const t=String(text||'').trim();if(!t)return null;
+ // Мысли — её слова о хозяине: безличные «человек»/«пользователь» становятся «хозяином».
+ const t=owner.words(String(text||'').trim());if(!t)return null;
  const at=new Date().toISOString(),k=KINDS[kind]?kind:'answer';
  return use(db=>{
   const id=Number(db.prepare('INSERT INTO brain_thoughts(at,kind,text,details) VALUES(?,?,?,?)').run(at,k,t.slice(0,600),JSON.stringify(details||{})).lastInsertRowid);
