@@ -9,7 +9,8 @@ async function check(){
  }
  truncated=truncated||pending.length>0;
  const missing=[];for(const collection of await collections.list())for(const file of collection.files){try{await library.filePath(file)}catch{if(missing.length<100)missing.push({collection:collection.name,path:file})}}
+ const missingLinks=[];for(const link of await collections.links())for(const file of [link.a,link.b]){try{await library.filePath(file)}catch{if(missingLinks.length<100)missingLinks.push({id:link.id,path:file})}}
  let freeBytes=null;try{const d=await fs.statfs(library.ROOT,{bigint:true});freeBytes=(d.bavail*d.bsize).toString()}catch{}
- const status=await queue.status();return {files,folders,bytes,freeBytes,scanned:Math.min(scanned,LIMIT),truncated,errors:errors.slice(0,100),missing,queue:status.counts};
+ const status=await queue.status();return {files,folders,bytes,freeBytes,scanned:Math.min(scanned,LIMIT),truncated,errors:errors.slice(0,100),missing,missingLinks,queue:status.counts};
 }
 module.exports={check};

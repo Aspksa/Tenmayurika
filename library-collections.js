@@ -15,5 +15,8 @@ function create(name){return mutate(state=>{const nameSafe=title(name);if(state.
 function add(id,file){return mutate(async state=>{const item=get(state,id);await library.filePath(file);if(!item.files.includes(file))item.files.push(file);return item})}
 function remove(id,file){return mutate(state=>{const item=get(state,id);item.files=item.files.filter(x=>x!==file);return item})}
 function drop(id){return mutate(state=>{get(state,id);state.collections=state.collections.filter(x=>x.id!==id);return {ok:true}})}
-function replacePath(oldPath,newPath){return mutate(state=>{for(const item of state.collections)item.files=[...new Set(item.files.map(x=>x===oldPath?newPath:x))];return {ok:true}})}
-module.exports={list,create,add,remove,drop,replacePath};
+function replacePath(oldPath,newPath){return mutate(state=>{for(const item of state.collections)item.files=[...new Set(item.files.map(x=>x===oldPath?newPath:x))];for(const link of state.links||[]){if(link.a===oldPath)link.a=newPath;if(link.b===oldPath)link.b=newPath}return {ok:true}})}
+async function links(){await chain.catch(()=>{});return (await read()).links||[]}
+function connect(a,b,label){return mutate(async state=>{if(typeof a!=='string'||typeof b!=='string'||a===b)throw new TypeError('Выберите два разных файла');await library.filePath(a);await library.filePath(b);const name=typeof label==='string'?label.trim():'';if(name.length>100)throw new TypeError('Описание связи слишком длинное');state.links??=[];const existing=state.links.find(x=>(x.a===a&&x.b===b)||(x.a===b&&x.b===a));if(existing)return existing;const link={id:crypto.randomUUID(),a,b,label:name};state.links.push(link);return link})}
+function disconnect(id){return mutate(state=>{state.links??=[];if(!state.links.some(x=>x.id===id))throw new TypeError('Связь не найдена');state.links=state.links.filter(x=>x.id!==id);return {ok:true}})}
+module.exports={list,create,add,remove,drop,replacePath,links,connect,disconnect};
