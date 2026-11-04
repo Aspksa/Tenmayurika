@@ -7,6 +7,8 @@
 // найденные места показываются хозяину под ответом (поле docs), а не подсказкой модели.
 // Имена файлов и конспекты не попадают в мысли и журнал агентов — те иногда идут в подсказки модели.
 const path=require('node:path');
+const fs=require('node:fs');
+const {ROOT}=require('./library');
 const crypto=require('node:crypto');
 const learn=require('./learn');
 const thoughts=require('./thoughts');
@@ -88,11 +90,13 @@ function saveFacts(d,file,page,text,facts){
  return added;
 }
 // Один проход читает до PASS_CHUNKS кусков (это быстро: без модели) и уступает до следующей минуты.
-function readPending({limit=PASS_CHUNKS,force=false}={}){
+function readPending({limit=PASS_CHUNKS,force=false,path:first=null}={}){
  if(busy||(!on()&&!force))return {read:0,chunks:0,facts:0};
  busy=true;const out={read:0,chunks:0,facts:0};
  try{
-  for(const doc of queue()){
+  // Выбранный хозяином документ («Прочитать сейчас») — первым и целиком.
+  let list=queue();if(first){const i=list.findIndex(x=>x.path===first);if(i>=0){list=[list[i],...list.slice(0,i),...list.slice(i+1)];limit=Math.max(limit,MAX_CHUNKS)}}
+  for(const doc of list){
    if(out.chunks>=limit)break;
    const text=textOf(doc.path);
    // Документ опустел: прежнее знание из него устарело — забываем, иначе он вечно «прочитан» со старыми выписками.
@@ -132,6 +136,10 @@ function reread(file){
 }
 
 /* ---------- Поиск: для разговора и окон ---------- */
+// Файл на Диске всё ещё тот, что прочитан: есть, тот же размер и время изменения (индекс мог не успеть обновиться).
+function onDisk(r){
+ try{const full=path.resolve(ROOT,...String(r.path).split('/'));if(!full.startsWith(ROOT+path.sep))return false;const st=fs.statSync(full);return st.isFile()&&st.size===r.size&&st.mtime.toISOString()===r.modified}catch{return false}
+}
 // Индекс FTS (unicode61) не считает «ё» и «е» одной буквой: основа ищется и в вариантах с «ё» на месте каждой «е».
 function yoVariants(stem){const out=new Set([stem]);for(let i=0;i<stem.length;i++)if(stem[i]==='е')out.add(stem.slice(0,i)+'ё'+stem.slice(i+1));return [...out].slice(0,5)}
 const STEMS=q=>[...new Set(terms(q).map(w=>w.slice(0,Math.max(4,Math.min(6,w.length-1)))))].slice(0,8);
@@ -142,9 +150,10 @@ function find(query,{limit=3}={}){
  const stems=STEMS(query);if(!stems.length)return [];
  const need=stems.length>2?2:1;
  let rows=[];
- try{rows=use(d=>hasTable(d,'library_index_fts')?d.prepare("SELECT f.path FROM library_index_fts f JOIN brain_reading r ON r.path=f.path JOIN library_index i ON i.path=f.path WHERE r.chunks_done>0 AND r.modified=i.modified AND library_index_fts MATCH ? ORDER BY bm25(library_index_fts) LIMIT ?").all(stems.flatMap(yoVariants).map(s=>'"'+s.replace(/"/g,'')+'"*').join(' OR '),limit*3):[])}catch(e){console.error('Reading search failed:',e.name);return []}
+ try{rows=use(d=>hasTable(d,'library_index_fts')?d.prepare("SELECT f.path,i.modified,i.size FROM library_index_fts f JOIN brain_reading r ON r.path=f.path JOIN library_index i ON i.path=f.path WHERE r.chunks_done>0 AND r.modified=i.modified AND library_index_fts MATCH ? ORDER BY bm25(library_index_fts) LIMIT ?").all(stems.flatMap(yoVariants).map(s=>'"'+s.replace(/"/g,'')+'"*').join(' OR '),limit*3):[])}catch(e){console.error('Reading search failed:',e.name);return []}
  const out=[];
  for(const r of rows){
+  if(!onDisk(r))continue;
   const lines=textOf(r.path).split(/\r?\n/);let page=null,best=null;
   for(let i=0;i<lines.length;i++){
    const pm=lines[i].match(/^\[Страница (\d+)\]$/);if(pm){page=Number(pm[1]);continue}

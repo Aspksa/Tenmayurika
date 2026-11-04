@@ -824,7 +824,7 @@ function renderLibrary(){
  function readingBox(item){
   const box=h('section',{class:'disk-reading','aria-label':'Что Юрика узнала из документа'},h('p',{class:'muted',text:'Смотрю, читала ли я его…'}));
   const draw=()=>request('/api/brain/reading/doc?path='+encodeURIComponent(item.path)).then(r=>{if(diskSelected!==item.path)return;const d=r.doc;
-   const again=h('button',{type:'button',text:d?'Перечитать':'Прочитать сейчас',onclick:async()=>{again.disabled=true;try{await request('/api/brain/reading/reread',{method:'POST',headers:json,body:JSON.stringify({path:item.path})});await request('/api/brain/reading/run',{method:'POST',headers:json,body:'{}'})}catch{}void draw()}});
+   const again=h('button',{type:'button',text:d?'Перечитать':'Прочитать сейчас',onclick:async()=>{again.disabled=true;try{await request('/api/brain/reading/reread',{method:'POST',headers:json,body:JSON.stringify({path:item.path})});await request('/api/brain/reading/run',{method:'POST',headers:json,body:JSON.stringify({path:item.path})})}catch{}void draw()}});
    if(!d){box.replaceChildren(h('h4',{text:'Юрика ещё не читала'}),h('p',{class:'muted',text:r.on?'Прочитаю сама, когда Хранитель проиндексирует файл.':'Чтение Диска выключено в «Мозге» → Дневник → мышление.'}),again);return}
    box.replaceChildren(h('h4',{text:d.status==='read'?'Юрика прочитала':d.status==='error'?'Не получилось дочитать':'Юрика читает · '+d.progress+'%'}),
     d.summary?h('p',{text:d.summary}):null,

@@ -42,6 +42,20 @@ test('changed document is not mixed with facts from its old version',async()=>{
  await fsp.unlink(f);await queue.scan();reading.readPending();
 });
 
+test('stale file on disk is not shown; chosen document is read first',async()=>{
+ const f=path.join(LIB,'смена.txt');
+ await fsp.writeFile(f,'Олег работает в порту.');await queue.scan();await queue.run(10);reading.readPending();
+ assert.equal(reading.find('Олег работает')[0].path,'смена.txt');
+ await fsp.writeFile(f,'Олег работает дома, совсем в другом месте.');
+ assert.equal(reading.find('Олег работает').length,0);
+ await fsp.unlink(f);assert.equal(reading.find('Олег работает').length,0);await queue.scan();reading.readPending();
+ // Очередь из большого документа: выбранный читается первым и целиком.
+ await fsp.writeFile(path.join(LIB,'выбор.txt'),'Вера любит розы.');await queue.scan();await queue.run(10);
+ await fsp.writeFile(path.join(LIB,'большой.txt'),Array.from({length:30},(_,i)=>'Абзац '+i+' '+'текст '.repeat(500)).join('\n'));await queue.scan();await queue.run(10);
+ const r=reading.readPending({path:'выбор.txt',limit:1});assert.ok(r.read>=1);assert.equal(reading.doc('выбор.txt').status,'read');
+ for(const x of ['выбор.txt','большой.txt'])await fsp.unlink(path.join(LIB,x));await queue.scan();reading.readPending();
+});
+
 test('excerpt keeps the matching line even after a long paragraph',async()=>{
  await fsp.mkdir(LIB,{recursive:true});
  await fsp.writeFile(path.join(LIB,'вступление.txt'),'Вступление '.repeat(60).trim()+'\nПлатёж за парковку вносится до десятого числа.');

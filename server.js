@@ -136,7 +136,7 @@ async function handleBrain(req,res,p,url){
   // Чтение Диска (reading.js): что прочитано, документ, прочитать сейчас, перечитать. Всё локально.
   if(req.method==='GET'&&p==='/api/brain/reading')return respond(res,200,{stats:reading.stats(),items:reading.list(limitParam(url,60,200))});
   if(req.method==='GET'&&p==='/api/brain/reading/doc')return respond(res,200,{doc:reading.doc(url.searchParams.get('path')||''),on:thoughts.on('reading')});
-  if(req.method==='POST'&&p==='/api/brain/reading/run')return respond(res,200,reading.readPending({force:true}));
+  if(req.method==='POST'&&p==='/api/brain/reading/run'){const input=await body(req);return respond(res,200,reading.readPending({force:true,path:typeof input?.path==='string'?input.path:null}))}
   if(req.method==='POST'&&p==='/api/brain/reading/reread'){const input=await body(req);return respond(res,200,{ok:reading.reread(input?.path)})}
   if(req.method==='POST'&&p==='/api/brain/settings'){const input=await body(req);return respond(res,200,thoughts.setSetting(input?.key,input?.value))}
   if(req.method==='GET'&&p==='/api/brain/thinking')return respond(res,200,{plans:require('./plans').upcoming(10),tune:require('./tune').view(),vectors:require('./factvec').status(),guesses:guesses.list(null,30),guessStats:guesses.stats(),questions:curiosity.list(null,30),questionStats:curiosity.stats(),forgotten:strength.forgotten({limit:20}),strength:strength.stats(),suggestions:initiative.list(null,20),suggestionStats:initiative.stats(),settings:thoughts.settings(),labels:thoughts.LABELS});
