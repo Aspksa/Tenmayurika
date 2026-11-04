@@ -33,6 +33,7 @@ const curiosity=require('./curiosity');
 const initiative=require('./initiative');
 const crypto=require('node:crypto');
 const library=require('./library');
+const libraryAnalysis=require('./library-analysis');
 
 const MAX_MESSAGE=2000,MAX_HISTORY=40,MAX_TOOL_ROUNDS=4;
 const PAGES={home:'Обзор',planner:'Планер',tasks:'Дела',notes:'Заметки',calendar:'Календарь',facts:'Факты памяти',brain:'Мозг',settings:'Настройки проекта'};
@@ -211,6 +212,10 @@ function makeTools(ctx){
    const result=[files.length?'По названию:\n'+files.join('\n'):'',fragments.length?'В содержимом:\n'+fragments.join('\n'):''].filter(Boolean);
    return {ok:true,text:(result.length?result.join('\n\n'):'В библиотеке по запросу «'+q+'» ничего не нашла.')+(names.truncated||content.truncated?'\nПоиск ограничен, показаны не все результаты.':'')+(content.unreadable?'\nНе удалось прочитать файлов: '+content.unreadable+'.':'')};
   },
+  async answer_library({query}){
+   const data=await libraryAnalysis.answer(String(query||''));const rows=data.items.map(x=>'• '+x.path+(x.page?', страница '+x.page:x.sheet?', '+x.sheet:', строка '+x.line)+': '+x.excerpt);
+   return {ok:true,text:(rows.length?'Нашла фрагменты документов (проверьте контекст):\n'+rows.join('\n'):'Подходящих фрагментов не нашла.')+(data.truncated?'\nПроверена только часть библиотеки.':'')+(data.unreadable?'\nНе удалось прочитать файлов: '+data.unreadable+'.':'')};
+  },
   // Самоправка памяти прямо в разговоре (идея самоправки из letta-code).
   async correct_fact({subject,predicate,object,new_object}){
    const nv=String(new_object||'').trim();if(!nv)return {ok:false,text:'Каким должно быть новое значение (new_object)?'};
@@ -343,6 +348,7 @@ function makeTools(ctx){
 // Какому переключателю принадлежит функция.
 const OWNER={agenda:'calendar',move_task:'calendar',days_until:'calendar',convert_units:'convert',generate_password:'password',pick_random:'fun',list_notes:'notes',day_summary:'insights',fact_conflicts:'insights',fact_relations:'insights',fact_path:'insights',memory_overview:'insights',experience_log:'insights',mind_diary:'insights',list_preferences:'insights',set_reminder:'reminders',calculate:'calc',roll_dice:'fun',flip_coin:'fun',change_look:'avatar',reindex_memory:'sync',add_note:'notes',add_task:'tasks',complete_task:'tasks',list_tasks:'tasks',remember_fact:'facts',search_memory:'search',open_page:'navigate',create_backup:'backup',system_status:'status',current_time:'clock',correct_fact:'facts',forget_fact:'facts',core_memory_append:'facts',recall_forgotten:'search',mind_guesses:'insights',core_memory_replace:'facts',core_memory_rewrite:'facts',onboarding_mark:'facts',core_show:'insights',recall_conversation:'search',open_zone:'search'};
 OWNER.search_library='search';
+OWNER.answer_library='search';
 const SCHEMAS={
  add_note:{description:'Создать заметку. category: personal (личная) или work (рабочая)',parameters:{type:'object',properties:{title:{type:'string'},content:{type:'string'},category:{type:'string',enum:['personal','work']}},required:['title']}},
  add_task:{description:'Добавить дело. category: personal (личное) или work (рабочее). Срок: due (ГГГГ-ММ-ДД) и time (ЧЧ:ММ) или when словами («завтра в 15:00», «в пятницу»). priority: low, normal, high',parameters:{type:'object',properties:{title:{type:'string'},category:{type:'string',enum:['personal','work']},due:{type:'string'},time:{type:'string'},when:{type:'string'},priority:{type:'string',enum:['low','normal','high']}},required:['title']}},
@@ -433,6 +439,7 @@ const pick=(map,text)=>Object.keys(map).find(k=>new RegExp(map[k]).test(text));
 function parseCommand(text){
  const t=text.trim(),low=t.toLocaleLowerCase();
  let m;
+ if((m=t.match(/^(?:спроси библиотеку|ответь по документам)\s*[:—–-]?\s*(.+?)\??$/iu)))return {fn:'answer_library',args:{query:m[1]}};
  if((m=t.match(/^(?:найди|поищи|поиск)\s+(?:в библиотеке|по библиотеке)\s*[:—–-]?\s*(.+?)\??$/iu)))return {fn:'search_library',args:{query:m[1]}};
  if(/^(помощь|справка|команды|что (ты )?умеешь|инструменты)\??!?$/.test(low))return {help:true};
  if((m=t.match(/^(?:создай\s+|новая\s+|добавь\s+|запиши\s+)?(?:(рабоч\S*|личн\S*)\s+)?заметк[уаи]\s*[:—–-]?\s+([\s\S]+)$/i)))return {fn:'add_note',args:{...splitTitle(m[2]),...(m[1]?{category:/^рабоч/i.test(m[1])?'work':'personal'}:{})}};
@@ -513,7 +520,7 @@ function cleanHistory(history){
  if(!Array.isArray(history))return [];
  const safe=[];let skipAssistant=false;
  for(const m of history){if(!m||!['user','assistant'].includes(m.role)||typeof m.text!=='string')continue;
-  if(m.role==='user'){skipAssistant=parseCommand(m.text)?.fn==='search_library';if(skipAssistant)continue}
+  if(m.role==='user'){skipAssistant=['search_library','answer_library'].includes(parseCommand(m.text)?.fn);if(skipAssistant)continue}
   else if(skipAssistant){skipAssistant=false;continue}
   if(!m.private)safe.push(m);
  }
@@ -610,7 +617,7 @@ async function reply(input,ctx={}){
  const message=input.message.trim();
  if(message.length>MAX_MESSAGE)throw new TypeError('Сообщение длиннее '+MAX_MESSAGE+' символов. Сократите его или разбейте на части.');
  // Результаты поиска по локальной библиотеке не попадают в память, журнал или контекст облачной модели.
- if(parseCommand(message)?.fn==='search_library'){const out=await answer(input,message,ctx);return {...out,secret:true}}
+ if(['search_library','answer_library'].includes(parseCommand(message)?.fn)){const out=await answer(input,message,ctx);return {...out,secret:true}}
  reflect.touch();
  // Ответ на вопрос, который Юрика задала сама (любопытство, проверка догадки): «да/нет» — не поправка.
  let answered=null;try{answered=curiosity.onMessage(message)}catch(e){console.error('Curiosity answer failed:',e.name)}

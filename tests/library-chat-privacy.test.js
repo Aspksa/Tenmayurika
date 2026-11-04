@@ -11,6 +11,7 @@ test('library chat results never enter chat history sent to model',async()=>{
  await new Promise(r=>server.listen(0,'127.0.0.1',r));process.env.CHAT_URL='http://127.0.0.1:'+server.address().port+'/v1/chat/completions';
  try{
   const first=await reply({message:user});assert.equal(first.secret,true);assert.match(first.reply,/договор\.txt/);assert.equal(payload,'');assert.equal(chatlog.recent(30).some(x=>x.text.includes('секретный текст')),false);
+  const second=await reply({message:'спроси библиотеку: секретный текст'});assert.equal(second.secret,true);assert.match(second.reply,/договор\.txt/);assert.equal(payload,'');
   await reply({message:'Расскажи про погоду',history:[{role:'user',text:user},{role:'assistant',text:first.reply}]});assert.ok(payload);assert.doesNotMatch(payload,/секретный текст|договор\.txt/);
  }finally{delete process.env.CHAT_URL;await new Promise(r=>server.close(r))}
 });
