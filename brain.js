@@ -178,7 +178,7 @@ function words(text,min=3){const out=[];for(const w of String(text||'').toLocale
 const stemsOf=it=>it.stems||(it.stems=new Set(words(it.title).map(stem)));
 function ts(v){const t=Date.parse(v||'');return Number.isFinite(t)?t:0}
 function plural(n,a,b,c){const m=n%10,h=n%100;return m===1&&h!==11?a:m>=2&&m<=4&&(h<12||h>14)?b:c}
-function buildModel(ws,facts,conflicts){
+function buildModel(ws,facts,conflicts,exp=[]){
  const app=()=>window.TenmaApp;
  const lobes=[],events=[];
  const add=(id,label,sub,color,items,open)=>{if(items.length)lobes.push({id,label,sub,color,items,open})};
@@ -205,6 +205,9 @@ function buildModel(ws,facts,conflicts){
  for(const n of notes)events.push({t:ts(n.createdAt),kind:'заметка',color:COLORS.notes,text:n.title});
  for(const f of facts)events.push({t:ts(f.observed_at),kind:'факт',color:COLORS.facts,text:f.subject+' '+f.predicate+' '+f.object});
  for(const c of conflicts)events.push({t:ts(c.detected_at),kind:'сбой',color:COLORS.conflicts,text:c.subject+': '+c.earlier+' / '+c.newer,bad:true});
+ // Опыт аватара: как поняла вопрос и что сделала; поправки пользователя видны отдельно.
+ for(const e of exp){const did=e.tools.length?e.tools.join(', '):(e.recalled.facts.length+e.recalled.notes.length)?'вспомнила '+(e.recalled.facts.length+e.recalled.notes.length):'не нашла';
+  events.push({t:ts(e.at),kind:e.feedback==='fix'?'поправка':e.feedback==='ok'?'поняла':'опыт',color:e.feedback==='fix'?COLORS.conflicts:COLORS.done,text:'«'+e.question+'» → '+(e.feedback==='fix'&&e.correction?e.correction:did)})}
  events.sort((a,b)=>b.t-a.t);
  // Связи между фактами: объект одного факта — субъект другого.
  const firstOf=new Map();for(const l of lobes)for(const it of l.items)if(it.fact){const k=it.fact.subject.toLocaleLowerCase();if(!firstOf.has(k))firstOf.set(k,it.id)}
@@ -310,11 +313,17 @@ function mount(host){
  const learnTitle=el('div','brain-k','04 // предлагаю запомнить');
  const chatToggle=el('label','brain-check'),chatCb=el('input');chatCb.type='checkbox';chatCb.checked=TenmaLearn.fromChat();chatToggle.append(chatCb,el('span','','учиться из чата'));
  chatCb.onchange=()=>TenmaLearn.setFromChat(chatCb.checked);
+ // Фоновое обучение на сервере: весь чат хранится, факты из каждого сообщения запоминаются сразу.
+ const autoToggle=el('label','brain-check'),autoCb=el('input');autoCb.type='checkbox';autoCb.checked=true;autoToggle.title='Сохранять весь чат и запоминать факты из него сразу, без подтверждения';autoToggle.append(autoCb,el('span','','учиться фоном'));
+ const chatStat=el('span','brain-hint brain-chatstat');
+ function showChatStat(st){if(!st)return;autoCb.checked=!!st.auto;chatToggle.style.display=st.auto?'none':'';chatStat.textContent='чат: '+st.messages+' сообщ. · выучено фактов: '+st.facts+(st.pending?' · разбираю: '+st.pending:'')}
+ async function loadChatStat(){try{const r=await fetch('/api/chatlog?limit=1');if(r.ok)showChatStat(await r.json())}catch{}}
+ autoCb.onchange=async()=>{try{const r=await fetch('/api/chatlog/auto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({on:autoCb.checked})});if(r.ok)showChatStat(await r.json())}catch{}};
  const scanBtn=el('button','brain-btn','Разобрать заметки');scanBtn.type='button';scanBtn.title='Найти факты в заметках (с моделью — её силами, без неё — по простым правилам)';
  const allBtn=el('button','brain-btn','✓ Запомнить всё');allBtn.type='button';
  const learnMsg=el('span','brain-hint'),learnList=el('ul','brain-learn-list');
  const fixBtn=el('button','brain-btn brain-alarm-btn');fixBtn.type='button';fixBtn.hidden=true;
- learnHead.append(learnTitle,chatToggle,scanBtn,allBtn,fixBtn);learnBox.append(learnHead,learnList,learnMsg);
+ learnHead.append(learnTitle,autoToggle,chatToggle,scanBtn,allBtn,fixBtn);learnBox.append(learnHead,chatStat,learnList,learnMsg);
  const hud=el('div','brain-hud');
  const pLog=el('section','brain-panel'),pAct=el('section','brain-panel'),pTree=el('section','brain-panel');
  const logHead=el('div','brain-k'),logAlert=el('span','brain-alert','сбой узла');logAlert.hidden=true;logHead.append(el('span','','01 // журнал событий'),logAlert);
@@ -338,7 +347,7 @@ function mount(host){
  stage.classList.toggle('gl',!!glr);
  glc.addEventListener('webglcontextlost',e=>{e.preventDefault();glr=null;dropGL()});
 
- let W=0,H=0,dpr=1,ui=1,quality=1,baseQ=1,fpsT=0,fpsN=0,model={lobes:[],events:[],links:[],facts:0},facts=[],conflicts=[];
+ let W=0,H=0,dpr=1,ui=1,quality=1,baseQ=1,fpsT=0,fpsN=0,model={lobes:[],events:[],links:[],facts:0},facts=[],conflicts=[],exp=[];
  const core={parts:makeParticles(9000,7,MULT.core),pulse:0};
  let satParts=makeParticles(220,31,MULT.sat);
  // Пыль в объёме: редкие тусклые частицы во всём пространстве между зонами, медленно дрейфуют.
@@ -434,7 +443,7 @@ function mount(host){
  let applied=false;
  function apply(){
   const ws=window.TenmaApp?.workspace||{notes:[],tasks:[]};
-  model=buildModel(ws,facts,conflicts);
+  model=buildModel(ws,facts,conflicts,exp);
   const alive=new Set();
   for(const l of model.lobes){
    alive.add(l.id);
@@ -906,9 +915,10 @@ function mount(host){
  /* ---------- Данные и цикл ---------- */
  let factSig='';
  async function loadFacts(){
-  try{const [f,c]=await Promise.all([fetch('/api/facts?limit=2000').then(r=>r.ok?r.json():r.status===400?fetch('/api/facts?limit=500').then(r2=>r2.ok?r2.json():[]):[]),fetch('/api/facts/conflicts?limit=100').then(r=>r.ok?r.json():[])]);facts=Array.isArray(f)?f.filter(x=>!x.valid_to):[];conflicts=Array.isArray(c)?c:[]}catch{}
+  try{const [f,c,x]=await Promise.all([fetch('/api/facts?limit=2000').then(r=>r.ok?r.json():r.status===400?fetch('/api/facts?limit=500').then(r2=>r2.ok?r2.json():[]):[]),fetch('/api/facts/conflicts?limit=100').then(r=>r.ok?r.json():[]),fetch('/api/experience?limit=40').then(r=>r.ok?r.json():{items:[]})]);facts=Array.isArray(f)?f.filter(x=>!x.valid_to):[];conflicts=Array.isArray(c)?c:[];exp=Array.isArray(x?.items)?x.items:[]}catch{}
   // Опрос раз в 20 с: если факты и противоречия не менялись, мозг не пересобирается (на 10 тыс. записей это заметно).
-  const sig=facts.length+':'+facts.map(f=>f.id).join(',')+'|'+conflicts.map(c=>c.id).join(',');
+  void loadChatStat();
+  const sig=facts.length+':'+facts.map(f=>f.id).join(',')+'|'+conflicts.map(c=>c.id).join(',')+'|'+exp.map(e=>e.id+(e.feedback||'')).join(',');
   if(sig===factSig&&applied)return;factSig=sig;
   if(host.isConnected)apply();
   firstVisit=false;
@@ -983,7 +993,7 @@ function mount(host){
   for(const id of ids)grow(neurons.get(id),true);
   coList=Object.entries(readCo()).filter(([,c])=>c>=2).sort((a,b)=>b[1]-a[1]).slice(0,200).map(([k,c])=>[...k.split('|'),c]);
   ids.slice(0,12).forEach((id,i)=>{const n=neurons.get(id);setTimeout(()=>{if(n.lobe.state)impulses.push({lobe:n.lobe,item:n.item,u:0,f:Math.floor(Math.random()*n.lobe.state.fil.length),recall:true})},i*140)});
-  const first=neurons.get(ids[0]);coreKind='вспоминаю';coreText=first.item.title;coreTextT=3.5;
+  const first=neurons.get(ids[0]);coreKind=e.detail?.experience?.used?.length?'вспоминаю опыт':'вспоминаю';coreText=first.item.title;coreTextT=3.5;
   buildChain(ids,e.detail?.text);
   for(const l of model.lobes)for(const it of l.items)it.str=strength(it);dirty=true;
  };
@@ -1004,7 +1014,9 @@ function mount(host){
   try{const r=await TenmaLearn.scanNotes(5);learnMsg.textContent=r.full?'Очередь кандидатов заполнена ('+LEARN_MAX+'). Подтвердите или отклоните часть, потом нажмите ещё раз'+(r.found?' (найдено сейчас: '+r.found+')':'')+'.':r.failed?'Не удалось разобрать заметок: '+r.failed+' — сервер не ответил. Попробуйте ещё раз.':r.scanned?'Прочитала заметок: '+r.scanned+', нашла фактов: '+r.found+(r.left?'. Осталось заметок: '+r.left+' — нажмите ещё раз.':'.'):'Новых заметок нет — все уже разобраны.';learnMsg.classList.toggle('err',!!r.failed)}catch(e){learnMsg.textContent=e.message;learnMsg.classList.add('err')}
   scanBtn.disabled=false};
  const onLearn=()=>renderLearn();
- window.addEventListener('tenma:thinking',onThinking);window.addEventListener('tenma:recall',onRecall);window.addEventListener('tenma:learn',onLearn);
+ // Новый эпизод опыта или оценка ответа — журнал перечитывается.
+ const onExperience=()=>{void loadFacts()};
+ window.addEventListener('tenma:thinking',onThinking);window.addEventListener('tenma:recall',onRecall);window.addEventListener('tenma:learn',onLearn);window.addEventListener('tenma:experience',onExperience);
  /* ---------- Разбор противоречий ---------- */
  // Совет: предпочтения («любит», «умеет») могут быть верны оба; остальное обычно меняется — новее вернее.
  const MULTI=/любит|обожает|нравит|умеет|говорит на|увлекается|играет|занимается|пьёт|пьет|ест|знает/i;
@@ -1064,7 +1076,7 @@ function mount(host){
   fpsT+=dt;fpsN++;if(fpsT>=1.2){const fps=fpsN/fpsT;if(fps<(calm?22:42)&&quality>.25)quality*=.8;else if(fps>(calm?27:56)&&quality<baseQ)quality=Math.min(baseQ,quality*1.1);
    slowN=glr&&glMode!=='force'&&quality<=.26&&fps<20?slowN+1:0;if(slowN>=3){console.warn('Мозг: WebGL слишком медленный, перехожу на 2D');dropGL()}fpsT=0;fpsN=0}
  }
- function destroy(){io?.disconnect();cancelAnimationFrame(raf);clearInterval(poll);ro.disconnect();hudRo.disconnect();window.removeEventListener('tenma:workspace',onWorkspace);window.removeEventListener('tenma:memory',onMemory);wideQuery.removeEventListener('change',onWide);document.removeEventListener('keydown',onKey);document.removeEventListener('fullscreenchange',onFsChange);document.documentElement.classList.remove('brain-fs-lock');window.removeEventListener('tenma:thinking',onThinking);window.removeEventListener('tenma:recall',onRecall);window.removeEventListener('tenma:learn',onLearn);glr?.destroy()}
+ function destroy(){io?.disconnect();cancelAnimationFrame(raf);clearInterval(poll);ro.disconnect();hudRo.disconnect();window.removeEventListener('tenma:workspace',onWorkspace);window.removeEventListener('tenma:memory',onMemory);wideQuery.removeEventListener('change',onWide);document.removeEventListener('keydown',onKey);document.removeEventListener('fullscreenchange',onFsChange);document.documentElement.classList.remove('brain-fs-lock');window.removeEventListener('tenma:thinking',onThinking);window.removeEventListener('tenma:recall',onRecall);window.removeEventListener('tenma:learn',onLearn);window.removeEventListener('tenma:experience',onExperience);glr?.destroy()}
  checkSleep();setPalette();placeHud();resize();apply();renderLearn();loadFacts();raf=requestAnimationFrame(frame);
  return {destroy};
 }
