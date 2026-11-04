@@ -32,6 +32,7 @@ const guesses=require('./guesses');
 const curiosity=require('./curiosity');
 const initiative=require('./initiative');
 const crypto=require('node:crypto');
+const library=require('./library');
 
 const MAX_MESSAGE=2000,MAX_HISTORY=40,MAX_TOOL_ROUNDS=4;
 const PAGES={home:'Обзор',planner:'Планер',tasks:'Дела',notes:'Заметки',calendar:'Календарь',facts:'Факты памяти',brain:'Мозг',settings:'Настройки проекта'};
@@ -196,6 +197,14 @@ function makeTools(ctx){
    const r=memory.addFact({subject,predicate,object,sourceId:'avatar-chat'});
    return {ok:true,changed:true,text:r.duplicate?'Это я уже помню.':'Запомнила: '+subject+' — '+predicate+' → '+object+(r.conflicts?'\n⚠ Противоречит прежним фактам: '+r.conflicts+'.':'')};
   },
+  async search_library({query}){
+   const q=String(query||'').trim();if(!q)return {ok:false,text:'Что поискать в библиотеке?'};
+   const [names,content]=await Promise.all([library.search(q),library.searchText(q)]);
+   const files=names.results.slice(0,5).map(x=>'• '+x.path+(x.type==='folder'?' (папка)':''));
+   const fragments=content.results.slice(0,5).map(x=>'• '+x.path+', строка '+x.line+': '+x.excerpt);
+   const result=[files.length?'По названию:\n'+files.join('\n'):'',fragments.length?'В содержимом:\n'+fragments.join('\n'):''].filter(Boolean);
+   return {ok:true,text:result.length?result.join('\n\n')+(names.truncated||content.truncated?'\nПоиск ограничен, показаны не все результаты.':''):'В библиотеке по запросу «'+q+'» ничего не нашла.'};
+  },
   async search_memory({query}){
    const q=String(query||'').trim();if(!q)return {ok:false,text:'Что поискать?'};
    const {facts,notes}=await recall(q);
@@ -333,6 +342,7 @@ function makeTools(ctx){
 }
 // Какому переключателю принадлежит функция.
 const OWNER={agenda:'calendar',move_task:'calendar',days_until:'calendar',convert_units:'convert',generate_password:'password',pick_random:'fun',list_notes:'notes',day_summary:'insights',fact_conflicts:'insights',fact_relations:'insights',fact_path:'insights',memory_overview:'insights',experience_log:'insights',mind_diary:'insights',list_preferences:'insights',set_reminder:'reminders',calculate:'calc',roll_dice:'fun',flip_coin:'fun',change_look:'avatar',reindex_memory:'sync',add_note:'notes',add_task:'tasks',complete_task:'tasks',list_tasks:'tasks',remember_fact:'facts',search_memory:'search',open_page:'navigate',create_backup:'backup',system_status:'status',current_time:'clock',correct_fact:'facts',forget_fact:'facts',core_memory_append:'facts',recall_forgotten:'search',mind_guesses:'insights',core_memory_replace:'facts',core_memory_rewrite:'facts',onboarding_mark:'facts',core_show:'insights',recall_conversation:'search',open_zone:'search'};
+OWNER.search_library='search';
 const SCHEMAS={
  add_note:{description:'Создать заметку. category: personal (личная) или work (рабочая)',parameters:{type:'object',properties:{title:{type:'string'},content:{type:'string'},category:{type:'string',enum:['personal','work']}},required:['title']}},
  add_task:{description:'Добавить дело. category: personal (личное) или work (рабочее). Срок: due (ГГГГ-ММ-ДД) и time (ЧЧ:ММ) или when словами («завтра в 15:00», «в пятницу»). priority: low, normal, high',parameters:{type:'object',properties:{title:{type:'string'},category:{type:'string',enum:['personal','work']},due:{type:'string'},time:{type:'string'},when:{type:'string'},priority:{type:'string',enum:['low','normal','high']}},required:['title']}},
@@ -423,6 +433,7 @@ const pick=(map,text)=>Object.keys(map).find(k=>new RegExp(map[k]).test(text));
 function parseCommand(text){
  const t=text.trim(),low=t.toLocaleLowerCase();
  let m;
+ if((m=t.match(/^(?:найди|поищи|поиск)\s+(?:в библиотеке|по библиотеке)\s*[:—–-]?\s*(.+?)\??$/iu)))return {fn:'search_library',args:{query:m[1]}};
  if(/^(помощь|справка|команды|что (ты )?умеешь|инструменты)\??!?$/.test(low))return {help:true};
  if((m=t.match(/^(?:создай\s+|новая\s+|добавь\s+|запиши\s+)?(?:(рабоч\S*|личн\S*)\s+)?заметк[уаи]\s*[:—–-]?\s+([\s\S]+)$/i)))return {fn:'add_note',args:{...splitTitle(m[2]),...(m[1]?{category:/^рабоч/i.test(m[1])?'work':'personal'}:{})}};
  if((m=t.match(/^(?:добавь\s+|новое\s+|создай\s+|новая\s+|запиши\s+)?((?:(?:рабоч|личн|важн|срочн)\S*\s+){0,2})(?:дело|задач[уа])\s*[:—–-]?\s+([\s\S]+)$/i))||(m=t.match(/^()(?:работа|по работе)\s*:\s*([\s\S]+)$/i)))return {fn:'add_task',args:taskArgs(m[1]+(/^(работа|по работе)/i.test(t)?' рабоч':''),m[2])};
