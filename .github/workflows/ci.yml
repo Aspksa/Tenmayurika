@@ -35,3 +35,16 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Run tests
         run: npm test
+
+  prepare-ocr-lock:
+    name: Prepare offline OCR dependency lock
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve OCR packages
+        run: |
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund tesseract.js@7.0.0 @tesseract.js-data/eng@1.0.0 @tesseract.js-data/rus@1.0.0 @napi-rs/canvas@0.1.96
+          node -e "const z=require('node:zlib'),f=require('node:fs'); console.log('TENMA_LOCK_BEGIN'+z.gzipSync(f.readFileSync('package-lock.json')).toString('base64')+'TENMA_LOCK_END')"
