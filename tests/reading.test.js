@@ -20,6 +20,18 @@ test('long lines are split into chunks, not cut',()=>{
  assert.ok(c.length>=2);assert.equal(c.map(x=>x.text).join('').replace(/\s/g,'').length,long.replace(/\s/g,'').length);
 });
 
+test('short documents, ё in words and commands with «в документах»',async()=>{
+ await fsp.mkdir(LIB,{recursive:true});
+ await fsp.writeFile(path.join(LIB,'чай.txt'),'Анна любит чай.');
+ await fsp.writeFile(path.join(LIB,'платёж.txt'),'Платёж поступает до десятого числа каждого месяца.');
+ await queue.scan();await queue.run(10);reading.readPending();
+ assert.ok(reading.doc('чай.txt').facts.some(f=>f.subject==='Анна'));
+ assert.equal(reading.find('платёж поступает')[0].path,'платёж.txt');assert.equal(reading.find('платеж поступает')[0].path,'платёж.txt');
+ const {reply}=require('../chat');const r=await reply({message:'дело: проверить даты в документах'});
+ assert.equal(r.secret,undefined);assert.doesNotMatch(r.reply,/Нашла в твоих документах|Недавно прочитала|ещё не прочитала/);
+ for(const f of ['чай.txt','платёж.txt'])await fsp.unlink(path.join(LIB,f));await queue.scan();reading.readPending();
+});
+
 test('excerpt keeps the matching line even after a long paragraph',async()=>{
  await fsp.mkdir(LIB,{recursive:true});
  await fsp.writeFile(path.join(LIB,'вступление.txt'),'Вступление '.repeat(60).trim()+'\nПлатёж за парковку вносится до десятого числа.');

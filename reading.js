@@ -24,7 +24,7 @@ function plural(n,a,b,c){const m=n%10,h=n%100;return m===1&&h!==11?a:m>=2&&m<=4&
 // Текст режется по абзацам на куски до CHUNK символов; у куска — страница, с которой он начинается ([Страница N] из PDF).
 function chunks(text){
  const out=[];let cur='',page=null,start=null;
- const push=()=>{const t=cur.trim();if(t.length>=20)out.push({text:t,page:start});cur='';start=null};
+ const push=()=>{const t=cur.trim();if(t)out.push({text:t,page:start});cur='';start=null};
  for(const raw of String(text||'').split(/\r?\n/)){
   const pm=raw.match(/^\[Страница (\d+)\]$/);if(pm){push();page=Number(pm[1]);continue}
   const line=raw.trim();if(!line)continue;
@@ -132,6 +132,8 @@ function reread(file){
 }
 
 /* ---------- Поиск: для разговора и окон ---------- */
+// Индекс FTS (unicode61) не считает «ё» и «е» одной буквой: основа ищется и в вариантах с «ё» на месте каждой «е».
+function yoVariants(stem){const out=new Set([stem]);for(let i=0;i<stem.length;i++)if(stem[i]==='е')out.add(stem.slice(0,i)+'ё'+stem.slice(i+1));return [...out].slice(0,5)}
 const STEMS=q=>[...new Set(terms(q).map(w=>w.slice(0,Math.max(4,Math.min(6,w.length-1)))))].slice(0,8);
 // Нужные места в прочитанных документах: до трёх документов, в каждом — лучший абзац со страницей,
 // и выписанные факты, которые подходят под вопрос.
@@ -139,7 +141,7 @@ function find(query,{limit=3}={}){
  const stems=STEMS(query);if(!stems.length)return [];
  const need=stems.length>2?2:1;
  let rows=[];
- try{rows=use(d=>hasTable(d,'library_index_fts')?d.prepare("SELECT f.path FROM library_index_fts f JOIN brain_reading r ON r.path=f.path WHERE r.chunks_done>0 AND library_index_fts MATCH ? ORDER BY bm25(library_index_fts) LIMIT ?").all(stems.map(s=>'"'+s.replace(/"/g,'')+'"*').join(' OR '),limit*3):[])}catch(e){console.error('Reading search failed:',e.name);return []}
+ try{rows=use(d=>hasTable(d,'library_index_fts')?d.prepare("SELECT f.path FROM library_index_fts f JOIN brain_reading r ON r.path=f.path WHERE r.chunks_done>0 AND library_index_fts MATCH ? ORDER BY bm25(library_index_fts) LIMIT ?").all(stems.flatMap(yoVariants).map(s=>'"'+s.replace(/"/g,'')+'"*').join(' OR '),limit*3):[])}catch(e){console.error('Reading search failed:',e.name);return []}
  const out=[];
  for(const r of rows){
   const lines=textOf(r.path).split(/\r?\n/);let page=null,best=null;

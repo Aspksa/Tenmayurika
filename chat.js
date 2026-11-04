@@ -668,7 +668,7 @@ async function reply(input,ctx={}){
  // Результаты поиска по локальной библиотеке не попадают в память, журнал или контекст облачной модели.
  if(['search_library','answer_library'].includes(parseCommand(message)?.fn)){const out=await answer(input,message,ctx);return {...out,secret:true}}
  // «Что ты прочитала?», «что в моих документах про X» — отвечает сама, без модели: документы не уходят наружу (reading.js).
- try{const rd=reading.reply(message);if(rd)return {reply:rd.text,source:'tool',understood:'прочитанные документы',docs:rd.docs.map(d=>({path:d.path,name:d.name,page:d.page})),secret:true}}catch(e){console.error('Reading reply failed:',e.name)}
+ try{const rd=parseCommand(message)?null:reading.reply(message);if(rd)return {reply:rd.text,source:'tool',understood:'прочитанные документы',docs:rd.docs.map(d=>({path:d.path,name:d.name,page:d.page})),secret:true}}catch(e){console.error('Reading reply failed:',e.name)}
  reflect.touch();
  // Ответ на вопрос, который Юрика задала сама (любопытство, проверка догадки): «да/нет» — не поправка.
  let answered=null;try{answered=curiosity.onMessage(message,{conversation:convo.validId(input.conversation),fresh:!cleanHistory(input.history).length})}catch(e){console.error('Curiosity answer failed:',e.name)}
