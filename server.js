@@ -37,6 +37,7 @@ const initiative=require('./initiative');
 const library=require('./library');
 const libraryDocuments=require('./library-documents');
 const libraryQueue=require('./library-queue');
+const libraryCollections=require('./library-collections');
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
 const HOST='127.0.0.1',PORT=Number(process.env.PORT)||5173;
@@ -239,6 +240,11 @@ if(p.startsWith('/api/library/')){
   if(req.method==='POST'&&p==='/api/library/queue/scan'){const result=await libraryQueue.scan();await libraryQueue.run();return respond(res,200,result)}
   if(req.method==='POST'&&p==='/api/library/queue/enabled'){const input=await body(req);return respond(res,200,await libraryQueue.setEnabled(input?.enabled))}
   if(req.method==='POST'&&p==='/api/library/queue/retry'){const input=await body(req);await libraryQueue.retry(input?.path);return respond(res,200,{ok:true})}
+  if(req.method==='GET'&&p==='/api/library/collections')return respond(res,200,{items:await libraryCollections.list()});
+  if(req.method==='POST'&&p==='/api/library/collections'){const input=await body(req);return respond(res,201,await libraryCollections.create(input?.name))}
+  if(req.method==='POST'&&p==='/api/library/collections/add'){const input=await body(req);return respond(res,200,await libraryCollections.add(input?.id,input?.path))}
+  if(req.method==='POST'&&p==='/api/library/collections/remove'){const input=await body(req);return respond(res,200,await libraryCollections.remove(input?.id,input?.path))}
+  if(req.method==='POST'&&p==='/api/library/collections/delete'){const input=await body(req);return respond(res,200,await libraryCollections.drop(input?.id))}
   if(req.method==='POST'&&p==='/api/library/folder'){const input=await body(req);await library.mkdir(input?.path);return respond(res,201,{ok:true})}
   if(req.method==='PUT'&&p==='/api/library/upload')return respond(res,201,await library.upload(url.searchParams.get('path')||'',req));
   if(req.method==='GET'&&p==='/api/library/download'){
