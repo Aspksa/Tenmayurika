@@ -20,6 +20,8 @@ const skills=require('./skills');
 const links=require('./links');
 const usefulness=require('./usefulness');
 const working=require('./working');
+const growth=require('./growth');
+const aliases=require('./aliases');
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
 const HOST='127.0.0.1',PORT=Number(process.env.PORT)||5173;
@@ -46,9 +48,16 @@ async function handleBrain(req,res,p,url){
    for(const f of memory.factsById(fids))title.set('fact:'+f.id,f.subject+' — '+f.predicate+' → '+f.object);
    const end=(k,r)=>({kind:k,id:r,title:title.get(k+':'+r)||null});
    return respond(res,200,{diary:reflect.diary(limitParam(url,20,200)),insights:reflect.insightList(20),skills:skills.list(),preferences:preferences.list(),summaries:reflect.summaries().slice(0,30).map(({factIds,...t})=>({...t,size:factIds.length})),
-    links:{count:links.count(),recent:recent.map(l=>({type:l.type,a:end(l.a_kind,l.a_ref),b:end(l.b_kind,l.b_ref),evidence:l.evidence,source:l.source}))},working:working.snapshot(),reflect:reflect.status()});
+    links:{count:links.count(),recent:recent.map(l=>({type:l.type,a:end(l.a_kind,l.a_ref),b:end(l.b_kind,l.b_ref),evidence:l.evidence,source:l.source}))},working:working.snapshot(),reflect:reflect.status(),growth:{...growth.stats(),cards:growth.cards(8)}});
   }
   if(req.method==='GET'&&p==='/api/brain/strength')return respond(res,200,usefulness.strength());
+  // Рост: крепнущие связи, карточки сущностей, псевдонимы и свои типы (growth.js).
+  if(req.method==='GET'&&p==='/api/brain/bonds')return respond(res,200,growth.bonds({limit:limitParam(url,2000,5000)}));
+  if(req.method==='GET'&&p==='/api/brain/card'){const c=growth.card(url.searchParams.get('name')||'');return c?respond(res,200,c):respond(res,404,{error:'Not found'})}
+  if(req.method==='GET'&&p==='/api/brain/growth')return respond(res,200,{...growth.stats(),cards:growth.cards(limitParam(url,50,500))});
+  if(req.method==='POST'&&p==='/api/brain/aliases'){const input=await body(req);const r=aliases.add(input?.alias,input?.canonical,{evidence:'указано вручную',source:'user'});return respond(res,r?201:200,r||{ok:true,unchanged:true})}
+  if(req.method==='POST'&&p==='/api/brain/aliases/remove'){const input=await body(req);return aliases.remove(input?.alias)?respond(res,200,{ok:true}):respond(res,404,{error:'Not found'})}
+  if(req.method==='POST'&&p==='/api/brain/types'){const input=await body(req);return respond(res,200,growth.setType(input?.name,input?.type))}
   if(req.method==='POST'&&p==='/api/brain/reflect'){const r=await reflect.run({ws:await storage.load(),complete:llm.config()?llm.complete:null,reason:'manual'});return respond(res,200,r)}
   if(req.method==='POST'&&p==='/api/brain/preferences'){const input=await body(req);return respond(res,201,preferences.addText(input?.text))}
   if(req.method==='POST'&&p==='/api/brain/preferences/remove'){const input=await body(req);return preferences.remove(input?.id)?respond(res,200,{ok:true}):respond(res,404,{error:'Not found'})}

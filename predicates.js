@@ -27,8 +27,15 @@ function classify(predicate){
  for(const t of TYPES)if(t.re.test(p))return {relation:t.relation,polarity:t.polarity||1,single:!!t.single};
  // «Не живёт в» — то же, что «живёт в», с обратным знаком: основа проходит то же сведение к типу.
  if(/^не\s+\S/.test(p)){const k=classify(p.slice(3));return {relation:k.relation,polarity:-k.polarity,single:k.single}}
- return {relation:p,polarity:1,single:!MULTI.test(p)};
+ return {relation:p,polarity:1,single:!MULTI.test(p)&&!learned.has(p)};
 }
+// Свои типы связей, которые «Мозг» вывел из памяти (growth.js): если у одного человека несколько значений
+// («играет в теннис», «играет в шахматы»), связь многозначная, и новое значение — не противоречие.
+// Выученное только снимает «единственность», но никогда не добавляет её.
+let learned=new Set();
+function learn(map){learned=new Set([...map.keys()].map(k=>clean(k).replace(/^не\s+/,'')))}
+const KNOWN=new Set(TYPES.map(t=>t.relation));
+const known=relation=>KNOWN.has(relation);
 // Сущность для сравнения: регистр, «ё», кавычки и «г.»/«город» не важны.
 function entityKey(s){return clean(s).replace(/^(г|город|гор|пос|с|д)\s+/,'').trim()}
-module.exports={classify,entityKey,clean};
+module.exports={classify,entityKey,clean,learn,known};

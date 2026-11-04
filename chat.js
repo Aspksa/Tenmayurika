@@ -17,6 +17,7 @@ const preferences=require('./preferences');
 const skills=require('./skills');
 const reflect=require('./reflect');
 const correct=require('./correct');
+const growth=require('./growth');
 const crypto=require('node:crypto');
 
 const MAX_MESSAGE=2000,MAX_HISTORY=12,MAX_TOOL_ROUNDS=4;
@@ -417,7 +418,7 @@ async function modelReply(name,message,history,facts,notes,enabled,impl,result,p
  const ws=history.length?{}:await storage.load().catch(()=>({}));
  const context=memoryBlock([...facts.map(f=>'ФАКТ: '+f.subject+' | '+f.predicate+' | '+f.object),...notes.map(n=>'ЗАМЕТКА: '+n.title+' — '+(n.content||'').slice(0,500)),...earlier.map(m=>'ПОЛЬЗОВАТЕЛЬ ГОВОРИЛ '+new Date(m.at).toLocaleDateString('ru-RU')+': '+m.text.slice(0,400)),
   // Сводки тем, к которым относятся вспомненные факты, и выводы, сделанные в простое.
-  ...(mind.summaries||[]).map(t=>'СВОДКА ТЕМЫ «'+t.label+'»: '+t.summary),...(mind.insights||[]).map(i=>'ВЫВОД: '+i.text)]);
+  ...(mind.summaries||[]).map(t=>'СВОДКА ТЕМЫ «'+t.label+'»: '+t.summary),...(mind.cards||[]).map(c=>'КАРТОЧКА «'+c.name+'»'+(c.type?' ('+c.type+')':'')+(c.aliases.length?' [она же: '+c.aliases.join(', ')+']':'')+': '+c.description),...(mind.insights||[]).map(i=>'ВЫВОД: '+i.text)]);
  const allowed=Object.keys(SCHEMAS).filter(fn=>enabled.has(OWNER[fn]));
  const tools=allowed.map(fn=>({type:'function',function:{name:fn,...SCHEMAS[fn]}}));
  const persona=(llm.config()?.systemPrompt||'').trim();
@@ -484,6 +485,8 @@ async function reply(input,ctx={}){
  if(prefs.length)out.preferences=prefs.map(p=>p.text);
  // Вспомненное согревает рабочую память и считается на сервере (сила памяти в «Мозге»).
  if(out.recalled){try{working.turn(out.recalled);usefulness.used(out.recalled)}catch(e){console.error('Working memory failed:',e.name)}}
+ // Вспомненное вместе связывается: нить между записями крепнет (growth.js).
+ if(out.recalled){try{growth.strengthen(out.recalled)}catch(e){console.error('Bond update failed:',e.name)}}
  try{if(!out.secret)chatlog.save('assistant',out.reply)}catch(e){console.error('Chat log failed:',e.name)}
  // Учимся фоном, не задерживая ответ.
  setImmediate(()=>chatlog.learnPending().catch(e=>console.error('Chat learning failed:',e.name)));
@@ -540,7 +543,7 @@ async function answer(input,message,ctx){
  let earlier=[];try{earlier=chatlog.search(message,3,ctx.said||0)}catch(e){console.error('Chat log search failed:',e.name)}
  // Навыки из опыта, сводки тем, выводы из простоя и предпочтения пользователя.
  let matched=[],mind={};
- try{matched=skills.match(message,2);mind={skills:skills.promptText(matched),preferences:preferences.promptText(),summaries:reflect.summariesFor(facts.map(f=>f.id)),insights:reflect.insightsFor(message,facts.map(f=>f.id))}}catch(e){console.error('Mind lookup failed:',e.name)}
+ try{matched=skills.match(message,2);mind={skills:skills.promptText(matched),preferences:preferences.promptText(),summaries:reflect.summariesFor(facts.map(f=>f.id)),insights:reflect.insightsFor(message,facts.map(f=>f.id)),cards:growth.cardsFor(facts)}}catch(e){console.error('Mind lookup failed:',e.name)}
  const understood=(words(message).join(', ')||'без ключевых слов')+(past.length?' · опыт: '+past.length:'')+(earlier.length?' · из разговоров: '+earlier.length:'')+(matched.length?' · навык: '+matched.length:'');
  const meta={understood,used:past.map(e=>e.id),skills:matched};
  // Что аватар вспомнил для ответа — «Мозг» подсвечивает эти нейроны.

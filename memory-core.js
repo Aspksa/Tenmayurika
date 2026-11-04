@@ -4,7 +4,8 @@ const fs=require('node:fs');
 const {DatabaseSync}=require('node:sqlite');
 const path=require('node:path');
 const predicates=require('./predicates');
-const {louvain}=require('./graph-cluster');
+const zones=require('./zones');
+const aliases=require('./aliases');
 const DB=process.env.TENMAYURIKA_MEMORY_DB ? path.resolve(process.env.TENMAYURIKA_MEMORY_DB) : path.join(__dirname,'data','tenmayurika.sqlite');
 function open(){
  fs.mkdirSync(path.dirname(DB),{recursive:true});
@@ -257,22 +258,30 @@ function retireFact(id,action='corrected'){
   }catch(e){db.exec('ROLLBACK');throw e}
  }finally{db.close()}
 }
+// Уверенность факта меняет отбор при размышлении (growth.js): полезное крепнет, поправленное слабеет.
+function setConfidence(id,value){
+ const fid=normalize(id,'id',100);if(typeof value!=='number'||!Number.isFinite(value)||value<0||value>1)throw new TypeError('Invalid confidence');
+ const db=open();try{return db.prepare('UPDATE memory_facts SET confidence=? WHERE id=? AND valid_to IS NULL AND confidence<>?').run(Math.round(value*1000)/1000,fid,Math.round(value*1000)/1000).changes>0}finally{db.close()}
+}
 /* ---------- Граф: сущности и связи ---------- */
 // Узлы — сущности (субъекты и объекты фактов), рёбра — действующие факты.
 function activeFacts(db){return db.prepare('SELECT id,subject,predicate,object,relation,polarity,source_id,confidence,observed_at FROM memory_facts WHERE valid_to IS NULL').all()}
-function buildGraph(rows){
+// Псевдонимы сводятся к основному имени: «мама» и «Ольга Петровна» — один узел (aliases.js).
+function buildGraph(rows,al=aliases.map()){
  const names=new Map(),adj=new Map();
- const node=(raw)=>{const k=predicates.entityKey(raw);if(!k)return null;if(!names.has(k))names.set(k,raw);if(!adj.has(k))adj.set(k,[]);return k};
+ const node=(raw)=>{const k=aliases.canon(al,predicates.entityKey(raw));if(!k)return null;if(!names.has(k))names.set(k,al.names.get(k)||raw);if(!adj.has(k))adj.set(k,[]);return k};
  for(const f of rows){const a=node(f.subject),b=node(f.object);if(!a||!b)continue;adj.get(a).push({to:b,fact:f});if(a!==b)adj.get(b).push({to:a,fact:f})}
- return {names,adj};
+ return {names,adj,al,key:raw=>aliases.canon(al,predicates.entityKey(raw))};
 }
 // Одно слово в разных падежах: общее начало почти во всю длину («анну» — «анна», «перми» — «пермь»).
 function near(x,y){let i=0;while(i<x.length&&i<y.length&&x[i]===y[i])i++;return i>=Math.max(3,Math.min(x.length,y.length)-1)}
 // Сущность по имени: точное совпадение, иначе по основе слова; из нескольких — самая связанная.
 function resolveEntity(graph,name){
- const k=predicates.entityKey(name);if(!k)return null;if(graph.adj.has(k))return k;
+ const k=graph.key(name);if(!k)return null;if(graph.adj.has(k))return k;
  const t=terms(k);if(!t.length)return null;
  let best=null,bd=-1;for(const [key,list] of graph.adj){const kt=terms(key);if(t.every(x=>kt.some(y=>near(x,y)))&&list.length>bd){best=key;bd=list.length}}
+ // Псевдоним в другом падеже («маму» → «мама» → «Ольга Петровна»).
+ if(!best&&graph.al)for(const a of graph.al.to.keys()){const kt=terms(a),c=aliases.canon(graph.al,a);if(graph.adj.has(c)&&t.every(x=>kt.some(y=>near(x,y)))){best=c;break}}
  return best;
 }
 const plain=f=>({id:f.id,subject:f.subject,predicate:f.predicate,object:f.object,source_id:f.source_id,confidence:f.confidence,observed_at:f.observed_at});
@@ -307,17 +316,20 @@ function findPath(from,to,maxDepth=3){
   res.facts=chain;return res;
  }finally{db.close()}
 }
-// Темы памяти: сообщества сущностей по алгоритму Лувена. Факт относится к теме своего субъекта.
+// Темы памяти — зоны, которые растут постепенно (zones.js): новое встаёт к соседям, разросшееся делится.
+// Факт относится к зоне своего субъекта.
 function communities(){
  const db=open();
  try{
   const rows=activeFacts(db),g=buildGraph(rows),keys=[...g.adj.keys()].sort();
-  const edges=rows.map(f=>[predicates.entityKey(f.subject),predicates.entityKey(f.object),1]).filter(e=>e[0]&&e[1]);
-  const member=louvain(keys,edges),groups=new Map();
-  for(const f of rows){const k=predicates.entityKey(f.subject),c=member.get(k);if(c===undefined)continue;if(!groups.has(c))groups.set(c,{facts:[],ents:new Map()});const gr=groups.get(c);gr.facts.push(f.id);for(const e of [k,predicates.entityKey(f.object)])if(member.get(e)===c)gr.ents.set(e,(gr.ents.get(e)||0)+1)}
-  return [...groups.values()].map(gr=>{const ents=[...gr.ents].sort((x,y)=>y[1]-x[1]||x[0].localeCompare(y[0]));return {id:'t:'+ents[0][0],label:g.names.get(ents[0][0]),entities:ents.slice(0,6).map(e=>g.names.get(e[0])),size:gr.facts.length,factIds:gr.facts}})
+  const edges=rows.map(f=>[g.key(f.subject),g.key(f.object),1]).filter(e=>e[0]&&e[1]);
+  db.close();
+  const {member,info}=zones.assign(keys,edges,g.names),groups=new Map();
+  for(const f of rows){const k=g.key(f.subject),c=member.get(k);if(c===undefined)continue;if(!groups.has(c))groups.set(c,{facts:[],ents:new Map()});const gr=groups.get(c);gr.facts.push(f.id);for(const e of [k,g.key(f.object)])if(member.get(e)===c)gr.ents.set(e,(gr.ents.get(e)||0)+1)}
+  return [...groups].map(([id,gr])=>{const ents=[...gr.ents].sort((x,y)=>y[1]-x[1]||x[0].localeCompare(y[0])),i=info.get(id)||{},parent=i.parent?info.get(i.parent):null;
+    return {id,label:i.label||g.names.get(ents[0][0]),entities:ents.slice(0,6).map(e=>g.names.get(e[0])),size:gr.facts.length,factIds:gr.facts,parent:parent?parent.label:null,created_at:i.created_at||null}})
    .sort((a,b)=>b.size-a.size||a.label.localeCompare(b.label));
- }finally{db.close()}
+ }finally{if(db.isOpen)db.close()}
 }
 
 /* ---------- Почти-дубли ---------- */
@@ -407,7 +419,7 @@ function impact(id){
  const fid=normalize(id,'id',100),db=open();
  try{
   const f=db.prepare('SELECT * FROM memory_facts WHERE id=?').get(fid);if(!f)return null;
-  const rows=activeFacts(db),g=buildGraph(rows),ents=[predicates.entityKey(f.subject),predicates.entityKey(f.object)].filter(Boolean);
+  const rows=activeFacts(db),g=buildGraph(rows),ents=[g.key(f.subject),g.key(f.object)].filter(Boolean);
   const facts=[],used=new Set([fid]);let frontier=[...new Set(ents)];const seen=new Set(frontier);
   for(let hop=1;hop<=2&&frontier.length;hop++){const next=[];for(const k of frontier)for(const e of g.adj.get(k)||[]){if(used.has(e.fact.id))continue;used.add(e.fact.id);if(facts.length<40)facts.push({...plain(e.fact),hop});if(!seen.has(e.to)){seen.add(e.to);next.push(e.to)}}frontier=next}
   const conflictsList=db.prepare('SELECT id,earlier_id,newer_id FROM memory_conflicts WHERE earlier_id=? OR newer_id=?').all(fid,fid).map(r=>({...r}));
@@ -420,6 +432,8 @@ function impact(id){
   return {fact:plain(f),active:!f.valid_to,facts,hop1:facts.filter(x=>x.hop===1).length,conflicts:conflictsList,episodes,notes:list.filter(r=>r.kind==='note'),tasks:list.filter(r=>r.kind==='task')};
  }finally{if(db.isOpen)db.close()}
 }
+// Граф действующих фактов для слоёв роста (карточки, типы): сущность → её факты, имена, ключ.
+function activeGraph(){const db=open();try{const rows=activeFacts(db);return {rows,graph:buildGraph(rows)}}finally{db.close()}}
 function diagnostics(){
  const db=open();
  try{
@@ -430,7 +444,7 @@ function diagnostics(){
    pendingVectors:db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='vector_queue'").get()?db.prepare('SELECT COUNT(*) AS n FROM vector_queue').get().n:0};
  }finally{db.close()}
 }
-module.exports={addFact,extractFacts,queryFacts,searchFacts,searchIndex,syncRecords,ftsQuery,terms,factsById,relations,neighborhood,findPath,communities,duplicates,mergeDuplicate,dismissDuplicate,overview,impact,conflicts,resolveConflict,supersede,retireFact,diagnostics};
+module.exports={addFact,extractFacts,queryFacts,searchFacts,searchIndex,syncRecords,ftsQuery,terms,factsById,relations,neighborhood,findPath,communities,duplicates,mergeDuplicate,dismissDuplicate,overview,impact,conflicts,resolveConflict,supersede,retireFact,setConfidence,activeGraph,diagnostics};
 if(require.main===module){
  try{
   const command=process.argv[2];
