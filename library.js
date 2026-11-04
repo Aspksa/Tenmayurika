@@ -35,9 +35,8 @@ async function upload(file,stream){
  return {size:written};
 }
 async function filePath(file){const full=await resolvePath(file);if(!(await fsp.stat(full)).isFile())throw new TypeError('Это не файл');return full}
-async function renameFile(file,newName,replaceReferences){
- if(typeof newName!=='string'||segments(newName).length!==1)throw new TypeError('Укажите имя файла без пути');
- const original=await filePath(file),parts=segments(file);parts.pop();const target=[...parts,newName].join('/');if(target===file)return {path:file,unchanged:true};
+async function relocateFile(file,target,replaceReferences){
+ const original=await filePath(file);if(target===file)return {path:file,unchanged:true};
  const destination=await resolvePath(target,{allowMissingLast:true});
  // Hard link refuses to overwrite an existing target; both names refer to the original data.
  let copied=false;
@@ -51,13 +50,21 @@ async function renameFile(file,newName,replaceReferences){
  try{await fsp.unlink(original)}catch{return {path:target,originalRetained:true}}
  return {path:target};
 }
+async function renameFile(file,newName,replaceReferences){
+ if(typeof newName!=='string'||segments(newName).length!==1)throw new TypeError('Укажите имя файла без пути');
+ const parts=segments(file);parts.pop();return relocateFile(file,[...parts,newName].join('/'),replaceReferences);
+}
+async function moveFile(file,directory,replaceReferences){
+ const parts=segments(directory),folder=await resolvePath(directory);if(!(await fsp.stat(folder)).isDirectory())throw new TypeError('Папка не найдена');
+ const filename=segments(file).pop();if(!filename)throw new TypeError('Укажите файл');return relocateFile(file,[...parts,filename].join('/'),replaceReferences);
+}
 async function search(query){
  if(typeof query!=='string'||!query.trim()||query.length>200)throw new TypeError('Введите название файла');
  const needle=query.trim().toLocaleLowerCase('ru');const stack=[''],results=[];let scanned=0;let truncated=false;
  while(stack.length&&scanned<5000&&results.length<100){const dir=stack.pop();let entries;try{entries=await list(dir)}catch{continue}for(const entry of entries){if(++scanned>5000){truncated=true;break}if(entry.name.toLocaleLowerCase('ru').includes(needle))results.push(entry);if(entry.type==='folder')stack.push(entry.path);if(results.length>=100){truncated=true;break}}}
  return {results,scanned,truncated:truncated||stack.length>0};
 }
-module.exports={ROOT,segments,list,mkdir,upload,filePath,renameFile,search};
+module.exports={ROOT,segments,list,mkdir,upload,filePath,renameFile,moveFile,search};
 
 // Поиск по содержимому локальных текстовых документов; большие и двоичные файлы пропускаются.
 async function searchText(query){

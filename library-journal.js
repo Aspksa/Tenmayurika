@@ -2,7 +2,7 @@
 // Journal stores local operation metadata, never file contents or search terms.
 const fs=require('node:fs/promises'),path=require('node:path');
 const FILE=process.env.TENMAYURIKA_LIBRARY_JOURNAL||path.join(__dirname,'data','library-journal.jsonl');
-const ALLOWED=new Set(['folder_created','file_uploaded','file_renamed','ocr_completed','collection_created','collection_added','collection_removed','collection_deleted']);
+const ALLOWED=new Set(['folder_created','file_uploaded','file_renamed','file_moved','ocr_completed','collection_created','collection_added','collection_removed','collection_deleted']);
 let chain=Promise.resolve();
 function record(action,detail={}){
  if(!ALLOWED.has(action))throw new TypeError('Неизвестное действие');

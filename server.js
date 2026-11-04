@@ -249,6 +249,7 @@ if(p.startsWith('/api/library/')){
   if(req.method==='GET'&&p==='/api/library/propose-facts')return respond(res,200,await libraryAnalysis.proposeFacts(url.searchParams.get('path')||''));
   if(req.method==='POST'&&p==='/api/library/tables'){const input=await body(req);return respond(res,200,await libraryAnalysis.tables(input?.files))}
   if(req.method==='GET'&&p==='/api/library/suggest-folder')return respond(res,200,{folder:libraryAnalysis.suggestFolder(url.searchParams.get('name')||'')});
+  if(req.method==='GET'&&p==='/api/library/suggest-file-folder')return respond(res,200,await libraryAnalysis.suggestFileFolder(url.searchParams.get('path')||''));
   if(req.method==='POST'&&p==='/api/library/ocr'){const input=await body(req),result=await libraryOcr.recognize(input?.path);await journal('ocr_completed',{path:input.path});return respond(res,200,result)}
   if(req.method==='POST'&&p==='/api/library/compare'){const input=await body(req);return respond(res,200,await libraryDocuments.compare(input?.left,input?.right))}
   if(req.method==='GET'&&p==='/api/library/queue')return respond(res,200,await libraryQueue.status());
@@ -272,6 +273,7 @@ if(p.startsWith('/api/library/')){
   if(req.method==='GET'&&p==='/api/library/journal')return respond(res,200,{items:await libraryJournal.recent()});
   if(req.method==='GET'&&p==='/api/library/health')return respond(res,200,await libraryHealth.check());
   if(req.method==='POST'&&p==='/api/library/rename'){const input=await body(req),result=await library.renameFile(input?.path,input?.name,libraryCollections.replacePath);if(!result.unchanged)await journal('file_renamed',{path:input.path,target:result.path});return respond(res,200,result)}
+  if(req.method==='POST'&&p==='/api/library/move'){const input=await body(req);if(input?.create===true)try{await library.mkdir(input.folder)}catch(e){if(e.code!=='EEXIST')throw e}const result=await library.moveFile(input?.path,input?.folder,libraryCollections.replacePath);if(!result.unchanged)await journal('file_moved',{path:input.path,target:result.path});return respond(res,200,result)}
   if(req.method==='POST'&&p==='/api/library/folder'){const input=await body(req);await library.mkdir(input?.path);await journal('folder_created',{path:input.path});return respond(res,201,{ok:true})}
   if(req.method==='PUT'&&p==='/api/library/upload'){const rel=url.searchParams.get('path')||'',result=await library.upload(rel,req);await journal('file_uploaded',{path:rel});return respond(res,201,result)}
   if(req.method==='GET'&&p==='/api/library/download'){

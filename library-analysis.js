@@ -18,8 +18,11 @@ async function similar(file){
  return {items:matches.sort((a,b)=>b.score-a.score).slice(0,20),scanned:Math.min(scanned,200),unreadable,truncated:truncated||pending.length>0};
 }
 function suggestFolder(filename){const name=String(filename||'').toLocaleLowerCase('ru');if(/\.(jpg|jpeg|png|webp|gif)$/.test(name))return 'Изображения';if(/\.(xlsx|xls|csv)$/.test(name))return 'Таблицы';if(/\.(pdf|docx|txt|md)$/.test(name))return 'Документы';return 'Другие файлы'}
+async function suggestFileFolder(file){await library.filePath(file);let text=file.toLocaleLowerCase('ru');if(/\.(txt|md|csv|json|docx|xlsx|pdf)$/i.test(file)){try{text+=' '+(await docs.read(file)).text.slice(0,8000).toLocaleLowerCase('ru')}catch{}}
+ const topics=[[/договор|контракт|соглашени/iu,'Договоры'],[/инструкц|руководств|инсталляц/iu,'Инструкции'],[/отч[её]т|реестр|ведомост/iu,'Отчёты']];for(const [pattern,folder] of topics)if(pattern.test(text))return {folder,reason:'По словам в названии или начале документа'};return {folder:suggestFolder(file),reason:'По типу файла'};
+}
 async function suggestName(file){const d=await docs.read(file),extension=file.split('.').pop().toLowerCase(),original=file.split('/').pop();const first=d.text.split(/\r?\n/).map(x=>x.trim()).find(x=>x.length>=6&&!/^\[.*\]$/.test(x));if(!first)return {name:original,reason:'Не удалось выделить заголовок'};let name=[...first].map(c=>c.charCodeAt(0)<32?' ':c).join('').replace(/[<>:"/\\|?*]/g,' ').replace(/\s+/g,' ').trim().slice(0,70).replace(/[. ]+$/,'');if(!name||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name))name='Документ';return {name:name+'.'+extension,reason:'По первой содержательной строке'};}
-module.exports={summarize,analyze,similar,suggestFolder,suggestName};
+module.exports={summarize,analyze,similar,suggestFolder,suggestName,suggestFileFolder};
 
 // Local extractive answers: only quotes from source files, never model-generated claims.
 async function answer(question,selectedFile=''){
