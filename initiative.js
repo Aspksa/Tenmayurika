@@ -65,14 +65,23 @@ async function accept(id,ctx){
  return {ok:true,text,changed:s.kind!=='prepare'};
 }
 // Для подсказки модели: недавно показанное (человек может ответить на него словами) и одно новое.
+// Возвращает {text, offerId}: предложение помечается показанным только после ответа (afterReply).
 function promptText({offer=true}={}){
  const hour=new Date(Date.now()-3600e3).toISOString();
  const recent=list('shown',5).filter(s=>s.shown_at>=hour)[0];
  let t='';
  if(recent)t+='\nТы недавно сама предложила: «'+recent.text+'». Если человек отвечает на это — помоги (например, инструментами дел).';
  const next=offer?fresh(1)[0]:null;
- if(next){shown(next.id);t+='\nПо своей инициативе: если к месту, в конце ответа можешь коротко предложить: «'+next.text+'».'}
- return t;
+ if(next)t+='\nПо своей инициативе: если к месту, в конце ответа можешь коротко предложить: «'+next.text+'».';
+ return {text:t,offerId:next?next.id:null};
+}
+// Предложение попало в ответ (общие слова) — показано; иначе остаётся новым и придёт облачком аватара.
+function afterReply(id,reply){
+ const s=get(id);if(!s||s.status!=='new')return false;
+ const norm=x=>String(x||'').toLocaleLowerCase().replace(/ё/g,'е');
+ const words=[...new Set(norm(s.text).split(/[^\p{L}\p{N}]+/u).filter(w=>w.length>=5).map(w=>w.slice(0,5)))],r=norm(reply);
+ const hit=words.length&&words.filter(w=>r.includes(w)).length>=Math.min(3,Math.ceil(words.length/2));
+ return hit?shown(id):false;
 }
 function stats(){return use(db=>db.prepare('SELECT status,COUNT(*) AS n FROM brain_suggestions GROUP BY status').all()).reduce((o,r)=>(o[r.status]=r.n,o),{new:0,shown:0,accepted:0,dismissed:0})}
-module.exports={scan,list,get,fresh,shown,dismiss,accept,promptText,stats,monthDay,daysUntil};
+module.exports={scan,list,get,fresh,shown,dismiss,accept,promptText,afterReply,stats,monthDay,daysUntil};

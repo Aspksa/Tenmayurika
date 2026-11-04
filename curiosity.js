@@ -81,12 +81,12 @@ function stillValid(q){
 }
 const read=()=>{const s=state('curiosity',null);return s&&typeof s==='object'?s:{turns:0,lastAsk:-99,pending:null}};
 // Ход разговора: подсказка модели с одним вопросом или пустая строка.
-function turn({busy=false}={}){
+function turn({busy=false,conversation=null}={}){
  const s=read();s.turns=(s.turns||0)+1;
  let text='';
  if(!busy&&s.turns-(s.lastAsk??-99)>=EVERY){
   let q=null;for(const c of list('open',6)){if(stillValid(c)){q=c;break}dismiss(c.id)}
-  if(q){s.lastAsk=s.turns;s.pending=q.id;use(db=>db.prepare("UPDATE memory_questions SET status='asked',asked_at=? WHERE id=?").run(new Date().toISOString(),q.id));
+  if(q){s.lastAsk=s.turns;s.pending=q.id;s.conv=conversation||null;use(db=>db.prepare("UPDATE memory_questions SET status='asked',asked_at=? WHERE id=?").run(new Date().toISOString(),q.id));
    text='\nЛюбопытство: тебе правда интересно узнать: «'+q.text+'»'+(q.reason?' (почему: '+q.reason+')':'')+'. Если это к месту и не мешает ответу, в самом конце мягко спроси ОДНО это, своими словами. Сначала ответь на то, что спросили.'}
  }
  setState('curiosity',s);
@@ -102,10 +102,12 @@ function afterReply(reply){
  else thoughts.add('ask','Спросила: '+q.text,{id:q.id});
 }
 // Следующее сообщение человека — ответ на заданный вопрос.
-function onMessage(message){
+// Только в том же разговоре: «нет» в новом чате — не ответ на вопрос из прошлого, вопрос возвращается в очередь.
+function onMessage(message,{conversation=null,fresh=false}={}){
  const s=read();if(!s.pending)return null;
- const q=get(s.pending);s.pending=null;setState('curiosity',s);
+ const q=get(s.pending),same=!fresh&&(!s.conv||!conversation||s.conv===conversation);s.pending=null;s.conv=null;setState('curiosity',s);
  if(!q||q.status!=='asked')return null;
+ if(!same){use(db=>db.prepare("UPDATE memory_questions SET status='open',asked_at=NULL WHERE id=? AND status='asked'").run(q.id));return null}
  const m=String(message||'').trim(),yes=YES.test(m),no=NO.test(m);
  use(db=>db.prepare("UPDATE memory_questions SET status='answered',answer=?,done_at=? WHERE id=?").run(m.slice(0,500),new Date().toISOString(),q.id));
  let effect=null;

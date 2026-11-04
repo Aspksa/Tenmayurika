@@ -15,6 +15,8 @@ async function run(){
  try{await backup(db,path.join(dest,'tenmayurika.sqlite'))}finally{db.close()}
  const vectors=path.join(data,'vectors');
  if(fs.existsSync(vectors))fs.cpSync(vectors,path.join(dest,'vectors'),{recursive:true});
+ const library=path.join(data,'library');
+ if(fs.existsSync(library))fs.cpSync(library,path.join(dest,'library'),{recursive:true});
  const checked=new DatabaseSync(path.join(dest,'tenmayurika.sqlite'),{readOnly:true});
  try{if(checked.prepare('PRAGMA integrity_check').get().integrity_check!=='ok')throw Error('Копия SQLite повреждена')}finally{checked.close()}
  const manifest={createdAt:new Date().toISOString(),files:[]};
@@ -26,3 +28,4 @@ async function run(){
 }
 if(require.main===module)run().catch(e=>{console.error('Ошибка:',e.message);process.exitCode=1});
 module.exports={run};
+

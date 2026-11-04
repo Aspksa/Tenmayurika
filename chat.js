@@ -19,6 +19,7 @@ const reflect=require('./reflect');
 const correct=require('./correct');
 const growth=require('./growth');
 const core=require('./core');
+const soul=require('./soul');
 const onboarding=require('./onboarding');
 const convo=require('./convo');
 const review=require('./review');
@@ -534,13 +535,14 @@ async function modelReply(name,message,all,facts,notes,enabled,impl,result,past=
  let side='';
  // Сердцевина, оглавление памяти, знакомство и сводка начала разговора (идеи letta-code).
  try{side+=core.promptText({tools:selfEdit})}catch(e){console.error('Core prompt failed:',e.name)}
+ try{side+=soul.promptText()}catch(e){console.error('Soul prompt failed:',e.name)}
  try{side+=memoryBlock([atlas.promptText({tool:allowed.includes('open_zone')})].filter(Boolean))}catch(e){console.error('Atlas prompt failed:',e.name)}
  try{side+=convo.context(cid,older)}catch(e){console.error('Conversation summary failed:',e.name)}
  let asking='';try{if(selfEdit)asking=onboarding.turn()}catch(e){console.error('Onboarding failed:',e.name)}side+=asking;
  // Своё мышление: догадки (не факты), один вопрос из любопытства, предложение по своей инициативе.
  try{if(thoughts.on('guesses'))side+=guesses.promptText()}catch(e){console.error('Guesses prompt failed:',e.name)}
- let curious='';try{if(thoughts.on('curiosity'))curious=curiosity.turn({busy:!!asking});side+=curious}catch(e){console.error('Curiosity failed:',e.name)}
- try{if(thoughts.on('initiative'))side+=initiative.promptText({offer:!asking&&!curious})}catch(e){console.error('Initiative prompt failed:',e.name)}
+ let curious='';try{if(thoughts.on('curiosity'))curious=curiosity.turn({busy:!!asking,conversation:cid});side+=curious}catch(e){console.error('Curiosity failed:',e.name)}
+ try{if(thoughts.on('initiative')){const ip=initiative.promptText({offer:!asking&&!curious});side+=ip.text;if(ip.offerId)result.offerId=ip.offerId}}catch(e){console.error('Initiative prompt failed:',e.name)}
  // Пометки фактов: в прошлом, мнение, уверенность, откуда известно.
  // Честное «не знаю»: о человеке и его мире ничего не нашлось — не выдумывать.
  const unknown=thoughts.on('honest')&&!facts.length&&!notes.length&&!earlier.length&&!(mind.inferred||[]).length&&inner.personal(message);
@@ -548,7 +550,7 @@ async function modelReply(name,message,all,facts,notes,enabled,impl,result,past=
  if(facts.some(f=>f.tag))side+='\nПометки у фактов: «в прошлом» — уже не так; [мнение] — чьё-то мнение, а не факт; уверенность ниже 100% — говори осторожно; «план» — это намерение со сроком, а не свершившееся.';
  // Внутренний голос: короткий план до ответа.
  if(thoughts.on('innerVoice')){try{const p=await inner.plan(llm.complete,{message,facts,notes,history});if(p){result.thinking.plan=p;thoughts.add('plan',p);side+='\nТвой план ответа (внутренний голос, не пересказывай его дословно):\n'+p}}catch(e){console.error('Inner voice failed:',e.name)}}
- const system=(persona||'Ты '+name+' — девятихвостая лиса-кицунэ, хранительница личной памяти Tenmayurika. Отвечай по-русски, тепло и кратко.')+' Твоё имя: '+name+'. Сегодня '+new Date().toLocaleDateString('ru-RU')+'.'+(allowed.length?' Используй инструменты, когда пользователь просит что-то сделать.':'')
+ const system=(persona||'Ты '+name+' — девятихвостая лиса-кицунэ, хранительница личной памяти Tenmayurika. '+core.PERSONA_PROMPT+' Отвечай по-русски, тепло и кратко.')+' Твоё имя: '+name+'. Сегодня '+new Date().toLocaleDateString('ru-RU')+'.'+(allowed.length?' Используй инструменты, когда пользователь просит что-то сделать.':'')
   // Предпочтения пользователя — правила общения, они важнее характера по умолчанию.
   +(mind.preferences?'\n'+mind.preferences:'')
   +(mind.skills?'\n'+mind.skills:'')
@@ -566,7 +568,9 @@ async function modelReply(name,message,all,facts,notes,enabled,impl,result,past=
    let text=msg.content.trim();
    // Сверка черновика с памятью: если он утверждает то, чего в памяти нет, ответ исправляется.
    // О личном ничего не нашлось — тоже сверка: именно тут легче всего выдумать.
-   if(thoughts.on('verify')&&(facts.length||notes.length||(unknown&&!result.tools.length))&&!result.secrets.length){try{const c=await inner.verify(llm.complete,{message,reply:text,facts,notes});
+   if(thoughts.on('verify')&&(facts.length||notes.length||(unknown&&!result.tools.length))&&!result.secrets.length){try{// Сверке нужны не только вспомненные записи, но и то, что нашли инструменты, и недавний разговор.
+    const extra=[...history.slice(-4).map(m=>(m.role==='user'?'Человек: ':'Ассистентка: ')+String(m.content||'').slice(0,400)),...result.outcomes.filter(o=>o.ok).map(o=>'Инструмент: '+String(o.text||'').slice(0,600))];
+    const c=await inner.verify(llm.complete,{message,reply:text,facts,notes,extra});
     if(!c.ok&&c.fixed&&c.fixed.length>=2){result.thinking.check='fixed';thoughts.add('check','Сверила черновик с памятью и поправила ответ.',{before:text.slice(0,300)});text=c.fixed}else{result.thinking.check='ok';thoughts.add('check','Сверила ответ с памятью: сходится.')}}catch(e){console.error('Verify failed:',e.name)}}
    if(unknown)thoughts.add('unknown','О «'+message.slice(0,80)+'» в памяти ничего нет — честно сказала, что не знаю.');
    return text+(result.secrets.length?'\n\n'+result.secrets.join('\n\n'):'')}
@@ -606,8 +610,10 @@ async function reply(input,ctx={}){
  if(message.length>MAX_MESSAGE)throw new TypeError('Сообщение длиннее '+MAX_MESSAGE+' символов. Сократите его или разбейте на части.');
  reflect.touch();
  // Ответ на вопрос, который Юрика задала сама (любопытство, проверка догадки): «да/нет» — не поправка.
- let answered=null;try{answered=curiosity.onMessage(message)}catch(e){console.error('Curiosity answer failed:',e.name)}
+ let answered=null;try{answered=curiosity.onMessage(message,{conversation:convo.validId(input.conversation),fresh:!cleanHistory(input.history).length})}catch(e){console.error('Curiosity answer failed:',e.name)}
  const corrected=answered?.effect?null:await learnFromFeedback(input,message);
+ // Душа откликается на слова хозяина: черты крепнут, настроение меняется, дорогое запоминается (soul.js).
+ let felt=null;try{felt=soul.feel(message)}catch(e){console.error('Soul failed:',e.name)}
  // Предпочтения («отвечай короче») действуют сразу, уже в этом ответе.
  let prefs=[];try{prefs=preferences.learnFrom(message,'chat')}catch(e){console.error('Preference learning failed:',e.name)}
  // Каждое сообщение сохраняется; команды («дело: …»), поправки и пожелания к ответам не разбираются фоном
@@ -626,7 +632,11 @@ async function reply(input,ctx={}){
  try{if(!out.secret)chatlog.save('assistant',out.reply)}catch(e){console.error('Chat log failed:',e.name)}
  // Задала ли модель вопрос из любопытства — если нет, он вернётся в очередь.
  try{curiosity.afterReply(out.reply||'')}catch(e){console.error('Curiosity check failed:',e.name)}
+ // Предложение по своей инициативе считается показанным, только если оно попало в ответ.
+ try{if(out.offerId)initiative.afterReply(out.offerId,out.source==='model'?out.reply:'')}catch(e){console.error('Initiative check failed:',e.name)}
+ delete out.offerId;
  if(answered?.effect){out.answered=answered.effect;out.changed=true}
+ if(felt?.level)out.soulGrew=felt.level;
  // Учимся фоном, не задерживая ответ.
  // Затем новые факты получают векторы для поиска по смыслу (если выбрана модель эмбеддингов).
  setImmediate(()=>chatlog.learnPending().then(()=>factvec.index()).catch(e=>console.error('Chat learning failed:',e.name)));

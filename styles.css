@@ -824,6 +824,33 @@ html.brain-fs-lock,html.brain-fs-lock body{overflow:hidden}
 .brain-core-edit{width:100%;box-sizing:border-box;resize:vertical;min-height:6rem;font:inherit}
 .brain-core-hist{display:grid;gap:.3rem;margin-top:.3rem}
 
+/* Чат аватара: спокойная рабочая область и свободное пространство для переписки. */
+.chat.floating{width:calc(clamp(340px,38vw,620px) * var(--chat-scale,1));height:calc(clamp(480px,76vh,900px) * var(--chat-scale,1));max-width:calc(100vw - 24px);overflow:hidden;background:#171714;border:1px solid #3d3a32;border-radius:20px;box-shadow:0 24px 80px rgba(0,0,0,.55)}
+.chat .floating-head{gap:.75rem;padding:1rem 1.2rem;border-bottom:1px solid #34332e;background:#1b1b18}
+.chat .floating-head img{width:2.5rem;height:2.5rem;border-color:#66563a}
+.chat .floating-head strong{color:#f1eee5;font-size:.95rem;letter-spacing:.01em}
+.chat .floating-head small{display:block;margin-top:.2rem;color:#aaa69b;font-size:.73rem}
+.chat .icon-btn{border-radius:10px;color:#aaa69b}
+.chat .icon-btn:hover,.chat .icon-btn:focus-visible{color:#f5e5be;background:#302d26;border-color:#514b3d}
+.chat .chat-log{gap:1.35rem;padding:1.6rem clamp(1rem,4vw,2.2rem);scrollbar-color:#575248 transparent;overscroll-behavior:contain}
+.chat .msg{max-width:100%;font-size:.95em;line-height:1.7;overflow-wrap:anywhere;word-break:normal}
+.chat .msg.assistant{align-self:stretch;padding:.15rem 0;background:transparent;border:0;border-radius:0;color:#eeece5}
+.chat .msg.user{align-self:flex-end;max-width:85%;padding:.75rem 1rem;background:#32312c;border:1px solid #403e37;border-radius:18px 18px 5px 18px;color:#f5f2eb}
+.chat .chat-log.is-empty{justify-content:center}
+.chat .chat-log.is-empty .msg.assistant{align-self:center;max-width:24rem;color:#f2eadc;font-family:Georgia,serif;font-size:clamp(1.25rem,2vw,1.65rem);line-height:1.45;text-align:center}
+.chat .chat-quick{justify-content:center;gap:.5rem;padding:.25rem 1rem .8rem}
+.chat .chip{padding:.55rem .8rem;background:#22221e;border:1px solid #454238;color:#d9d4c8;font-size:.78em}
+.chat .chip:hover,.chat .chip:focus-visible{background:#302c24;border-color:#967b4b;color:#f5e6c5}
+.chat .chat-form{align-items:flex-end;gap:.5rem;margin:0 1rem 1rem;padding:.7rem;background:#242420;border:1px solid #4a473d;border-radius:18px;box-shadow:0 5px 20px rgba(0,0,0,.16)}
+.chat .chat-form:focus-within{border-color:#aa8c59;box-shadow:0 0 0 2px rgba(191,157,99,.15)}
+.chat .chat-form textarea{flex:1;min-width:0;min-height:2.5rem;max-height:10rem;padding:.55rem .45rem;background:transparent;border:0;box-shadow:none;color:#f4f1e9;outline:none;line-height:1.5}
+.chat .chat-form textarea::placeholder{color:#a8a398}
+.chat .chat-form button{width:2.5rem;height:2.5rem;border-radius:12px;background:#c69b61;border:1px solid #c69b61;color:#181612}
+.chat .chat-form button:hover:not(:disabled){background:#d9b27e}
+.chat .chat-form button:disabled{opacity:.5;cursor:wait}
+.chat .msg-rate button:focus-visible,.chat button:focus-visible{outline:2px solid #d4b47d;outline-offset:2px}
+@media(max-width:640px){.chat.floating.sheet{left:0!important;right:0!important;top:0!important;bottom:0!important;width:auto;height:100dvh;max-width:none;max-height:none;border-radius:0}.chat .floating-head{padding-top:max(1rem,env(safe-area-inset-top))}.chat .chat-form{margin-bottom:max(1rem,env(safe-area-inset-bottom))}.chat .chat-log{padding:1.2rem}}
+
 /* Планер: свободное пространство между основными зонами и элементами управления. */
 .planner{gap:clamp(18px,1.5vw,28px);margin-top:clamp(20px,3vh,36px)}
 .planner > *, .pl-right > *{min-width:0}
@@ -920,3 +947,14 @@ html.brain-fs-lock,html.brain-fs-lock body{overflow:hidden}
 .brain-stage.clean .brain-thoughts,.brain-stage.clean .brain-time{display:none}
 @media (max-width:900px){.brain-thoughts{left:.75rem;right:.75rem;width:auto;top:auto;bottom:.75rem;max-height:40%}}
 @media (max-width:640px){.brain-thoughts,.brain-time{top:auto}.brain-time{bottom:.75rem}}
+
+
+/* Душа: ступень, черты, настроение (brain.js soulSec) */
+.brain-soul-level{display:flex;flex-wrap:wrap;gap:.3rem .8rem;align-items:baseline;justify-content:space-between}
+.brain-soul-name{color:#e8c25a;font-weight:600}
+.brain-soul-bar{height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
+.brain-soul-bar.small{height:4px}
+.brain-soul-bar>i{display:block;height:100%;background:linear-gradient(90deg,#b8862e,#f3d37a);border-radius:inherit;transition:width .6s ease}
+.brain-soul-traits{display:grid;gap:.35rem}
+.brain-soul-trait{display:grid;grid-template-columns:7.5rem 1fr 2rem;gap:.5rem;align-items:center;font-size:.85rem}
+@media (prefers-reduced-motion:reduce){.brain-soul-bar>i{transition:none}}

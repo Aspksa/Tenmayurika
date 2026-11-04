@@ -16,9 +16,12 @@ const FACTOR={active:1,dormant:.8,fading:.6};
 const LABEL={active:'действует',dormant:'спит',fading:'угасает',forgotten:'забыт'};
 const PEOPLE=/мам|пап|мать|отец|брат|сестр|муж|жен|сын|доч|друг|подруг|бабуш|дедуш|родител|ребен|ребён|дет|партн|коллег/;
 const MAX_FORGET=20;
-function isProtected(f,u){
+// people — имена близких: объекты фактов вида «Я | мама | Ольга» (sweep собирает их заранее).
+function isProtected(f,u,people=new Set()){
  const s=String(f.subject||'').trim().toLocaleLowerCase();
  if(s==='я'||s==='мне'||s==='меня')return true;
+ // «Мама | живёт в | Казань», «Ольга (мама) | любит | розы» — о близких не забываем.
+ if(PEOPLE.test(s)||people.has(s))return true;
  if(/^manual/.test(f.source_id||''))return true;
  if(['зовут','день рождения','женат на','дружит с'].includes(f.relation))return true;
  if(PEOPLE.test(String(f.predicate||'').toLocaleLowerCase()))return true;
@@ -37,14 +40,16 @@ function sweep({forget=true,now=Date.now()}={}){
  const facts=activeFacts(),u=usefulness.get('fact',facts.map(f=>f.id).slice(0,500));
  // usefulness.get берёт до 500 id за раз — остальное догружаем пачками.
  for(let i=500;i<facts.length;i+=500)for(const [k,v] of usefulness.get('fact',facts.slice(i,i+500).map(f=>f.id)))u.set(k,v);
- const rows=facts.map(f=>{const uu=u.get(f.id),prot=isProtected(f,uu),a=activation(f,uu,now);return {f,a,prot,stage:stageOf(a,prot)}});
+ const people=new Set(facts.filter(f=>PEOPLE.test(String(f.predicate||'').toLocaleLowerCase())||['женат на','дружит с'].includes(f.relation)).flatMap(f=>[String(f.object).trim().toLocaleLowerCase(),String(f.subject).trim().toLocaleLowerCase()]));
+ const rows=facts.map(f=>{const uu=u.get(f.id),prot=isProtected(f,uu,people),a=activation(f,uu,now);return {f,a,prot,stage:stageOf(a,prot)}});
  const at=new Date(now).toISOString(),counts={active:0,dormant:0,fading:0,forgotten:0},forgotten=[];
  let doomed=rows.filter(r=>r.stage==='forgotten').sort((x,y)=>x.a-y.a);
  if(!forget)doomed=[];else doomed=doomed.slice(0,MAX_FORGET);
  const doomedIds=new Set(doomed.map(r=>r.f.id));
  use(db=>{const st=db.prepare('INSERT INTO memory_strength(fact_id,value,stage,protected,at) VALUES(?,?,?,?,?) ON CONFLICT(fact_id) DO UPDATE SET value=excluded.value,stage=excluded.stage,protected=excluded.protected,at=excluded.at');
   tx(db,()=>{for(const r of rows){const stage=r.stage==='forgotten'&&!doomedIds.has(r.f.id)?'fading':r.stage;st.run(r.f.id,Math.round(r.a*1000)/1000,stage,r.prot?1:0,at);counts[stage]++}})});
- for(const r of doomed){try{if(memory.retireFact(r.f.id,'forgotten')){forgotten.push(r.f);counts.fading--;counts.forgotten++}}catch(e){console.error('Forget failed:',e.name)}}
+ // Забытые уже посчитаны в транзакции; если отставить не вышло — факт остаётся угасающим.
+ for(const r of doomed){let ok=false;try{ok=memory.retireFact(r.f.id,'forgotten')}catch(e){console.error('Forget failed:',e.name)}if(ok)forgotten.push(r.f);else{counts.forgotten--;counts.fading++}}
  return {...counts,forgottenFacts:forgotten.map(f=>({id:f.id,subject:f.subject,predicate:f.predicate,object:f.object}))};
 }
 function get(ids){

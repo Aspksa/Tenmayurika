@@ -24,7 +24,7 @@ const say=text=>({content:text});
 
 test('core blocks: seed, append, replace, limit, injection, history and restore',()=>{
  const l=core.list();
- assert.deepEqual(l.map(b=>b.name),['self','human','bond']);
+ assert.deepEqual(l.map(b=>b.name),['self','human','bond','soul']);
  assert.ok(l.every(b=>b.seed&&b.version===1));
  // К сиду не дописывается — он заменяется.
  core.append('human','Ты любишь чай с жасмином.');
