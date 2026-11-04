@@ -53,6 +53,9 @@ test('hybrid recall: words plus graph neighbours, with reasons',async()=>{
  for(let i=0;i<65;i++)add('Анна','знает','язык '+i);
  assert.equal((await recall('Анна',{ws:{notes:[{id:'n4',title:'День рождения',content:'Анна'}]}})).notes[0].id,'n4');
  assert.ok(m.neighborhood('Анна',2,6).facts.length<=6);
+ // Больше 50 кандидатов: сосед по графу с высоким баллом не теряется из-за порядка вставки.
+ add('Пермь','река','Кама');
+ assert.ok((await recall('Анна Пермь',{ws:{notes:[]},factLimit:100})).facts.length>50);
  // Одинаковый факт из многих источников сворачивается без перебора всех пар.
  for(let i=0;i<300;i++)add('Ира','живёт в','Омск','src'+i);
  const t0=Date.now(),many=m.duplicates({limit:5});assert.equal(many.length,5);assert.ok(many.every(x=>x.keep.id===many[0].keep.id));assert.ok(Date.now()-t0<1500);

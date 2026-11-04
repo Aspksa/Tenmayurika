@@ -45,7 +45,8 @@ async function recall(text,{factLimit=8,noteLimit=5,ws}={}){
  const top=memory.factsById([...facts.values()].sort((a,b)=>b.score-a.score).slice(0,3).map(x=>x.id));
  const ents=new Set();for(const f of top){ents.add(f.subject);ents.add(f.object)}
  for(const e of ents){let rel=[];try{rel=memory.relations(e,20)}catch{}rel.forEach((f,i)=>{if(!facts.has(f.id)||[...facts.get(f.id).why].every(w=>w==='связь'))add(facts,f.id,'связь',W.graph*rrf(i)*6)})}
- const rows=memory.factsById([...facts.keys()]),now=Date.now();
+ // factsById берёт не больше 50 id за раз — грузим всех кандидатов пачками, чтобы порядок решал итоговый балл.
+ const ids=[...facts.keys()],rows=[];for(let i=0;i<ids.length;i+=50)rows.push(...memory.factsById(ids.slice(i,i+50)));const now=Date.now();
  const outFacts=rows.map(f=>{const e=facts.get(f.id),age=(now-Date.parse(f.observed_at||0))/864e5;
    const score=(e.score+W.fresh*Math.exp(-Math.max(0,age)/30))*(.6+.4*(Number(f.confidence)||0));
    return {...f,score,why:[...e.why]}})
