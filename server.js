@@ -43,6 +43,7 @@ const libraryOcr=require('./library-ocr');
 const libraryJournal=require('./library-journal');
 const libraryHealth=require('./library-health');
 const libraryIndex=require('./library-index');
+const libraryVersions=require('./library-versions');
 async function journal(action,detail){try{await libraryJournal.record(action,detail)}catch(e){console.error('Library journal failed:',e.code||e.name)}}
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
@@ -277,6 +278,9 @@ if(p.startsWith('/api/library/')){
   if(req.method==='POST'&&p==='/api/library/move'){const input=await body(req);if(input?.create===true)try{await library.mkdir(input.folder)}catch(e){if(e.code!=='EEXIST')throw e}const result=await library.moveFile(input?.path,input?.folder,libraryCollections.replacePath);if(!result.unchanged)await journal('file_moved',{path:input.path,target:result.path});return respond(res,200,result)}
   if(req.method==='POST'&&p==='/api/library/folder'){const input=await body(req);await library.mkdir(input?.path);await journal('folder_created',{path:input.path});return respond(res,201,{ok:true})}
   if(req.method==='PUT'&&p==='/api/library/upload'){const rel=url.searchParams.get('path')||'',result=await library.upload(rel,req);await journal('file_uploaded',{path:rel});return respond(res,201,result)}
+  if(req.method==='PUT'&&p==='/api/library/replace'){const rel=url.searchParams.get('path')||'',result=await libraryVersions.replace(rel,req);await journal('file_replaced',{path:rel,target:result.backup});return respond(res,200,result)}
+  if(req.method==='GET'&&p==='/api/library/versions')return respond(res,200,{items:await libraryVersions.list(url.searchParams.get('path')||'')});
+  if(req.method==='GET'&&p==='/api/library/version'){const version=await libraryVersions.file(url.searchParams.get('id')||'');res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':"attachment; filename=\"backup\"; filename*=UTF-8''"+encodeURIComponent(version.meta.path.split('/').pop()),'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});return fs.createReadStream(version.full).on('error',()=>res.destroy()).pipe(res)}
   if(req.method==='GET'&&p==='/api/library/download'){
    const rel=url.searchParams.get('path')||'',file=await library.filePath(rel);
    res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':"attachment; filename=\"download\"; filename*=UTF-8''"+encodeURIComponent(rel.split('/').pop()),'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});
