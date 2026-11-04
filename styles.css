@@ -809,6 +809,11 @@ html.brain-fs-lock,html.brain-fs-lock body{overflow:hidden}
 .brain-dia-row{display:flex;align-items:flex-start;gap:.5rem;justify-content:space-between}
 .brain-dia-row>.brain-fix-ok{flex:1;min-width:0;overflow-wrap:anywhere}
 .brain-dia-row>.brain-find{flex:1;min-width:0}
+.brain-core-block{padding:.4rem 0;border-top:1px solid rgba(232,194,90,.14)}
+.brain-core-block .brain-dia-row>.brain-fix-q{flex:1;min-width:0}
+.brain-core-text{white-space:pre-wrap;overflow-wrap:anywhere}
+.brain-core-edit{width:100%;box-sizing:border-box;resize:vertical;min-height:6rem;font:inherit}
+.brain-core-hist{display:grid;gap:.3rem;margin-top:.3rem}
 
 /* Планер: свободное пространство между основными зонами и элементами управления. */
 .planner{gap:clamp(18px,1.5vw,28px);margin-top:clamp(20px,3vh,36px)}

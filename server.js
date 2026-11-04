@@ -24,6 +24,10 @@ const growth=require('./growth');
 const aliases=require('./aliases');
 const memskills=require('./memskills');
 const selfstudy=require('./selfstudy');
+const core=require('./core');
+const onboarding=require('./onboarding');
+const review=require('./review');
+const atlas=require('./atlas');
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
 const HOST='127.0.0.1',PORT=Number(process.env.PORT)||5173;
@@ -55,7 +59,7 @@ async function handleBrain(req,res,p,url){
    for(const f of memory.factsById(fids))title.set('fact:'+f.id,f.subject+' — '+f.predicate+' → '+f.object);
    const end=(k,r)=>({kind:k,id:r,title:title.get(k+':'+r)||null});
    return respond(res,200,{diary:reflect.diary(limitParam(url,20,200)),insights:reflect.insightList(20),skills:skills.list(),preferences:preferences.list(),summaries:reflect.summaries().slice(0,30).map(({factIds,...t})=>({...t,size:factIds.length})),
-    links:{count:links.count(),recent:recent.map(l=>({type:l.type,a:end(l.a_kind,l.a_ref),b:end(l.b_kind,l.b_ref),evidence:l.evidence,source:l.source}))},working:working.snapshot(),reflect:reflect.status(),growth:{...growth.stats(),cards:growth.cards(8)},memskills:mskillView()});
+    links:{count:links.count(),recent:recent.map(l=>({type:l.type,a:end(l.a_kind,l.a_ref),b:end(l.b_kind,l.b_ref),evidence:l.evidence,source:l.source}))},working:working.snapshot(),reflect:reflect.status(),growth:{...growth.stats(),cards:growth.cards(8)},memskills:mskillView(),core:core.list(),onboarding:onboarding.status(),review:review.status()});
   }
   if(req.method==='GET'&&p==='/api/brain/memskills/organs')return respond(res,200,memskills.list({all:true}).map(s=>({name:s.name,title:s.title,status:s.status,uses:s.uses,value:s.value,version:s.version,action:s.action})));
   if(req.method==='GET'&&p==='/api/brain/memskills')return respond(res,200,{...mskillView(),misses:memskills.queue({limit:50}),selftests:selfstudy.selftests(50),windows:selfstudy.watchInfo().windows});
@@ -70,6 +74,19 @@ async function handleBrain(req,res,p,url){
   if(req.method==='POST'&&p==='/api/brain/aliases'){const input=await body(req);const r=aliases.add(input?.alias,input?.canonical,{evidence:'указано вручную',source:'user'});return respond(res,r?201:200,r||{ok:true,unchanged:true})}
   if(req.method==='POST'&&p==='/api/brain/aliases/remove'){const input=await body(req);return aliases.remove(input?.alias)?respond(res,200,{ok:true}):respond(res,404,{error:'Not found'})}
   if(req.method==='POST'&&p==='/api/brain/types'){const input=await body(req);return respond(res,200,growth.setType(input?.name,input?.type))}
+  // Сердцевина: блоки «Кто я», «Кто ты», «Как мы общаемся», их версии и возврат (core.js).
+  if(req.method==='GET'&&p==='/api/brain/core')return respond(res,200,core.list().map(b=>({...b,history:core.history(b.name,10)})));
+  if(req.method==='POST'&&p==='/api/brain/core'){const input=await body(req);if(typeof input?.body!=='string')return respond(res,400,{error:'Invalid body'});return respond(res,200,core.write(input.name,input.body,{source:'user',reason:'поправлено вручную'}))}
+  if(req.method==='POST'&&p==='/api/brain/core/restore'){const input=await body(req);const r=core.restore(input?.name,input?.version);return r?respond(res,200,r):respond(res,404,{error:'Not found'})}
+  // Знакомство: пропустить пункт, закончить или начать заново.
+  if(req.method==='POST'&&p==='/api/brain/onboarding'){const input=await body(req),a=input?.action;
+   if(a==='skip')return respond(res,200,onboarding.mark(String(input.item||''),{skipped:true}));
+   if(a==='finish')return respond(res,200,onboarding.finish());
+   if(a==='restart')return respond(res,200,onboarding.restart());
+   return respond(res,400,{error:'Invalid action'})}
+  // Разбор разговора вручную и оглавление памяти.
+  if(req.method==='POST'&&p==='/api/brain/review')return respond(res,200,await review.run({complete:llm.config()?llm.complete:null,reason:'manual'}));
+  if(req.method==='GET'&&p==='/api/brain/atlas')return respond(res,200,atlas.index(limitParam(url,30,200)));
   if(req.method==='POST'&&p==='/api/brain/reflect'){const r=await reflect.run({ws:await storage.load(),complete:llm.config()?llm.complete:null,reason:'manual'});return respond(res,200,r)}
   if(req.method==='POST'&&p==='/api/brain/preferences'){const input=await body(req);return respond(res,201,preferences.addText(input?.text))}
   if(req.method==='POST'&&p==='/api/brain/preferences/remove'){const input=await body(req);return preferences.remove(input?.id)?respond(res,200,{ok:true}):respond(res,404,{error:'Not found'})}

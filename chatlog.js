@@ -50,6 +50,22 @@ function search(text,limit=3,exceptId=0){
   return rows.map(r=>{const hay=r.text.toLocaleLowerCase();return {...r,score:terms.filter(t=>hay.includes(t)).length}}).filter(r=>r.score>=need).sort((a,b)=>b.score-a.score||b.id-a.id).slice(0,limit);
  }finally{db.close()}
 }
+// Разговоры за промежуток времени (вспоминание по датам). С запросом — только сообщения с его словами
+// и по соседнему сообщению вокруг каждого (вопрос и ответ вместе).
+function stemsOf(text){return [...new Set(String(text||'').toLocaleLowerCase().replace(/ё/g,'е').split(/[^\p{L}\p{N}]+/u).filter(w=>w.length>=3&&!STOP.has(w)).map(w=>w.slice(0,5)))].slice(0,8)}
+function between(from,to,{query='',limit=16,exceptId=0}={}){
+ const a=new Date(from).toISOString(),b=new Date(to).toISOString(),terms=stemsOf(query).filter(t=>!/^(говор|обсуж|болта|разго|расск|спрос|писал|мы$|тобой)/.test(t));
+ const db=open();
+ try{
+  const rows=db.prepare('SELECT id,at,role,text FROM chat_log WHERE at>=? AND at<? AND id<>? ORDER BY id LIMIT 2000').all(a,b,exceptId);
+  if(!terms.length)return {total:rows.length,messages:rows.slice(-limit)};
+  const hit=new Set();rows.forEach((r,i)=>{const t=r.text.toLocaleLowerCase().replace(/ё/g,'е');if(terms.some(x=>t.includes(x))){hit.add(i);if(r.role==='user'&&i+1<rows.length&&rows[i+1].role==='assistant')hit.add(i+1);if(r.role==='assistant'&&i>0&&rows[i-1].role==='user')hit.add(i-1)}});
+  const out=rows.filter((r,i)=>hit.has(i));
+  return {total:rows.length,matched:out.length,messages:out.slice(-limit)};
+ }finally{db.close()}
+}
+// Соседи найденного сообщения: n до и n после.
+function around(id,n=2){const db=open();try{return db.prepare('SELECT id,at,role,text FROM chat_log WHERE id BETWEEN ? AND ? ORDER BY id').all(Number(id)-n,Number(id)+n)}finally{db.close()}}
 function recent(limit=50){const db=open();try{return db.prepare('SELECT id,at,role,text,learned,facts FROM chat_log ORDER BY id DESC LIMIT ?').all(limit)}finally{db.close()}}
 
 // Итог разбора — в память: новые факты, новые версии известных (старая уходит в историю) и явно отменённое.
@@ -95,4 +111,4 @@ async function learnPending(limit=BATCH){
   return {processed,facts:added};
  }finally{busy=false}
 }
-module.exports={save,search,stats,recent,message,autoLearn,setAutoLearn,learnPending,relearn,apply};
+module.exports={save,search,between,around,stats,recent,message,autoLearn,setAutoLearn,learnPending,relearn,apply};
