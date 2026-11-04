@@ -585,6 +585,8 @@ async function modelReply(name,message,all,facts,notes,enabled,impl,result,past=
  try{side+=core.promptText({tools:selfEdit})}catch(e){console.error('Core prompt failed:',e.name)}
  try{side+=soul.promptText()}catch(e){console.error('Soul prompt failed:',e.name)}
  try{side+=psyche.promptText()+selfrules.promptText()+(allowed.includes('use_my_tool')?mytools.promptText():'')}catch(e){console.error('Psyche prompt failed:',e.name)}
+ // Уроки помощников (agents.js): свой агент видит свои, в разговоре — уроки Секретаря и Исследователя.
+ try{side+=agents.promptText({agent:result.agent||null,enabled})}catch(e){console.error('Agent lessons prompt failed:',e.name)}
  // Самонастройка: вариант креативности и длины на этот ответ; оценка хозяина скажет, какой лучше.
  let style=null;try{style=selfrules.choose();if(style){result.tune=style;if(style.length.hint)side+='\n'+style.length.hint}}catch(e){console.error('Self-tune failed:',e.name)}
  try{side+=memoryBlock([atlas.promptText({tool:allowed.includes('open_zone')})].filter(Boolean))}catch(e){console.error('Atlas prompt failed:',e.name)}
@@ -638,7 +640,7 @@ async function modelReply(name,message,all,facts,notes,enabled,impl,result,past=
  // Модель исчерпала лимит раундов: честно показываем, что вышло у каждого инструмента.
  return result.outcomes.length?'Не успела закончить ответ. Результаты инструментов:\n'+result.outcomes.map(o=>(o.ok?'• ':'✗ ')+o.text).join('\n'):'Не удалось завершить ответ.';
 }
-const pub=({done,outcomes,secrets,thinking,silent:_silent,...rest})=>{const t=thinking&&Object.keys(thinking).length?{thinking}:{};return secrets.length?{...rest,...t,secret:true}:{...rest,...t}};
+const pub=({done,outcomes,secrets,thinking,silent:_silent,agent:_agent,...rest})=>{const t=thinking&&Object.keys(thinking).length?{thinking}:{};return secrets.length?{...rest,...t,secret:true}:{...rest,...t}};
 function track(result,fn,out){result.tools.push(fn);if(!result.silent){try{agents.fromTool(OWNER[fn],TOOLS[OWNER[fn]]?.label||fn,out.secret?'':out.text,out.ok!==false)}catch(e){console.error('Agents note failed:',e.name)}}if(out.ok===false)result.failed=true;result.outcomes.push({ok:out.ok!==false,text:out.text});if(out.ok!==false)result.done.push(out.text);if(out.secret)result.secrets.push(out.text);if(out.changed)result.changed=true;if(out.action)result.actions.push(out.action);
  // Явный поиск по памяти тоже «вспоминание»: «Мозг» подсвечивает найденное и считает его силу.
  if(out.recalled){const r=result.recalled||(result.recalled={facts:[],notes:[]});for(const k of ['facts','notes'])for(const id of out.recalled[k])if(!r[k].includes(id))r[k].push(id)}}
@@ -733,7 +735,7 @@ async function answer(input,message,ctx){
  const name=typeof input.avatar==='string'&&input.avatar.trim()?input.avatar.trim().slice(0,40):'Юрика';
  // Без списка — все инструменты включены; с пустым списком — все выключены.
  const enabled=new Set(Array.isArray(input.tools)?input.tools.filter(id=>TOOL_IDS.includes(id)):TOOL_IDS);
- const impl=makeTools(ctx),result={tools:[],actions:[],changed:false,done:[],outcomes:[],secrets:[],thinking:{},silent:!!input.agentRun};
+ const impl=makeTools(ctx),result={tools:[],actions:[],changed:false,done:[],outcomes:[],secrets:[],thinking:{},silent:!!input.agentRun,agent:input.agentRun&&typeof input.agentId==='string'?input.agentId:null};
  const command=parseCommand(message);
  if(command){
   if(command.help)return {reply:helpText(enabled),source:'tool',...pub(result)};

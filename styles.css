@@ -662,6 +662,17 @@ html.brain-fs-lock,html.brain-fs-lock body{overflow:hidden}
 .brain-tab{font:500 .7rem/1.2 var(--mono);padding:.4em .75em;border-radius:3px;background:none;border:1px solid transparent;color:#a99d8a;cursor:pointer}
 .brain-tab:hover{color:var(--ember-hot);box-shadow:none}
 .brain-tab.on{border-color:rgba(238,138,60,.55);color:var(--ember-hot);background:rgba(238,138,60,.08)}
+/* Связи роста: агент → урок, мечта → вопрос… */
+.brain-tie{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:.2rem .45rem;align-items:start;padding:.4rem 0;border-bottom:1px dashed rgba(238,138,60,.16)}
+.brain-tie:last-child{border-bottom:0}
+.brain-tie-node{display:grid;gap:.1rem;min-width:0;font-size:.76rem;color:#efe6d6;overflow-wrap:anywhere}
+.brain-tie-node b{font:500 .64rem/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ember)}
+.brain-tie-goal b,.brain-tie-question b{color:#ffd36b}
+.brain-tie-lesson b,.brain-tie-rule b{color:#9be7ff}
+.brain-tie-miss b,.brain-tie-exam b{color:#9df5b4}
+.brain-tie-arrow{font:500 .8rem/1.4 var(--mono);color:var(--ember-hot)}
+.brain-tie-meta{grid-column:1/-1;font:400 .64rem/1.3 var(--mono);color:#8f8473}
+.brain-tie-n{font:600 .74rem/1.4 var(--mono);color:var(--ember-hot)}
 .brain-mind-set{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.35rem .8rem}
 .brain-mature{display:grid;grid-template-columns:minmax(0,9rem) minmax(0,1fr) auto;gap:.6em;align-items:center;font:.72rem/1.3 var(--mono);color:#e3dacb}
 .brain-mature span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1563,6 +1574,18 @@ input:checked+.switch::after{background:var(--ember-hot)}
 .agent-log{margin:0;padding:0;list-style:none;display:grid;gap:.35rem}
 .agent-log li{display:grid;gap:.1rem;padding:.4rem .6rem;border-radius:10px;background:rgba(255,255,255,.03);font-size:.84rem}
 .agent-log small{color:var(--muted);font-size:.78rem}
+.agent-log li{position:relative}
+.agent-rate{display:flex;align-items:center;gap:.3rem;justify-self:end}
+.agent-rate small{margin-right:auto}
+.agent-log li button{padding:.15em .55em;min-height:0;border-radius:999px;font-size:.78rem;box-shadow:none}
+.agent-log li button.on{border-color:var(--agent);background:color-mix(in srgb,var(--agent) 22%,transparent)}
+.agent-log li:has(>button){grid-template-columns:1fr auto;align-items:center}
+.agent-log li:has(>button) small{grid-column:1}
+.agent-set input{flex:1 1 12rem;min-width:0}
+.agent-proposal{border-style:dashed;border-color:var(--agent);box-shadow:0 0 18px -8px var(--agent)}
+.agent-proposal .agent-orb{animation:agent-call 2.4s ease-in-out infinite}
+@keyframes agent-call{50%{box-shadow:0 0 18px 2px var(--agent)}}
+@media (prefers-reduced-motion:reduce){.agent-proposal .agent-orb{animation:none}}
 .agent-body>div>p{margin:0;font-size:.84rem;color:var(--muted)}
 .agent-shapes{display:flex;flex-wrap:wrap;gap:.35rem}
 .agent-shape{width:2.2rem;height:2.2rem;padding:0;display:grid;place-items:center;border-radius:50%;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);font-size:1rem;box-shadow:none}

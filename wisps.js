@@ -8,7 +8,8 @@
   {id:'guardian',name:'Хранитель',role:'библиотека',rgb:[120,210,255],page:'library',shape:'book'},
   {id:'reviewer',name:'Разборщик',role:'разбор разговора',rgb:[200,150,255],page:'brain',shape:'moon'},
   {id:'secretary',name:'Секретарь',role:'дела и календарь',rgb:[255,178,92],page:'planner',shape:'star'},
-  {id:'researcher',name:'Исследователь',role:'факты и поиск',rgb:[125,255,176],page:'facts',shape:'crystal'}
+  {id:'researcher',name:'Исследователь',role:'факты и поиск',rgb:[125,255,176],page:'facts',shape:'crystal'},
+  {id:'teacher',name:'Учитель',role:'занятия с Мозгом',rgb:[255,226,130],page:'brain',shape:'flame'}
  ];
  // Настройки огоньков: меню аватара меняет их через TenmaWisps.set().
  const CFG_KEY='tenmayurika.wisps.v1',CFG0={fly:true,labels:true,size:1,speed:1,off:{},colors:{},shapes:{}};

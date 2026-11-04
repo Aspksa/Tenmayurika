@@ -103,6 +103,16 @@ function feelingOf(eid){const f=get('feelings',{})[eid];return f||null}
 function feelingNote(eid){const f=feelingOf(eid);return f&&f.mood!=='calm'?'; тогда я чувствовала: '+f.label:''}
 
 /* ---------- 5. Сны ---------- */
+// 7. Чему учиться: открытые мечты и цели души задают темы любопытства и самоэкзамена.
+const FOCUS_STOP=new Set(['хочу','чтобы','чтоб','научи','узнат','лучше','хозяи','больш','сама','самой','свои','своег','своих','моего','моих','этого','котор','стать','быть','очень','много','всегд','каждо','делат','понят','помог']);
+function focus(){
+ if(!on())return {goals:[],words:[]};
+ const g=goals().filter(x=>!x.done&&!x.check).slice(0,3),w=new Set();
+ for(const x of g)for(const s of words(x.text))if(!FOCUS_STOP.has(s))w.add(s);
+ return {goals:g.map(x=>({id:x.id,text:x.text,words:[...words(x.text)].filter(s=>!FOCUS_STOP.has(s))})),words:[...w]};
+}
+// Какая мечта ближе всего к тексту (по общим основам слов) — или null.
+function focusMatch(text,f=focus()){const t=words(text);let best=null,score=0;for(const g of f.goals){const n=g.words.filter(s=>t.has(s)).length;if(n>score){score=n;best=g}}return best?{goal:best,score}:null}
 function dreams(){return get('dreams',[])}
 function pick(list,n){const a=[...list];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a.slice(0,n)}
 function dreamSeeds(){
@@ -240,4 +250,4 @@ function promptText(){
  return t+(parts.length?'\n<внутренний мир>\nЭто твоё, говори об этом, только когда к слову. '+parts.join(' ')+'\n</внутренний мир>':'');
 }
 function view(){return {on:on(),anchors:anchors(),defaultAnchors:DEFAULT_ANCHORS,tastes:tastes(),goals:goals(),dreams:dreams().slice(0,6),chronicle:chronicle().slice(0,12),letters:letters().slice(0,4)}}
-module.exports={anchors,setAnchors,DEFAULT_ANCHORS,tastes,addTaste,removeTaste,goals,addGoal,removeGoal,finishGoal,checkGoals,ruleGoals,tagEpisode,feelingOf,feelingNote,dreams,dream,chronicle,letters,markLetterRead,weekly,mirror,growTastes,reflect,promptText,view};
+module.exports={focus,focusMatch,anchors,setAnchors,DEFAULT_ANCHORS,tastes,addTaste,removeTaste,goals,addGoal,removeGoal,finishGoal,checkGoals,ruleGoals,tagEpisode,feelingOf,feelingNote,dreams,dream,chronicle,letters,markLetterRead,weekly,mirror,growTastes,reflect,promptText,view};

@@ -105,6 +105,8 @@ async function handleBrain(req,res,p,url){
   if(req.method==='POST'&&p==='/api/brain/core'){const input=await body(req);if(typeof input?.body!=='string')return respond(res,400,{error:'Invalid body'});return respond(res,200,core.write(input.name,input.body,{source:'user',reason:'поправлено вручную'}))}
   // Душа: ступень, черты, настроение и дорогие моменты (soul.js); можно начать рост заново.
   if(req.method==='GET'&&p==='/api/brain/soul')return respond(res,200,soul.view());
+  // Связи роста (кто кого чему научил) и экзамен поведения Учителя.
+  if(req.method==='GET'&&p==='/api/brain/ties')return respond(res,200,{...require('./ties').view(80),exams:require('./teacher').exams().slice(0,12)});
   if(req.method==='POST'&&p==='/api/brain/soul/reset')return respond(res,200,soul.reset());
   // Внутренний мир и рост себя (psyche.js, selfrules.js, mytools.js, selfcode.js). Код меняется только по кнопке хозяина.
   if(req.method==='GET'&&p==='/api/brain/psyche')return respond(res,200,{soul:soul.view(),...psyche.view(),rules:selfrules.rules(),tune:selfrules.tuneView(),tools:mytools.list(),code:selfcode.view()});
@@ -363,7 +365,11 @@ if(p==='/api/facts'||p.startsWith('/api/facts/'))return await handleFacts(req,re
 // Гибридное вспоминание (слова + смысл + связи) — им «Мозг» подсвечивает найденное.
 if(req.method==='GET'&&p==='/api/recall'){const query=url.searchParams.get('q')||'';if(!query.trim())return respond(res,400,{error:'Missing query'});const r=await require('./recall').recall(query.slice(0,300),{factLimit:30,noteLimit:20,diversify:false,topic:false});return respond(res,200,{facts:r.facts.map(f=>({id:f.id,score:f.score,why:f.why})),notes:r.notes.map(n=>({id:n.id,score:n.score,why:n.why}))})}
 if(p==='/api/llm'||p.startsWith('/api/llm/'))return await handleLlm(req,res,p);
-if(req.method==='GET'&&p==='/api/agents')return respond(res,200,agents.snapshot());
+if(req.method==='GET'&&p==='/api/agents')return respond(res,200,agents.snapshot({journal:Math.max(0,Math.min(300,Number(url.searchParams.get('journal'))||0))}));
+  if(req.method==='POST'&&p==='/api/agents/feedback'){try{const input=await body(req);return respond(res,200,agents.feedback(input?.id,input?.kind,typeof input?.note==='string'?input.note:''))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
+  if(req.method==='POST'&&p==='/api/agents/lessons'){try{const input=await body(req);return respond(res,200,agents.addLesson(input?.agent,input?.text,'owner'))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
+  if(req.method==='POST'&&p==='/api/agents/lessons/remove'){const input=await body(req);return agents.removeLesson(input?.agent,input?.id)?respond(res,200,{ok:true}):respond(res,404,{error:'Not found'})}
+  if(req.method==='POST'&&p==='/api/agents/proposals/answer'){try{const input=await body(req);return respond(res,200,agents.answerProposal(input?.id,input?.yes===true))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
   if(req.method==='POST'&&p==='/api/agents/custom'){try{return respond(res,200,agents.saveCustom(await body(req)))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
   if(req.method==='POST'&&p==='/api/agents/custom/delete'){try{const input=await body(req);return respond(res,200,agents.deleteCustom(input?.id))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
   if(req.method==='POST'&&p==='/api/agents/note'){const input=await body(req);if(input?.agent!=='secretary'||typeof input.task!=='string')return respond(res,400,{error:'Можно отметить только дело Секретаря'});return respond(res,200,agents.record('secretary',input.task,typeof input.result==='string'?input.result:'',{from:'yurika'})||{})}

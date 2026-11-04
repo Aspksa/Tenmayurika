@@ -235,7 +235,7 @@
    if(q.send){input.value=q.send;form.requestSubmit()}else{input.value=q.insert;input.focus();const at=q.insert.indexOf(' ')+1||q.insert.length;input.setSelectionRange(q.tool==='facts'?8:q.insert.length,q.tool==='facts'?8:q.insert.length);void at;autoGrow()}
   }})));
  }
- function bubble(role,text,tag,m){const el=h('div',{class:'msg '+role+(m&&m.agent?' agent-note':'')},document.createTextNode(text));if(m&&m.thinking)el.append(thinkingRow(m.thinking));if(m&&m.offer)el.append(offerRow(m));const foot=[tag?h('span',{class:'msg-tag',text:tag.replace(/^⚙\s*/,'')}):null,m&&m.exp?rateRow(m):null].filter(Boolean);if(foot.length)el.append(h('div',{class:'msg-foot'},...foot));if(m&&m.agent){el.style.setProperty('--agent',m.agent.color||'#ffd36b');agentBubbles.set(m.agent.key,el)}log.append(el);log.scrollTop=log.scrollHeight;return el}
+ function bubble(role,text,tag,m){const el=h('div',{class:'msg '+role+(m&&m.agent?' agent-note':'')},document.createTextNode(text));if(m&&m.thinking)el.append(thinkingRow(m.thinking));if(m&&m.offer)el.append(offerRow(m));const foot=[tag?h('span',{class:'msg-tag',text:tag.replace(/^⚙\s*/,'')}):null,m&&m.exp?rateRow(m):null,m&&m.agent?agentRateRow(m):null].filter(Boolean);if(foot.length)el.append(h('div',{class:'msg-foot'},...foot));if(m&&m.agent){el.style.setProperty('--agent',m.agent.color||'#ffd36b');agentBubbles.set(m.agent.key,el)}log.append(el);log.scrollTop=log.scrollHeight;return el}
  // «Как думала»: план внутреннего голоса, подвопросы и сверка с памятью — свёрнуто под ответом.
  function thinkingRow(t){
   const lines=[t.split?.length?'Разбила вопрос: '+t.split.map(x=>'«'+x+'»').join(', '):'',t.plan?t.plan:'',t.check==='fixed'?'Сверила с памятью и поправила черновик.':t.check==='ok'?'Сверила с памятью: сходится.':''].filter(Boolean);
@@ -269,20 +269,29 @@
  // Агенты в чате: Юрика говорит, кого отправила, а вернувшийся огонёк приносит карточку «Готово».
  // Такие записи не уходят модели (private) и идут подряд одной карточкой, если агент делает много дел.
  const agentBubbles=new Map();
- const NOM={guardian:'Хранитель',reviewer:'Разборщик',secretary:'Секретарь',researcher:'Исследователь'};
- const ACC={guardian:'Хранителя',reviewer:'Разборщика',secretary:'Секретаря',researcher:'Исследователя'};
+ const NOM={guardian:'Хранитель',reviewer:'Разборщик',secretary:'Секретарь',researcher:'Исследователь',teacher:'Учитель'};
+ const ACC={guardian:'Хранителя',reviewer:'Разборщика',secretary:'Секретаря',researcher:'Исследователя',teacher:'Учителя'};
  function agentEntry(entry){history.push(entry);history=history.slice(-100);store(CHAT_KEY,history);if(!chat.hidden){if(log.classList.contains('is-empty'))log.replaceChildren();log.classList.remove('is-empty');bubble('assistant',entry.text,entry.tag,entry)}}
- function agentUpdate(entry){store(CHAT_KEY,history);const el=agentBubbles.get(entry.agent.key);if(el&&!chat.hidden){el.firstChild.textContent=entry.text}}
+ function agentUpdate(entry){store(CHAT_KEY,history);const el=agentBubbles.get(entry.agent.key);if(el&&!chat.hidden){el.firstChild.textContent=entry.text;el.querySelector('.msg-rate')?.remove();const r=agentRateRow(entry);if(r){let foot=el.querySelector('.msg-foot');if(!foot){foot=h('div',{class:'msg-foot'});el.append(foot)}foot.append(r)}}}
+ // Оценка дела агента: 👍 растит его уровень, 👎 с пояснением становится его уроком (agents.js).
+ function agentRateRow(m){const a=m.agent;if(!a||!Number.isInteger(a.job)||!a.done)return null;
+  if(a.fb)return h('span',{class:'msg-rate done',text:a.fb==='ok'?'✓ '+(NOM[a.id]||'агент')+' молодец':'✎ '+(a.lesson?'урок: «'+a.lesson+'»':'учтёт')});
+  const row=h('span',{class:'msg-rate'});
+  const rate=async kind=>{let note='';if(kind==='fix'){const t=prompt('Что не так? Напиши, как надо — это станет уроком агента (можно оставить пустым).','');if(t===null)return;note=t.trim()}
+   try{const r=await fetch('/api/agents/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:a.job,kind,note})});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error);a.lesson=d.lesson?.text||'';a.fb=kind}catch{row.replaceChildren('не удалось сохранить оценку');return}
+   store(CHAT_KEY,history);row.replaceWith(agentRateRow(m));window.TenmaWisps?.poll()};
+  row.append(h('button',{type:'button',title:'Хорошо сделано',text:'👍',onclick:()=>rate('ok')}),h('button',{type:'button',title:'Не то: научить агента',text:'👎',onclick:()=>rate('fix')}));
+  return row}
  window.addEventListener('tenma:agent',e=>{const d=e.detail||{},job=d.job||{},who=ACC[d.agent]||'агента «'+d.name+'»';
   if(d.type==='sent'){agentEntry({role:'assistant',private:true,tag:'✦ агенты',agent:{key:'job:'+job.id,id:d.agent,color:d.color},text:'✦ Отправила '+who+': '+job.task});return}
   if(d.type!=='done')return;
   const res=(job.ok===false?'✗ ':'✓ ')+(job.result||'готово');
   const sent=history.find(m=>m.agent?.key==='job:'+job.id);
   // Дело из чата: ответ уже есть в сообщении Юрики — здесь только отметка, что помощник вернулся.
-  if(sent){sent.text='✦ '+d.name+' вернулся: '+job.task+(String(d.agent).startsWith('c_')?'\n'+res:job.ok===false?' ✗':' ✓');agentUpdate(sent);return}
+  if(sent){sent.text='✦ '+d.name+' вернулся: '+job.task+(String(d.agent).startsWith('c_')?'\n'+res:job.ok===false?' ✗':' ✓');sent.agent.job=job.id;sent.agent.done=true;agentUpdate(sent);return}
   const last=history[history.length-1];
-  if(last?.agent?.id===d.agent&&last.agent.group&&Date.now()-last.agent.at<300000){last.agent.count=(last.agent.count||1)+1;last.agent.at=Date.now();last.text='✦ Готово · '+d.name+' (дел: '+last.agent.count+')\nПоследнее: '+job.task+'\n'+res;agentUpdate(last);return}
-  agentEntry({role:'assistant',private:true,tag:'✦ агенты'+(job.from&&job.from!=='yurika'?' · позвал '+(NOM[job.from]||'помощник'):''),agent:{key:'done:'+job.id,id:d.agent,color:d.color,group:true,at:Date.now()},text:'✦ Готово · '+d.name+'\n'+job.task+'\n'+res});
+  if(last?.agent?.id===d.agent&&last.agent.group&&Date.now()-last.agent.at<300000){last.agent.count=(last.agent.count||1)+1;last.agent.at=Date.now();last.text='✦ Готово · '+d.name+' (дел: '+last.agent.count+')\nПоследнее: '+job.task+'\n'+res;last.agent.job=job.id;delete last.agent.fb;delete last.agent.lesson;agentUpdate(last);return}
+  agentEntry({role:'assistant',private:true,tag:'✦ агенты'+(job.from&&job.from!=='yurika'?' · позвал '+(NOM[job.from]||'помощник'):''),agent:{key:'done:'+job.id,id:d.agent,color:d.color,group:true,at:Date.now(),job:job.id,done:true},text:'✦ Готово · '+d.name+'\n'+job.task+'\n'+res});
   if(chat.hidden&&String(d.agent).startsWith('c_'))avatar.classList.add('has-unread');
  });
  function renderHistory(){
@@ -522,7 +531,11 @@
   researcher:{emoji:'🔭',where:'Факты',
    about:'Ищет ответы в памяти и сводит их вместе. Юрика отправляет его искать факты, итоги и противоречия; на зов других агентов сверяет новые факты.',
    does:['Ищет по фактам и заметкам','Отвечает со ссылками на источник','Составляет короткие конспекты'],
-   rights:'Только чтение.',memory:'Факты и библиотека'}
+   rights:'Только чтение.',memory:'Факты и библиотека'},
+  teacher:{emoji:'🎓',where:'Мозг',
+   about:'Занимается с Мозгом, пока тихо: экзамен памяти, разбор промахов и проверка, держатся ли уроки и правила.',
+   does:['Устраивает самоэкзамен по недавним разговорам','Ищет заново то, что «записано, но не нашлось»','Проверяет уроки агентов и правила Юрики','Отправляет на покой то, что не держится','Темы выбирает по мечтам души'],
+   rights:'Пишет только в навыки и дневник Мозга.',memory:'Журнал промахов, самоэкзамен, экзамен поведения'}
  };
  const wispsApi=()=>window.TenmaWisps;
  function wispSettingsCard(){
@@ -539,18 +552,37 @@
  let agentOpen='guardian',agentForm=null;
  const SHAPE_LABEL={book:['📖','книжка'],moon:['🌙','луна'],star:['⭐','звезда'],crystal:['💎','кристалл'],flame:['🔥','пламя'],leaf:['🍃','листок'],heart:['💗','сердце'],drop:['💧','капля']};
  const PAGE_LABEL={home:'Обзор',planner:'Планер',brain:'Мозг',facts:'Факты',library:'Библиотека'};
- const HELPS={guardian:'Прочитав документ, зовёт Исследователя сверить новые факты',reviewer:'Нашёл противоречие — зовёт Исследователя проверить его',secretary:'Получает дела от Юрики, когда ты просишь про дела и время',researcher:'Приходит на зов Хранителя и Разборщика'};
+ const HELPS={guardian:'Прочитав документ, зовёт Исследователя сверить новые факты',reviewer:'Нашёл противоречие — зовёт Исследователя проверить его',secretary:'Получает дела от Юрики, когда ты просишь про дела и время',researcher:'Приходит на зов Хранителя и Разборщика',teacher:'Помогает агентам: из 👎 без слов сам выводит им урок'};
  const agentApi=(url,body)=>fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Ошибка');return d});
  function agentsSection(){
   const W=wispsApi();if(!W)return [wispSettingsCard()];
   const states={idle:'у хвостов',call:'зовут на помощь',go:'летит к делу',work:'работает',deliver:'несёт результат',back:'возвращается',off:'выключен'};
   const list=h('div',{class:'agents'}),err=h('p',{class:'hint agent-err'});
   const fresh=async()=>{await W.poll();draw()};
-  function growthRow(a){const g=W.server().growth?.[a.id];if(!g)return null;const levels=W.server().levels||[];const nextTitle=levels[g.level]?.title;
+  // Рост за качество: опыт = дела + 2 за 👍 − 3 за 👎.
+  function growthRow(a){const g=W.server().growth?.[a.id];if(!g)return null;const levels=W.server().levels||[];const nextTitle=levels[g.level]?.title,pts=g.points??g.done;
    return h('div',{class:'agent-grow'},h('span',{class:'agent-lv',text:'Ур. '+g.level+' · '+g.title}),h('span',{class:'agent-bar'},h('i',{style:'width:'+Math.round(g.progress*100)+'%'})),
-    h('small',{text:g.next===null?'дел: '+g.done+' · высший уровень':'дел: '+g.done+' · до «'+nextTitle+'» ещё '+(g.next-g.done)}))}
+    h('small',{text:'опыт '+pts+' · дел '+g.done+(g.ok||g.fix?' · 👍 '+g.ok+' 👎 '+g.fix+(g.quality!=null?' · качество '+g.quality+'%':''):'')+(g.next===null?' · высший уровень':' · до «'+nextTitle+'» ещё '+(g.next-pts))}))}
+  const rateJob=async(x,kind)=>{let note='';if(kind==='fix'){const t=prompt('Что не так? Напиши, как надо — это станет уроком агента (можно оставить пустым).','');if(t===null)return;note=t.trim()}
+   try{await agentApi('/api/agents/feedback',{id:x.id,kind,note});await fresh()}catch(e){err.textContent=e.message}};
   function recentRows(a){const items=(W.server().recent||[]).filter(x=>x.agent===a.id).slice(0,3);
-   return h('div',{},h('h5',{text:'Последние дела'}),items.length?h('ul',{class:'agent-log'},...items.map(x=>h('li',{},h('span',{text:(x.ok?'✓ ':'✗ ')+x.task}),x.result?h('small',{text:x.result}):null))):h('p',{text:'Пока ничего — дела появятся здесь.'}))}
+   return h('div',{},h('h5',{text:'Последние дела'}),items.length?h('ul',{class:'agent-log'},...items.map(x=>h('li',{},h('span',{text:(x.ok?'✓ ':'✗ ')+x.task}),x.result?h('small',{text:x.result}):null,
+    h('span',{class:'agent-rate'},x.feedback?h('small',{text:x.feedback==='ok'?'👍 оценено':'👎 '+(x.note?'«'+x.note+'»':'учтёт')}):null,
+     h('button',{type:'button',class:'ghost'+(x.feedback==='ok'?' on':''),title:'Хорошо сделано','aria-label':'Хорошо сделано',text:'👍',onclick:()=>rateJob(x,'ok')}),
+     h('button',{type:'button',class:'ghost'+(x.feedback==='fix'?' on':''),title:'Не то: научить агента','aria-label':'Не то: научить агента',text:'👎',onclick:()=>rateJob(x,'fix')}))))):h('p',{text:'Пока ничего — дела появятся здесь.'}))}
+  // Уроки агента: пишутся из 👎 хозяина или самим агентом; держатся, пока сдают экзамен Учителя.
+  function lessonRows(a){const items=W.server().lessons?.[a.id]||[];
+   const inp=h('input',{type:'text',maxlength:240,placeholder:'Чему научить: «пиши дела со временем»','aria-label':'Новый урок'});
+   const add=h('form',{class:'agent-set',onsubmit:async e=>{e.preventDefault();const t=inp.value.trim();if(!t)return;try{await agentApi('/api/agents/lessons',{agent:a.id,text:t});await fresh()}catch(x){err.textContent=x.message}}},inp,h('button',{type:'submit',class:'ghost',text:'Научить'}));
+   return h('div',{},h('h5',{text:'Уроки'}),items.length?h('ul',{class:'agent-log'},...items.map(l=>h('li',{},h('span',{text:'✎ '+l.text}),h('small',{text:(l.source==='owner'?'от тебя':'сам понял')+(l.exam?.n?' · экзамен '+l.exam.passed+'/'+l.exam.n:'')+(l.ok||l.fix?' · 👍 '+l.ok+' 👎 '+l.fix:'')}),
+     h('button',{type:'button',class:'ghost',title:'Забыть урок','aria-label':'Забыть урок',text:'✕',onclick:async()=>{try{await agentApi('/api/agents/lessons/remove',{agent:a.id,id:l.id});await fresh()}catch(x){err.textContent=x.message}}})))):h('p',{text:'Пока уроков нет — поставь 👎 делу и напиши, как надо.'}),add)}
+  // Душа предлагает помощника под мечту: появится только после «Да».
+  function proposalCards(){return (W.server().proposals||[]).map(p=>{const el=h('article',{class:'agent open agent-proposal'},
+    h('header',{class:'agent-top'},h('span',{class:'agent-orb'},h('span',{text:SHAPE_LABEL[p.shape]?.[0]||'✦'})),h('span',{class:'agent-title'},h('strong',{text:'Юрика предлагает: '+p.name}),h('small',{text:'для мечты «'+p.goal+'»'}))),
+    h('div',{class:'agent-body'},h('p',{class:'agent-about',text:(p.about?p.about+' · ':'')+'задание: «'+p.task+'» · куда летает: «'+(PAGE_LABEL[p.page]||p.page)+'» · только чтение'}),
+     h('div',{class:'agent-set'},h('button',{type:'button',text:'Да, заведи',onclick:async()=>{try{const r=await agentApi('/api/agents/proposals/answer',{id:p.id,yes:true});agentOpen=r.agent?.id||'';await fresh()}catch(x){err.textContent=x.message}}}),
+      h('button',{type:'button',class:'ghost',text:'Не надо',onclick:async()=>{try{await agentApi('/api/agents/proposals/answer',{id:p.id,yes:false});await fresh()}catch(x){err.textContent=x.message}}}))));
+   el.style.setProperty('--agent',p.color||'#ffd36b');return el})}
   function shapePicker(a){const cur=W.get().shapes[a.id]||a.shape;return h('div',{class:'agent-shapes',role:'radiogroup','aria-label':'Форма огонька'},...W.shapes.map(k=>h('button',{type:'button',role:'radio','aria-checked':String(k===cur),title:SHAPE_LABEL[k]?.[1]||k,class:'agent-shape',onclick:()=>{W.set({shapes:{[a.id]:k}});draw()}},h('span',{text:SHAPE_LABEL[k]?.[0]||'✦'}))))}
   function card1(a){
    const info=AGENT_INFO[a.id]||{},custom=a.custom&&W.server().custom?.find(c=>c.id===a.id),cfgNow=W.get(),on=!cfgNow.off[a.id],color=cfgNow.colors[a.id]||a.hex,open=agentOpen===a.id,st=W.state(a.id);
@@ -572,6 +604,7 @@
        :h('div',{},h('h5',{text:'Что делает'}),h('ul',{},...(info.does||[]).map(t=>h('li',{text:t}))),HELPS[a.id]?h('h5',{text:'Помогает другим'}):null,HELPS[a.id]?h('p',{text:HELPS[a.id]}):null),
       h('div',{},h('h5',{text:'Права'}),h('p',{text:custom?(custom.rights==='confirm'?'Может добавлять дела и заметки':'Только чтение: смотрит, ищет, считает'):info.rights}),h('h5',{text:'Память'}),h('p',{text:custom?'Общая память Юрики':info.memory}))),
      recentRows(a),
+     lessonRows(a),
      h('div',{},h('h5',{text:'Форма огонька'}),shapePicker(a)),
      h('div',{class:'agent-set'},
       h('label',{class:'agent-color'},h('span',{text:'Цвет'}),pick),
@@ -600,7 +633,7 @@
      h('div',{class:'agent-set'},h('button',{type:'button',text:f.id?'Сохранить':'Создать агента',onclick:async()=>{err.textContent='';try{const c=await agentApi('/api/agents/custom',{id:f.id,template:f.template,name:name.value,task:task.value,about:about.value,page:page.value,rights:rights.value,shape,color:color.value});agentForm=null;agentOpen=c.id;await fresh()}catch(x){err.textContent=x.message}}}),
       h('button',{type:'button',class:'ghost',text:'Отмена',onclick:()=>{agentForm=null;draw()}}))));
    el.style.setProperty('--agent',color.value);color.addEventListener('input',()=>el.style.setProperty('--agent',color.value));return el}
-  const draw=()=>list.replaceChildren(...W.agents.map(card1),agentForm?form():h('button',{type:'button',class:'agent agent-add',onclick:()=>{agentForm={template:null};draw()}},h('span',{class:'agent-orb'},h('span',{text:'+'})),h('span',{class:'agent-title'},h('strong',{text:'Новый агент'}),h('small',{text:'Из шаблона: Летописец, Глашатай, Сыщик — или своё задание'}))),err);
+  const draw=()=>list.replaceChildren(...proposalCards(),...W.agents.map(card1),agentForm?form():h('button',{type:'button',class:'agent agent-add',onclick:()=>{agentForm={template:null};draw()}},h('span',{class:'agent-orb'},h('span',{text:'+'})),h('span',{class:'agent-title'},h('strong',{text:'Новый агент'}),h('small',{text:'Из шаблона: Летописец, Глашатай, Сыщик — или своё задание'}))),err);
   draw();
   // Пока меню открыто — статусы и уровни обновляются вместе с журналом агентов.
   const onAgents=()=>{if(!list.isConnected){window.removeEventListener('tenma:agents',onAgents);return}if(!list.contains(document.activeElement)||document.activeElement===document.body)draw()};
