@@ -260,7 +260,7 @@ function neighborhood(name,depth=2,limit=60){
   const seen=new Set([start]),out=[],used=new Set();let frontier=[start];
   for(let hop=1;hop<=depth&&frontier.length&&out.length<limit;hop++){
    const next=[];
-   for(const k of frontier)for(const e of g.adj.get(k)){if(used.has(e.fact.id))continue;used.add(e.fact.id);out.push({...plain(e.fact),hop,via:g.names.get(k)});if(!seen.has(e.to)){seen.add(e.to);next.push(e.to)}if(out.length>=limit)break}
+   for(const k of frontier){if(out.length>=limit)break;for(const e of g.adj.get(k)){if(out.length>=limit)break;if(used.has(e.fact.id))continue;used.add(e.fact.id);out.push({...plain(e.fact),hop,via:g.names.get(k)});if(!seen.has(e.to)){seen.add(e.to);next.push(e.to)}}}
    frontier=next;
   }
   return {entity:g.names.get(start),facts:out};

@@ -29,9 +29,12 @@ async function recall(text,{factLimit=8,noteLimit=5,ws}={}){
  try{memory.syncRecords('note',data.notes||[])}catch(e){console.error('Note index failed:',e.name)}
  const facts=new Map(),notes=new Map();
  // Слова.
- const hits=memory.searchIndex(query,{kinds:['fact','note'],limit:60});
- hits.filter(h=>h.kind==='fact').forEach((h,i)=>add(facts,h.ref,'слова',W.text*rrf(i)*8));
- hits.filter(h=>h.kind==='note').forEach((h,i)=>add(notes,h.ref,'слова',W.text*rrf(i)*8));
+ // Кандидаты отдельно для фактов и заметок: много фактов не вытесняют заметки.
+ memory.searchIndex(query,{kinds:['fact'],limit:40}).forEach((h,i)=>add(facts,h.ref,'слова',W.text*rrf(i)*8));
+ memory.searchIndex(query,{kinds:['note'],limit:30}).forEach((h,i)=>add(notes,h.ref,'слова',W.text*rrf(i)*8));
+ // Заметки по части слова («зань»), если индекс ничего не дал.
+ if(!notes.size){const ws=[...new Set(query.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w=>w.length>=3))].slice(0,8);
+  if(ws.length)(data.notes||[]).map(n=>{const hay=(n.title+' '+(n.content||'')).toLocaleLowerCase();return {n,c:ws.filter(w=>hay.includes(w)).length}}).filter(x=>x.c>0).sort((a,b)=>b.c-a.c).slice(0,10).forEach((x,i)=>add(notes,x.n.id,'слова',W.text*rrf(i)*6))}
  // Часть слова, которой нет в индексе («зань»): старый поиск по подстроке.
  if(!facts.size)try{memory.searchFacts(query,20).forEach((f,i)=>add(facts,f.id,'слова',W.text*rrf(i)*6))}catch(e){if(!(e instanceof TypeError))throw e}
  // Смысл.

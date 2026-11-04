@@ -46,4 +46,9 @@ test('hybrid recall: words plus graph neighbours, with reasons',async()=>{
  assert.ok(r.facts[0].why.includes('слова'));
  assert.ok(r.facts.some(f=>f.why.includes('связь')));
  assert.equal(r.notes[0].id,'n2');
+ // Часть слова в заметке и заметка за множеством фактов не теряются.
+ assert.equal((await recall('зань',{ws:{notes:[{id:'n3',title:'Поездка в Казань',content:''}]}})).notes[0].id,'n3');
+ for(let i=0;i<65;i++)add('Анна','знает','язык '+i);
+ assert.equal((await recall('Анна',{ws:{notes:[{id:'n4',title:'День рождения',content:'Анна'}]}})).notes[0].id,'n4');
+ assert.ok(m.neighborhood('Анна',2,6).facts.length<=6);
 });
