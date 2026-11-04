@@ -5,6 +5,8 @@ process.env.TENMAYURIKA_MEMORY_DB=path.join(dir,'facts.sqlite');
 process.env.TENMAYURIKA_DATA_DIR=dir;
 delete process.env.CHAT_URL;
 const {server}=require('../server');
+// Самонастройка пробует ±креативность — здесь проверяется ровно та, что выбрана в настройках.
+require('../thoughts').setSetting('selftune',false);
 test('model settings: key is stored on disk only, models are listed, chat uses the chosen model',async()=>{
  const seen=[];
  const fake=http.createServer((req,res)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{seen.push({url:req.url,auth:req.headers.authorization,body:b?JSON.parse(b):null});res.writeHead(200,{'Content-Type':'application/json'});

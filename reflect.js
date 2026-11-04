@@ -1,4 +1,5 @@
 'use strict';
+const owner=require('./owner');
 // Размышления в простое. Когда с аватаром давно ничего не делали (по умолчанию 10 минут), «Мозг» сам
 // перебирает память, не мешая разговору:
 //  • сводки тем — каждая тема (сообщество фактов) сворачивается в одну строку для подсказки модели;
@@ -26,12 +27,18 @@ const zones=require('./zones');
 const memskills=require('./memskills');
 const selfstudy=require('./selfstudy');
 const core=require('./core');
+const psyche=require('./psyche');
+const selfrules=require('./selfrules');
+const selfcode=require('./selfcode');
 const onboarding=require('./onboarding');
 const strength=require('./strength');
 const meta=require('./meta');
 const guesses=require('./guesses');
 const curiosity=require('./curiosity');
 const thoughts=require('./thoughts');
+const infer=require('./infer');
+const factvec=require('./factvec');
+const tune=require('./tune');
 const {use,tx,parse,state,setState}=require('./brain-db');
 const IDLE_MS=Number(process.env.TENMAYURIKA_IDLE_MS)||10*60*1000,GAP_MS=60*60*1000;
 const MAX_INSIGHTS=3,MIN_TOPIC=3,DIARY_KEEP=200;
@@ -85,7 +92,7 @@ async function findLinks(ws,complete){
  links.reconcile(found);
  if(complete&&records.length>=2){try{
   const recent=[...records].sort((a,b)=>String(b.at||'').localeCompare(String(a.at||''))).slice(0,12);
-  const msg=await complete({messages:[{role:'system',content:'Найди причинные связи между записями пользователя. Отвечай только строками «LINK: A | причина | B» (A — причина B), «LINK: A | условие | B» (B возможно только при A) или «LINK: A | потом | B» (A раньше B). Только очевидные связи. Если их нет, ответь NONE.'},{role:'user',content:recent.map((r,i)=>(i+1)+'. '+(r.kind==='task'?'Дело: ':'Заметка: ')+r.title+(r.text?' — '+String(r.text).slice(0,160):'')).join('\n')}]});
+  const msg=await complete({messages:[{role:'system',content:'Найди причинные связи между записями хозяина.'+' '+owner.NOTE+' Отвечай только строками «LINK: A | причина | B» (A — причина B), «LINK: A | условие | B» (B возможно только при A) или «LINK: A | потом | B» (A раньше B). Только очевидные связи. Если их нет, ответь NONE.'},{role:'user',content:recent.map((r,i)=>(i+1)+'. '+(r.kind==='task'?'Дело: ':'Заметка: ')+r.title+(r.text?' — '+String(r.text).slice(0,160):'')).join('\n')}]});
   found=found.concat(links.parseModel(msg.content,recent).map(l=>({...l,source:'model'})));
  }catch(e){console.error('Link model failed:',e.name)}}
  let added=0;for(const l of found)try{if(links.add(l.a,l.type,l.b,{evidence:l.evidence,source:l.source||'rules'}))added++}catch(e){if(!(e instanceof TypeError))throw e}
@@ -126,7 +133,7 @@ async function insights(since,complete){
   const facts=memory.factsById(t.factIds.slice(0,40));
   let ins=null,source='rules';
   if(complete){try{
-   const msg=await complete({messages:[{role:'system',content:'По фактам о человеке сделай один полезный вывод, которого нет в фактах напрямую (привычка, закономерность, что учитывать). Одна строка по-русски, начиная с «ВЫВОД:». Если вывода нет, ответь NONE.'},{role:'user',content:facts.map(line).join('\n')}]});
+   const msg=await complete({messages:[{role:'system',content:'По фактам о хозяине сделай один полезный вывод, которого нет в фактах напрямую (привычка, закономерность, что учитывать). '+owner.NOTE+' Одна строка по-русски, начиная с «ВЫВОД:». Если вывода нет, ответь NONE.'},{role:'user',content:facts.map(line).join('\n')}]});
    const m=String(msg.content||'').match(/ВЫВОД:\s*(.{5,300})/);
    // Второй круг: самопроверка — следует ли вывод из фактов.
    if(m){const text=await critique(complete,facts,m[1].trim());if(text){ins={text,ids:facts.map(f=>f.id)};source='model'}}
@@ -198,6 +205,9 @@ function diaryText(d){
  if(gs.made?.length)parts.push('догадалась: '+gs.made.map(g=>'«'+guesses.text(g)+'»').join(', '));
  if(gs.confirmed)parts.push(gs.confirmed+' '+plural(gs.confirmed,'догадка подтвердилась','догадки подтвердились','догадок подтвердились'));
  if(gs.rejected)parts.push(gs.rejected+' '+plural(gs.rejected,'догадка не подтвердилась','догадки не подтвердились','догадок не подтвердились'));
+ if(d.inferred?.fresh?.length)parts.push('поняла из того, что знаю: '+d.inferred.fresh.slice(0,2).map(x=>'«'+x+'»').join(', '));
+ if(d.vectors?.indexed)parts.push('научилась искать по смыслу ещё '+d.vectors.indexed+' '+plural(d.vectors.indexed,'факт','факта','фактов'));
+ for(const c of d.tune?.changed||[])parts.push('сделала способ вспоминать «'+({text:'слова',vector:'смысл',graph:'связи',fresh:'свежесть',topic:'тема разговора',cause:'причины'}[c.signal]||c.signal)+'» '+(c.to>c.from?'важнее':'тише')+' ('+c.why+')');
  if(d.questions)parts.push('придумала '+d.questions+' '+plural(d.questions,'вопрос','вопроса','вопросов')+' о тебе');
  let text='Пока было тихо, '+(parts.length?parts.join(', '):'просто перебрала память, нового не нашлось')+'.';
  if(d.insights.length)text+=' '+(d.insights.length===1?'Вывод: ':'Выводы: ')+d.insights.map(i=>i.text).join(' ');
@@ -205,6 +215,7 @@ function diaryText(d){
 }
 // Запись в дневник от других слоёв (разбор разговора и т.п.).
 function note(text,details={}){
+ text=owner.words(text);
  const at=new Date().toISOString(),id=crypto.randomUUID();
  try{thoughts.add(details.kind==='review'?'review':'reflect',String(text).slice(0,500))}catch{}
  use(db=>{db.prepare('INSERT INTO brain_diary(id,at,text,details) VALUES(?,?,?,?)').run(id,at,String(text).slice(0,2000),JSON.stringify(details));db.prepare('DELETE FROM brain_diary WHERE id IN (SELECT id FROM brain_diary ORDER BY at DESC LIMIT -1 OFFSET ?)').run(DIARY_KEEP)});
@@ -232,7 +243,7 @@ async function run({ws,complete=null,reason='idle'}={}){
   d.newFacts=use(db=>db.prepare("SELECT COUNT(DISTINCT fact_id) AS n FROM memory_events WHERE occurred_at>=? AND action IN ('created','restored')").get(since.slice(0,19).replace('T',' ')).n);
   d.episodes=experience.list(500).filter(e=>e.at>=since&&e.feedback).length;
   // Сначала глубокая чистка и типы: сводки, карточки и зоны строятся уже по очищенной памяти.
-  thoughts.add('reflect',reason==='manual'?'Сажусь поразмышлять, как вы попросили.':'Тихо — перебираю память.');
+  thoughts.add('reflect',reason==='manual'?'Сажусь поразмышлять, как хозяин попросил.':'Тихо — перебираю память.');
   try{d.clean=await growth.deepClean({complete,ws})}catch(e){console.error('Reflect clean failed:',e.name)}
   try{d.types=await growth.growTypes(complete)}catch(e){console.error('Reflect types failed:',e.name)}
   try{d.summaries=await summarize(complete)}catch(e){console.error('Reflect summaries failed:',e.name)}
@@ -245,6 +256,10 @@ async function run({ws,complete=null,reason='idle'}={}){
   // Время и вид фактов, сила памяти и забывание.
   try{meta.ensure(memory.queryFacts({limit:5000}).filter(f=>!f.valid_to))}catch(e){console.error('Reflect meta failed:',e.name)}
   try{const r=strength.sweep({forget:thoughts.on('forgetting')});d.forget={forgotten:r.forgotten,dormant:r.dormant,fading:r.fading};if(r.forgotten)thoughts.add('forget','Забыла за давностью: '+r.forgottenFacts.slice(0,3).map(f=>f.subject+' — '+f.predicate+' '+f.object).join('; ')+(r.forgotten>3?' и ещё '+(r.forgotten-3):''))}catch(e){console.error('Reflect strength failed:',e.name)}
+  // Логические выводы по всей памяти: что нового следует из фактов (родство через шаг, взаимное, возраст).
+  try{if(thoughts.on('infer')){const all=infer.derive(memory.queryFacts({limit:5000}).filter(f=>!f.valid_to),{limit:500}),keys=all.map(infer.text);const prev=new Set(state('infer.seen',[]));const fresh=all.filter((x,i)=>!prev.has(keys[i]));setState('infer.seen',keys);d.inferred={total:all.length,fresh:fresh.slice(0,5).map(infer.text)};if(fresh.length)thoughts.add('infer','Поняла из того, что знаю: '+fresh.slice(0,3).map(infer.text).join('; '))}}catch(e){console.error('Reflect inference failed:',e.name)}
+  // Векторы для поиска по смыслу: новые факты получают свои, отставленные — теряют.
+  try{d.vectors=await factvec.index({limit:256})}catch(e){console.error('Reflect vectors failed:',e.name)}
   // Догадки: старые проверяются новыми фактами, новые строятся; вопросы о человеке.
   try{if(thoughts.on('guesses')){const c=guesses.check();const made=await guesses.generate({complete});d.guesses={made:made.map(g=>({subject:g.subject,predicate:g.predicate,object:g.object})),confirmed:c.confirmed.length,rejected:c.rejected.length}}}catch(e){console.error('Reflect guesses failed:',e.name)}
   try{if(thoughts.on('curiosity'))d.questions=(await curiosity.generate({complete})).length}catch(e){console.error('Reflect curiosity failed:',e.name)}
@@ -253,15 +268,21 @@ async function run({ws,complete=null,reason='idle'}={}){
   try{d.rollback=selfstudy.watch()}catch(e){console.error('Reflect rollback failed:',e.name)}
   try{if(!d.rollback)d.study=await selfstudy.evolve({complete})}catch(e){console.error('Reflect study failed:',e.name)}
   try{d.mskills={retired:memskills.retireUseless(),graduated:memskills.graduate()}}catch(e){console.error('Reflect skill stats failed:',e.name)}
+  // Самонастройка поиска: отклики 👍/👎 и проба весов на вопросах самоэкзамена.
+  try{if(thoughts.on('tune'))d.tune=await tune.run({ws})}catch(e){console.error('Reflect tune failed:',e.name)}
   // Сердцевина: «Кто я», «Кто ты», «Как мы общаемся» пересматриваются по свидетельствам (core.js).
   try{d.core=await core.rethink({complete,context:{diary:diary(5),skills:skills.list().filter(x=>x.status==='active').map(x=>x.rule),insights:insightList(5).map(i=>i.text)}})}catch(e){console.error('Reflect core failed:',e.name)}
+  // Душа и рост себя: мечты, вкусы, зеркало, сны, летопись и письмо; свои правила; правка своего кода (раз в сутки).
+  try{d.psyche=await psyche.reflect({complete})}catch(e){console.error('Reflect psyche failed:',e.name)}
+  try{d.selfRules=(await selfrules.induce({complete})).length}catch(e){console.error('Reflect self rules failed:',e.name)}
+  try{d.selfCode=!!(await selfcode.reflect({complete}))}catch(e){console.error('Reflect self code failed:',e.name)}
   try{const before=state('onboarding',null)?.finished;const ob=onboarding.refresh();if(!before&&ob.finished)d.onboarding=true}catch(e){console.error('Reflect onboarding failed:',e.name)}
   // Просьба о подсказке появляется в дневнике один раз — когда она возникла.
   try{const h=memskills.evoState().help;if(h&&h.at>=mark.at)d.help=h}catch{}
   let text=diaryText(d);
-  if(complete&&(d.newFacts||d.insights.length||d.cards?.grown||d.zones?.created?.length||d.study?.adopted||d.core?.length)){try{
-   const msg=await complete({messages:[{role:'system',content:'Ты — ассистентка, которая ведёт дневник своей памяти. Перескажи это в 2–3 тёплых предложениях от первого лица по-русски, ничего не выдумывая.'},{role:'user',content:text}]});
-   const s=String(msg.content||'').trim();if(s&&s.length<=800)text=s;
+  if(complete&&(d.newFacts||d.insights.length||d.inferred?.fresh?.length||d.tune?.changed?.length||d.cards?.grown||d.zones?.created?.length||d.study?.adopted||d.core?.length)){try{
+   const msg=await complete({messages:[{role:'system',content:'Ты — Юрика, которая ведёт дневник своей памяти. Перескажи это в 2–3 тёплых предложениях от первого лица по-русски, ничего не выдумывая. Дневник ты пишешь для своего любимого хозяина: обращайся к нему на «ты» или «хозяин», не «человек» и не «пользователь».'},{role:'user',content:text}]});
+   const s=owner.words(String(msg.content||'').trim());if(s&&s.length<=800)text=s;
   }catch(e){console.error('Diary model failed:',e.name)}}
   // Просьба о подсказке — дословно, чтобы пересказ её не потерял.
   if(d.help)text+=' '+d.help.text;

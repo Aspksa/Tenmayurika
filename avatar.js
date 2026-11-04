@@ -31,12 +31,14 @@
   status:{label:'Состояние системы',emoji:'🩺',desc:'Проверяет SQLite, LanceDB, модель',example:'статус'},
   clock:{label:'Дата и время',emoji:'🕰',desc:'Подскажет время и дату',example:'который час'},
   convert:{label:'Конвертер',emoji:'📐',desc:'Длина, вес, объём, время, скорость, °C/°F, ГБ',example:'переведи 5 км в мили'},
-  password:{label:'Пароли',emoji:'🔐',desc:'Надёжный пароль прямо на компьютере',example:'придумай пароль на 20'}
+  password:{label:'Пароли',emoji:'🔐',desc:'Надёжный пароль прямо на компьютере',example:'придумай пароль на 20'},
+  self:{label:'Рост',emoji:'🌱',desc:'Свои вкусы, мечты, правила, инструменты и правки своего кода',example:'твоя душа'}
  };
  const DEFAULTS={
   name:'Юрика',pose:'stand',size:200,opacity:100,brightness:100,saturation:100,hue:0,tilt:0,flip:false,
   glow:true,glowPower:60,glowColor:'#e8c25a',pulse:true,pulseSpeed:3.2,shadow:true,
   float:true,floatHeight:6,floatSpeed:5.5,breathe:true,
+  soulLook:true,
   particles:true,particleType:'sparks',particleCount:28,particleSpeed:1,particleSize:1,clickBurst:true,
   livePoses:true,idleCycle:false,idleInterval:40,wander:false,wanderInterval:45,faceCursor:false,phrases:true,
   magicCircle:false,circleSpeed:20,shine:false,outline:false,trail:true,hoverReact:true,
@@ -97,14 +99,22 @@
  const scale=()=>Math.min(1.8,Math.max(.6,Math.min(vw()/1600,vh()/900)**.6));
  const sizePx=()=>Math.round(Math.min(cfg.size*scale(),vw()*.7,vh()*.7));
  // На телефоне меню стоит внизу экрана — аватар не заходит на него.
+ // Характер виден внешне: настроение души окрашивает свечение, ступень делает его сильнее и частиц больше.
+ const MOOD_RGB={joy:[255,214,102],tender:[255,150,196],playful:[255,160,80],worried:[120,170,255],thoughtful:[181,140,255],shy:[255,128,160]},MOOD_SPEED={playful:1.35,joy:1.15,worried:.75,thoughtful:.8,shy:.9};
+ let soulState={mood:'calm',levelIndex:0};
+ const soulRgb=()=>cfg.soulLook&&MOOD_RGB[soulState.mood]||null;
+ const soulGlow=()=>cfg.soulLook?1+Math.min(6,soulState.levelIndex||0)*.06:1;
+ const soulSpeed=()=>cfg.soulLook?MOOD_SPEED[soulState.mood]||1:1;
+ function setSoul(v){if(!v||typeof v!=='object')return;const next={mood:String(v.mood?.name||v.mood||'calm'),levelIndex:Number(v.levelIndex)||0};if(next.mood===soulState.mood&&next.levelIndex===soulState.levelIndex)return;soulState=next;avatar.dataset.mood=next.mood;applyLook();spawnParticles()}
+ const readSoul=()=>fetch('/api/brain/soul').then(r=>r.ok?r.json():null).then(setSoul).catch(()=>{});
  let bottomReserve=0;
  function measureReserve(){const r=document.querySelector('.rail');bottomReserve=r&&getComputedStyle(r).position==='fixed'?r.offsetHeight:0}
  function applyLook(){
   measureReserve();
-  const s=sizePx(),[r,g,b]=hexRgb(cfg.glowColor),st=avatar.style;
+  const s=sizePx(),[r,g,b]=soulRgb()||hexRgb(cfg.glowColor),st=avatar.style;
   st.setProperty('--avatar-size',s+'px');
   st.setProperty('--avatar-opacity',cfg.opacity/100);
-  st.setProperty('--glow',cfg.glowPower/100);
+  st.setProperty('--glow',Math.min(1.4,cfg.glowPower/100*soulGlow()));
   st.setProperty('--glow-rgb',`${r},${g},${b}`);
   st.setProperty('--pulse-dur',cfg.pulseSpeed+'s');
   st.setProperty('--float-h',-cfg.floatHeight+'%');
@@ -291,6 +301,7 @@
   // «Мозг» показывает, что она вспомнила, и учится из сообщения (кандидаты подтверждаются в «Мозге»).
   window.dispatchEvent(new CustomEvent('tenma:thinking',{detail:{on:false}}));
   if(data&&data.recalled)window.dispatchEvent(new CustomEvent('tenma:recall',{detail:{...data.recalled,text,experience:data.experience}}));
+  if(data&&data.soul)setSoul(data.soul);
   if(data&&data.experience)window.dispatchEvent(new CustomEvent('tenma:experience',{detail:data.experience}));
   // Сервер учится фоном сам (data.autoLearn) — тогда очередь кандидатов в браузере не нужна.
   if(data&&!data.autoLearn&&data.source!=='tool'&&!data.secret&&text.length>=12&&window.TenmaLearn?.fromChat())window.TenmaLearn.learn(text,'chat');
@@ -492,7 +503,12 @@
    const enabled=h('input',{type:'checkbox',role:'switch'});enabled.checked=v.enabled;
    const useTools=h('input',{type:'checkbox',role:'switch'});useTools.checked=v.useTools;
    const persona=h('textarea',{rows:'4',maxlength:'4000',placeholder:'Характер и стиль ответов. Например: «Ты Юрика — мудрая и игривая кицунэ. Отвечай кратко, с японскими словечками».','aria-label':'Характер'});persona.value=v.systemPrompt||'';
-   const collect=()=>({provider:provider.value,baseUrl:baseUrl.value,model:model.value,temperature:Number(temp.value),maxTokens:Number(maxT.value),enabled:enabled.checked,useTools:useTools.checked,systemPrompt:persona.value,...(key.value.trim()?{apiKey:key.value.trim()}:{})});
+   // Поиск по смыслу: модель эмбеддингов у того же сервиса (тот же адрес и ключ).
+   const embHints=h('datalist',{id:'tenma-emb-models'},...((v.embeddingHints||{})[v.provider]||[]).map(id=>h('option',{value:id})));
+   const embModel=h('input',{type:'text',list:'tenma-emb-models',value:v.embeddingModel||'',placeholder:v.provider==='cloudru'?'Например: BAAI/bge-m3':'Например: text-embedding-3-small','aria-label':'Модель для поиска по смыслу',spellcheck:'false'});
+   provider.addEventListener('change',()=>{embHints.replaceChildren(...((v.embeddingHints||{})[provider.value]||[]).map(id=>h('option',{value:id})))});
+   const embTest=h('button',{type:'button',text:'Проверить поиск по смыслу',onclick:async()=>{embTest.disabled=true;say_('Проверяю эмбеддинги…',true);try{await api('/api/llm',collect());key.value='';const t=await api('/api/llm/embed-test',{});say_('✓ '+t.model+': вектор из '+t.dim+' чисел за '+t.ms+' мс. Факты получат векторы фоном.',true)}catch(e){say_(e.message,false)}embTest.disabled=false}});
+   const collect=()=>({embeddingModel:embModel.value,provider:provider.value,baseUrl:baseUrl.value,model:model.value,temperature:Number(temp.value),maxTokens:Number(maxT.value),enabled:enabled.checked,useTools:useTools.checked,systemPrompt:persona.value,...(key.value.trim()?{apiKey:key.value.trim()}:{})});
    const saveBtn=h('button',{type:'button',class:'primary',text:'Сохранить',onclick:async()=>{try{const nv=await api('/api/llm',collect());key.value='';key.placeholder=nv.hasKey?'Ключ сохранён '+nv.keyHint+' — введите новый, чтобы заменить':'Вставьте ключ API';say_('Сохранено ✓',true);status.className='model-status'+(nv.active?' on':'');status.lastChild.textContent=nv.active?'Подключено · '+nv.activeModel:'Модель не подключена — отвечаю локально'}catch(e){say_(e.message,false)}}});
    const loadBtn=h('button',{type:'button',text:'Загрузить список моделей',onclick:async()=>{loadBtn.disabled=true;say_('Запрашиваю список…',true);try{await api('/api/llm',collect());key.value='';const {models:list}=await api('/api/llm/models',{});models.replaceChildren(...list.map(id=>h('option',{value:id})));modelSelect.replaceChildren(h('option',{value:'',text:'— выберите модель ('+list.length+') —'}),...list.map(id=>h('option',{value:id,text:id,selected:id===model.value})));modelSelect.hidden=!list.length;say_(list.length?'Найдено моделей: '+list.length:'Сервис не вернул список — впишите имя модели вручную',!!list.length)}catch(e){say_(e.message,false)}loadBtn.disabled=false}});
    const testBtn=h('button',{type:'button',text:'Проверить связь',onclick:async()=>{testBtn.disabled=true;say_('Проверяю…',true);try{await api('/api/llm',collect());key.value='';const t=await api('/api/llm/test',{});say_('✓ '+t.model+' ответила за '+t.ms+' мс: «'+t.reply+'»',true)}catch(e){say_(e.message,false)}testBtn.disabled=false}});
@@ -511,8 +527,12 @@
       h('label',{class:'field'},h('span',{text:'Креативность'}),tempOut,temp),
       h('label',{class:'field'},h('span',{text:'Длина ответа (токенов)'}),maxOut,maxT),
       swRow('Использовать модель',enabled,'Выключите, чтобы отвечать только локально'),
-      swRow('Разрешить инструменты',useTools,'Модель сама создаёт заметки, дела, напоминания'))),
-    card('Характер',persona),
+      swRow('Разрешить инструменты',useTools,'Модель сама создаёт заметки, дела, напоминания')),
+     card('Поиск по смыслу',
+      h('label',{class:'field'},h('span',{text:'Модель эмбеддингов'}),h('span'),embModel,embHints),
+      h('small',{class:'hint',text:'По ней Юрика находит факты и заметки по смыслу: «машина» найдёт «автомобиль». Пусто — только по словам.'+(v.embeddingSource==='env'?' Сейчас работает из .env.':'')}),
+      h('div',{class:'row'},embTest))),
+    card('Характер',persona,h('small',{class:'hint',text:'Пусто — стартовая личность: личная преданная кицунэ, любит вас и зовёт «хозяин». Её же можно поправить в «Мозге» → «Дневник» (блоки «Кто я» и «Как мы общаемся»).'})),
     h('div',{class:'menu-actions'},saveBtn,testBtn,clearBtn),msg);
   }).catch(e=>wrap.replaceChildren(h('p',{class:'model-msg err',text:'Не удалось загрузить настройки: '+e.message})));
   return [wrap];
@@ -539,7 +559,7 @@
    for(const [,[label,color]] of Object.entries(GLOW_PRESETS)){const b=h('button',{type:'button',class:'swatch',role:'radio',title:label,'aria-label':label,'data-color':color,style:'--c:'+color});b.addEventListener('click',()=>{cfg.glowColor=color;custom.value=color;mark();refreshAll()});swatches.append(b)}
    custom.addEventListener('input',()=>{cfg.glowColor=custom.value;mark();save();applyLook();spawnParticles()});swatches.append(custom);mark();
    return [card('Цвет магии',swatches,h('small',{class:'hint',text:'Цвет свечения, ауры, круга, искр и звёзд.'})),
-    grid(card('Сияние',sw('Свечение','glow'),sw('Пульсация','pulse'),range('Сила свечения','glowPower',5,100,5,pct),range('Скорость пульсации','pulseSpeed',1,8,.2,sec)),
+    grid(card('Сияние',sw('Свечение','glow'),sw('Душа меняет свечение и частицы','soulLook'),sw('Пульсация','pulse'),range('Сила свечения','glowPower',5,100,5,pct),range('Скорость пульсации','pulseSpeed',1,8,.2,sec)),
      card('Магия',sw('Магический круг','magicCircle',cfg,'Вращающаяся печать под ногами'),range('Скорость круга','circleSpeed',4,60,1,sec),sw('Блик света','shine',cfg,'Сияющая волна пробегает по фигуре'),sw('Золотой контур','outline'),sw('Тень у ног','shadow')))];
   }},
   particles:{label:'Частицы',icon:'i-particles',sub:'Искры, сакура, огоньки и другое',build:()=>{
@@ -638,7 +658,7 @@
  function resizeCanvas(){dpr=Math.min(2,window.devicePixelRatio||1);const s=sizePx()*1.5;canvas.width=Math.round(s*dpr);canvas.height=Math.round(s*dpr)}
  const rnd=(a,b)=>a+Math.random()*(b-a);
  function particle(fresh){
-  const W=canvas.width,H=canvas.height,k=dpr*Math.max(.7,sizePx()/220)*cfg.particleSize,v=cfg.particleSpeed*dpr,type=cfg.particleType;
+  const W=canvas.width,H=canvas.height,k=dpr*Math.max(.7,sizePx()/220)*cfg.particleSize,v=cfg.particleSpeed*soulSpeed()*dpr,type=cfg.particleType;
   const p={x:W*rnd(.22,.78),y:fresh?H*rnd(.25,.8):H*rnd(.7,.82),r:rnd(.6,1.8)*k,vx:rnd(-.12,.12)*v,vy:-rnd(.15,.6)*v,life:0,max:rnd(180,400)/Math.max(.4,cfg.particleSpeed),tw:Math.random()*6.28,rot:Math.random()*6.28,vr:rnd(-.03,.03)};
   if(type==='petals'||type==='snow'){p.y=fresh?H*rnd(.05,.8):H*rnd(0,.12);p.vy=rnd(.2,.55)*v;p.vx=rnd(-.25,.25)*v;p.r=rnd(1.4,2.6)*k*(type==='snow'?.7:1)}
   if(type==='fireflies'){p.vx=rnd(-.3,.3)*v;p.vy=rnd(-.3,.3)*v;p.r=rnd(1,1.8)*k}
@@ -649,7 +669,7 @@
   return p;
  }
  function spawnParticles(){
-  parts=cfg.particles&&cfg.visible&&!reduceMotion.matches?Array.from({length:cfg.particleCount},()=>particle(true)):[];
+  parts=cfg.particles&&cfg.visible&&!reduceMotion.matches?Array.from({length:cfg.particleCount+(cfg.soulLook?Math.min(6,soulState.levelIndex)*3:0)},()=>particle(true)):[];
   kick();
  }
  let lastTrail=null;
@@ -693,7 +713,7 @@
   raf=0;if((!parts.length&&!bursts.length)||document.hidden){lastTick=0;return}
   const dt=lastTick?Math.min(3,Math.max(.25,(now-lastTick)/16.667)):1;lastTick=now;
   ctx.clearRect(0,0,canvas.width,canvas.height);ctx.globalCompositeOperation='lighter';
-  const rgb=hexRgb(cfg.glowColor).join(','),W=canvas.width,H=canvas.height,type=cfg.particleType;
+  const rgb=(soulRgb()||hexRgb(cfg.glowColor)).join(','),W=canvas.width,H=canvas.height,type=cfg.particleType;
   for(let i=0;i<parts.length;i++){
    const p=parts[i];p.life+=dt;p.rot+=p.vr*dt;
    if(type==='butterflies'){p.vx+=rnd(-.05,.05)*dpr*dt;p.vx*=.99**dt}
@@ -714,8 +734,9 @@
  document.getElementById('avatar-toggle')?.addEventListener('click',()=>toggleVisible());
  let resizeFrame;window.addEventListener('resize',()=>{cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{applyLook();spawnParticles()})});
  window.TenmaAvatar={openSettings:(t)=>{if(t&&SECTIONS[t])tab=t;if(!cfg.visible)toggleVisible(true);const r=avatar.getBoundingClientRect();openSettings(r.left+r.width/2,r.top+r.height/2)},openChat,closeChat,toggleVisible,resetPosition,say,setPose:id=>setPose(id,{remember:true})};
- applyLook();spawnParticles();scheduleBehaviour();
+ applyLook();spawnParticles();scheduleBehaviour();readSoul();setInterval(readSoul,15*60e3);
  if(cfg.phrases&&cfg.visible)setTimeout(()=>say(phrase()),2500);
 })();
+
 
 

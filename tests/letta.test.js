@@ -24,7 +24,7 @@ const say=text=>({content:text});
 
 test('core blocks: seed, append, replace, limit, injection, history and restore',()=>{
  const l=core.list();
- assert.deepEqual(l.map(b=>b.name),['self','human','bond']);
+ assert.deepEqual(l.map(b=>b.name),['self','human','bond','soul']);
  assert.ok(l.every(b=>b.seed&&b.version===1));
  // К сиду не дописывается — он заменяется.
  core.append('human','Ты любишь чай с жасмином.');
@@ -195,9 +195,9 @@ test('chat model gets core, atlas, onboarding and summary; self-edit tools chang
   assert.match(toolMsgs[0],/Поправила память: «Пермь» → «Казань»/);
   assert.match(toolMsgs[2],/Разговоры сегодня[\s\S]*Пермь/);
   // Фоновое сжатие копит сводку по номеру разговора.
-  const deadline=Date.now()+10000;
-  while(!convo.summaryOf('conv-chat-0001')&&Date.now()<deadline)await new Promise(r=>setTimeout(r,100));
-  assert.ok(convo.summaryOf('conv-chat-0001'),'фоновое сжатие не завершилось за 10 секунд');
+  // Ждём до 10 с: на медленных машинах (Windows CI) сжатие не успевает за 200 мс.
+  for(let i=0;i<100&&!convo.summaryOf('conv-chat-0001');i++)await new Promise(r=>setTimeout(r,100));
+  assert.ok(convo.summaryOf('conv-chat-0001'));
  }finally{delete process.env.CHAT_URL;await new Promise(r=>fake.close(r))}
  // Без модели: сердцевина и вспоминание по датам — локальными командами.
  assert.match((await reply({message:'сердцевина'})).reply,/Моя сердцевина:[\s\S]*Кто ты/);
@@ -286,4 +286,5 @@ test('review fixes 3: explicit predicate respected, overflowing lessons kept, ne
  assert.equal(all.total,2006);assert.equal(all.messages.at(-1).text,'уникальная тема цеппелин');
  assert.equal(chatlog.between(d.from,d.to,{query:'цеппелин'}).matched,1);
 });
+
 

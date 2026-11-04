@@ -19,6 +19,8 @@ function connect(){
  for(const note of snapshot.notes||[]){if(!note.id||!note.title)continue;const known=db.prepare('SELECT id FROM knowledge_nodes WHERE id=?').get(note.id);if(!known){db.prepare('INSERT INTO knowledge_nodes(id,title,content) VALUES(?,?,?)').run(note.id,note.title,note.content||'');db.prepare('INSERT OR IGNORE INTO vector_queue(id) VALUES(?)').run(note.id)}}
 }
 function ensure(){if(!db)connect()}
+// peek: синхронное чтение без записи (проверка полей перед сохранением).
+function peek(){ensure();return JSON.parse(db.prepare('SELECT payload FROM workspace WHERE id=1').get().payload)}
 async function load(){ensure();return JSON.parse(db.prepare('SELECT payload FROM workspace WHERE id=1').get().payload)}
 async function save(data){ensure();db.prepare('UPDATE workspace SET payload=? WHERE id=1').run(JSON.stringify(data))}
 function mutate(change){ensure();db.exec('BEGIN IMMEDIATE');try{const data=JSON.parse(db.prepare('SELECT payload FROM workspace WHERE id=1').get().payload);const result=change(data);db.prepare('UPDATE workspace SET payload=? WHERE id=1').run(JSON.stringify(data));db.exec('COMMIT');return result}catch(e){db.exec('ROLLBACK');throw e}}
@@ -71,4 +73,4 @@ function backup(){
 function enqueueMissing(ids){ensure();const stmt=db.prepare('INSERT OR IGNORE INTO vector_queue(id) VALUES(?)');let added=0;db.exec('BEGIN IMMEDIATE');try{for(const id of ids){if(typeof id==='string'&&id&&stmt.run(id).changes)added++}db.exec('COMMIT')}catch(e){db.exec('ROLLBACK');throw e}return added}
 function reindexAll(){ensure();db.exec('BEGIN IMMEDIATE');try{db.exec('INSERT OR IGNORE INTO vector_queue(id) SELECT id FROM knowledge_nodes');db.exec('UPDATE vector_queue SET attempts=0,last_error=NULL,next_retry_at=0');const count=db.prepare('SELECT COUNT(*) AS count FROM vector_queue').get().count;db.exec('COMMIT');return count}catch(error){db.exec('ROLLBACK');throw error}}
 function close(){if(db){db.close();db=undefined}}
-module.exports={connect,load,save,mutate,syncNode,removeNode,wasDeleted,graph,pending,indexed,failed,backup,reindexAll,enqueueMissing,close};
+module.exports={connect,peek,load,save,mutate,syncNode,removeNode,wasDeleted,graph,pending,indexed,failed,backup,reindexAll,enqueueMissing,close};

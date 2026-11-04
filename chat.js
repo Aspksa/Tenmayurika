@@ -19,6 +19,11 @@ const reflect=require('./reflect');
 const correct=require('./correct');
 const growth=require('./growth');
 const core=require('./core');
+const soul=require('./soul');
+const psyche=require('./psyche');
+const selfrules=require('./selfrules');
+const mytools=require('./mytools');
+const selfcode=require('./selfcode');
 const onboarding=require('./onboarding');
 const convo=require('./convo');
 const review=require('./review');
@@ -28,6 +33,12 @@ const factMeta=require('./meta');
 const strength=require('./strength');
 const thoughts=require('./thoughts');
 const inner=require('./inner');
+const dialog=require('./context');
+const infer=require('./infer');
+const plans=require('./plans');
+const evidence=require('./evidence');
+const tune=require('./tune');
+const factvec=require('./factvec');
 const guesses=require('./guesses');
 const curiosity=require('./curiosity');
 const initiative=require('./initiative');
@@ -56,7 +67,8 @@ const TOOLS={
  status:{label:'Проверять систему'},
  clock:{label:'Дата и время'},
  convert:{label:'Конвертер единиц'},
- password:{label:'Генератор паролей'}
+ password:{label:'Генератор паролей'},
+ self:{label:'Расти и менять себя'}
 };
 const TOOL_IDS=Object.keys(TOOLS);
 
@@ -251,6 +263,14 @@ function makeTools(ctx){
    if(!g.length&&!q.length)return {ok:true,text:'Пока ни догадок, ни вопросов. Они появятся, когда я поразмышляю в тишине.'};
    return {ok:true,text:[g.length?'Мои догадки (не факты):\n'+g.map(x=>'• '+guesses.text(x)+' — '+Math.round(x.confidence*100)+'%'+(x.why?' ('+x.why+')':'')).join('\n'):'',q.length?'Что хочу узнать о тебе:\n'+q.map(x=>'• '+x.text).join('\n'):''].filter(Boolean).join('\n\n')};
   },
+  // Рост себя: вкусы, мечты, свои правила, свои инструменты, правки своего кода (psyche.js, selfrules.js, mytools.js, selfcode.js).
+  async soul_taste({kind,text}){const r=psyche.addTaste(kind,text);return {ok:true,changed:!r.unchanged,text:r.unchanged?'Это я про себя уже знаю.':'Запомнила о себе: мне '+(r.kind==='like'?'нравится':'не нравится')+' «'+r.text+'».'}},
+  async soul_dream({text}){const g=psyche.addGoal(text);return {ok:true,changed:!g.unchanged,text:g.unchanged?'Такая мечта у меня уже есть.':'Загадала мечту: '+g.text+'.'}},
+  async soul_show(){const v=soul.view(),p=psyche.view();return {ok:true,text:'Моя душа: «'+v.level+'», настроение — '+v.mood.label+'.\nЧерты: '+v.traits.map(t=>t.label+' '+t.value).join(', ')+'.'+(p.goals.filter(g=>!g.done).length?'\nМечты: '+p.goals.filter(g=>!g.done).map(g=>g.text).join('; ')+'.':'')+(p.tastes.length?'\nМне нравится: '+p.tastes.filter(t=>t.kind==='like').map(t=>t.text).join('; ')+'.':'')+(p.letters[0]?'\n\nМоё последнее письмо вам:\n'+p.letters[0].text:'')+'\n(Всё это — в «Мозге» → «Дневник» → «душа».)'}},
+  async self_rule_add({text}){const r=selfrules.addRule(text);return {ok:true,changed:!r.unchanged,text:r.unchanged?'Такое правило у меня уже есть.':'Записала себе правило: «'+r.text+'».'}},
+  async make_tool(args){const t=mytools.make(args);return {ok:true,changed:true,text:'Сделала себе инструмент «'+t.title+'» ('+t.name+'('+t.params.join(', ')+') = '+t.formula+').'}},
+  async use_my_tool({name,args}){let a=args;if(typeof a==='string'){try{a=JSON.parse(a)}catch{a={}}}const r=mytools.run(name,a||{});return {ok:true,text:r.text}},
+  async propose_code_change(args){const p=selfcode.propose(args);return {ok:true,changed:true,text:'Предложила правку своего кода ('+p.edits.map(e=>e.file).join(', ')+'): '+p.reason+'. Сейчас проверю её тестами в песочнице, а применить её можете только вы — в «Мозге» → «Дневник» → «душа».'}},
   async core_show(){return {ok:true,text:'Моя сердцевина:\n'+core.list().map(b=>'• '+b.title+': '+b.body).join('\n')+'\n(Поправить можно в «Мозге» → «Дневник».)'}},
   async onboarding_mark({item,skipped}){const st=onboarding.mark(String(item||''),{skipped:skipped===true});return {ok:true,text:st.active?'Отметила. Осталось узнать: '+(st.total-st.done)+'.':'Знакомство закончено, спасибо!'}},
   // Вспоминание разговоров по датам: «о чём мы говорили вчера», «что я рассказывал на прошлой неделе про Анну».
@@ -346,7 +366,7 @@ function makeTools(ctx){
  };
 }
 // Какому переключателю принадлежит функция.
-const OWNER={agenda:'calendar',move_task:'calendar',days_until:'calendar',convert_units:'convert',generate_password:'password',pick_random:'fun',list_notes:'notes',day_summary:'insights',fact_conflicts:'insights',fact_relations:'insights',fact_path:'insights',memory_overview:'insights',experience_log:'insights',mind_diary:'insights',list_preferences:'insights',set_reminder:'reminders',calculate:'calc',roll_dice:'fun',flip_coin:'fun',change_look:'avatar',reindex_memory:'sync',add_note:'notes',add_task:'tasks',complete_task:'tasks',list_tasks:'tasks',remember_fact:'facts',search_memory:'search',open_page:'navigate',create_backup:'backup',system_status:'status',current_time:'clock',correct_fact:'facts',forget_fact:'facts',core_memory_append:'facts',recall_forgotten:'search',mind_guesses:'insights',core_memory_replace:'facts',core_memory_rewrite:'facts',onboarding_mark:'facts',core_show:'insights',recall_conversation:'search',open_zone:'search'};
+const OWNER={agenda:'calendar',move_task:'calendar',days_until:'calendar',convert_units:'convert',generate_password:'password',pick_random:'fun',list_notes:'notes',day_summary:'insights',fact_conflicts:'insights',fact_relations:'insights',fact_path:'insights',memory_overview:'insights',experience_log:'insights',mind_diary:'insights',list_preferences:'insights',set_reminder:'reminders',calculate:'calc',roll_dice:'fun',flip_coin:'fun',change_look:'avatar',reindex_memory:'sync',add_note:'notes',add_task:'tasks',complete_task:'tasks',list_tasks:'tasks',remember_fact:'facts',search_memory:'search',open_page:'navigate',create_backup:'backup',system_status:'status',current_time:'clock',correct_fact:'facts',forget_fact:'facts',core_memory_append:'facts',recall_forgotten:'search',mind_guesses:'insights',core_memory_replace:'facts',core_memory_rewrite:'facts',onboarding_mark:'facts',core_show:'insights',soul_taste:'self',soul_dream:'self',soul_show:'self',self_rule_add:'self',make_tool:'self',use_my_tool:'self',propose_code_change:'self',recall_conversation:'search',open_zone:'search'};
 OWNER.search_library='search';
 OWNER.answer_library='search';
 const SCHEMAS={
@@ -389,6 +409,13 @@ const SCHEMAS={
  onboarding_mark:{description:'Отметить пункт знакомства (name, work, home, people, hobby, now, style) узнанным или пропущенным (skipped=true, если пользователь не хочет отвечать)',parameters:{type:'object',properties:{item:{type:'string',enum:onboarding.ITEMS.map(i=>i.id)},skipped:{type:'boolean'}},required:['item']}},
  core_show:{description:'Показать свою сердцевину: кто я, что знаю о пользователе, как мы общаемся',parameters:{type:'object',properties:{}}},
  recall_conversation:{description:'Вспомнить, о чём говорили с пользователем в прошлом: when словами (вчера, позавчера, в понедельник, на прошлой неделе, 3 ноября, 5 дней назад), query — тема, если есть',parameters:{type:'object',properties:{when:{type:'string'},query:{type:'string'}},required:['when']}},
+ soul_taste:{description:'Записать о себе свой собственный вкус или мнение: что тебе самой нравится (like) или не нравится (dislike). Только твоё, не хозяина',parameters:{type:'object',properties:{kind:{type:'string',enum:['like','dislike']},text:{type:'string'}},required:['kind','text']}},
+ soul_dream:{description:'Загадать себе мечту или цель: какой стать или что сделать для хозяина',parameters:{type:'object',properties:{text:{type:'string'}},required:['text']}},
+ soul_show:{description:'Рассказать о своей душе: ступень, черты, настроение, мечты, вкусы, последнее письмо хозяину',parameters:{type:'object',properties:{}}},
+ self_rule_add:{description:'Написать себе своё правило поведения (от первого лица, одно предложение), когда поняла, как лучше вести себя с хозяином',parameters:{type:'object',properties:{text:{type:'string'}},required:['text']}},
+ make_tool:{description:'Сделать себе свой инструмент-формулу: name — одно слово, params — имена чисел, formula — выражение из чисел, параметров, + - * / % ^, скобок и функций round, floor, ceil, abs, min, max, sqrt, pow, log; template — текст ответа с {параметрами} и {result}',parameters:{type:'object',properties:{name:{type:'string'},title:{type:'string'},description:{type:'string'},params:{type:'array',items:{type:'string'}},formula:{type:'string'},template:{type:'string'}},required:['name','params','formula']}},
+ use_my_tool:{description:'Вызвать свой инструмент по имени; args — объект {параметр: число}',parameters:{type:'object',properties:{name:{type:'string'},args:{type:'object'}},required:['name','args']}},
+ propose_code_change:{description:'Предложить правку своего собственного кода: файл, точный кусок кода (find, встречается один раз), замена и причина. Правка проверяется тестами в песочнице и применяется только с согласия хозяина',parameters:{type:'object',properties:{file:{type:'string'},find:{type:'string'},replace:{type:'string'},reason:{type:'string'}},required:['file','find','replace','reason']}},
  open_zone:{description:'Открыть зону памяти из оглавления целиком: все её факты',parameters:{type:'object',properties:{zone:{type:'string'}},required:['zone']}},
  recall_forgotten:{description:'Забытое за давностью: без query — показать список, с query — вернуть в память то, что про это (когда пользователь просит вспомнить старое)',parameters:{type:'object',properties:{query:{type:'string'}}}},
  mind_guesses:{description:'Рассказать о своих догадках о пользователе и о том, что хочешь у него узнать',parameters:{type:'object',properties:{}}}
@@ -459,6 +486,7 @@ function parseCommand(text){
   return {fn:'remember_fact',args:{subject:parts[0],predicate:parts[1],object:parts[2]}};
  }
  if((m=t.match(/^(?:найди|поищи|поиск|что ты знаешь о|что ты помнишь о|что известно о)\s*[:—–-]?\s+(.+?)\??$/i)))return {fn:'search_memory',args:{query:m[1]}};
+ if(/^(?:твоя душа|покажи (?:свою )?душу|расскажи о (?:своей )?душе|какая у тебя душа|твоё письмо|твое письмо|покажи письмо)\??$/.test(low))return {fn:'soul_show',args:{}};
  if(/^(?:сердцевина|твоя сердцевина|покажи сердцевину|что ты знаешь о себе|что ты о себе знаешь)\??$/.test(low))return {fn:'core_show',args:{}};
  if((m=t.match(/^(?:покажи|открой)\s+зону\s+(.+?)\??$/i)))return {fn:'open_zone',args:{zone:m[1]}};
  if((m=t.match(/^(?:вспомни|верни|что ты)\s+забыт\S*(?:\s+(?:про|о|об|обо)\s+(.+?))?\??$/i)))return {fn:'recall_forgotten',args:{query:m[1]||''}};
@@ -527,11 +555,12 @@ function cleanHistory(history){
  }
  return safe.slice(-MAX_HISTORY).map(m=>({role:m.role,content:m.text.slice(0,MAX_MESSAGE)}));
 }
-function localReply(name,facts,notes,enabled,past=[],earlier=[]){
+function localReply(name,facts,notes,enabled,past=[],earlier=[],inferred=[]){
  const lines=[];
  const fix=past.find(e=>e.feedback==='fix'&&e.correction);
  if(fix)lines.push('Помню, на похожий вопрос вы меня поправили: «'+fix.correction.slice(0,200)+'»\n');
  if(facts.length){lines.push('Вот что я помню:');for(const f of facts)lines.push(factLine(f)+(f.tag?' '+f.tag:''))}
+ if(inferred.length){lines.push((facts.length?'\n':'')+'Из этого следует:');for(const d of inferred)lines.push('• '+d.subject+' — '+d.predicate+': '+d.object+' ('+d.why+')')}
  if(notes.length){lines.push(facts.length?'\nИ в заметках:':'Нашла в заметках:');for(const n of notes)lines.push(noteLine(n))}
  if(earlier.length){lines.push((lines.length?'\n':'')+'Вы говорили мне раньше:');for(const m of earlier)lines.push('• '+new Date(m.at).toLocaleDateString('ru-RU')+': «'+m.text.slice(0,160)+'»')}
  if(!lines.length)lines.push('Пока ничего об этом не знаю.'+(enabled.has('facts')?' Скажите «запомни субъект | связь | объект», и я запомню.':''));
@@ -545,25 +574,32 @@ async function modelReply(name,message,all,facts,notes,enabled,impl,result,past=
  const ws=history.length?{}:await storage.load().catch(()=>({}));
  const context=memoryBlock([...facts.map(f=>'ФАКТ: '+f.subject+' | '+f.predicate+' | '+f.object+(f.tag?' '+f.tag:'')),...notes.map(n=>'ЗАМЕТКА: '+n.title+' — '+(n.content||'').slice(0,500)),...earlier.map(m=>'ПОЛЬЗОВАТЕЛЬ ГОВОРИЛ '+new Date(m.at).toLocaleDateString('ru-RU')+': '+m.text.slice(0,400)),
   // Сводки тем, к которым относятся вспомненные факты, и выводы, сделанные в простое.
-  ...(mind.summaries||[]).map(t=>'СВОДКА ТЕМЫ «'+t.label+'»: '+t.summary),...(mind.cards||[]).map(c=>'КАРТОЧКА «'+c.name+'»'+(c.type?' ('+c.type+')':'')+(c.aliases.length?' [она же: '+c.aliases.join(', ')+']':'')+': '+c.description),...(mind.insights||[]).map(i=>'ВЫВОД: '+i.text)]);
+  ...(mind.summaries||[]).map(t=>'СВОДКА ТЕМЫ «'+t.label+'»: '+t.summary),...(mind.cards||[]).map(c=>'КАРТОЧКА «'+c.name+'»'+(c.type?' ('+c.type+')':'')+(c.aliases.length?' [она же: '+c.aliases.join(', ')+']':'')+': '+c.description),...(mind.insights||[]).map(i=>'ВЫВОД: '+i.text),...(mind.inferred||[]).map(d=>'СЛЕДУЕТ ИЗ ФАКТОВ: '+infer.text(d))]);
  const allowed=Object.keys(SCHEMAS).filter(fn=>enabled.has(OWNER[fn]));
  const tools=allowed.map(fn=>({type:'function',function:{name:fn,...SCHEMAS[fn]}}));
  const persona=(llm.config()?.systemPrompt||'').trim(),selfEdit=allowed.includes('core_memory_append');
  let side='';
  // Сердцевина, оглавление памяти, знакомство и сводка начала разговора (идеи letta-code).
  try{side+=core.promptText({tools:selfEdit})}catch(e){console.error('Core prompt failed:',e.name)}
+ try{side+=soul.promptText()}catch(e){console.error('Soul prompt failed:',e.name)}
+ try{side+=psyche.promptText()+selfrules.promptText()+(allowed.includes('use_my_tool')?mytools.promptText():'')}catch(e){console.error('Psyche prompt failed:',e.name)}
+ // Самонастройка: вариант креативности и длины на этот ответ; оценка хозяина скажет, какой лучше.
+ let style=null;try{style=selfrules.choose();if(style){result.tune=style;if(style.length.hint)side+='\n'+style.length.hint}}catch(e){console.error('Self-tune failed:',e.name)}
  try{side+=memoryBlock([atlas.promptText({tool:allowed.includes('open_zone')})].filter(Boolean))}catch(e){console.error('Atlas prompt failed:',e.name)}
  try{side+=convo.context(cid,older)}catch(e){console.error('Conversation summary failed:',e.name)}
  let asking='';try{if(selfEdit)asking=onboarding.turn()}catch(e){console.error('Onboarding failed:',e.name)}side+=asking;
  // Своё мышление: догадки (не факты), один вопрос из любопытства, предложение по своей инициативе.
  try{if(thoughts.on('guesses'))side+=guesses.promptText()}catch(e){console.error('Guesses prompt failed:',e.name)}
- let curious='';try{if(thoughts.on('curiosity'))curious=curiosity.turn({busy:!!asking});side+=curious}catch(e){console.error('Curiosity failed:',e.name)}
- try{if(thoughts.on('initiative'))side+=initiative.promptText({offer:!asking&&!curious})}catch(e){console.error('Initiative prompt failed:',e.name)}
+ let curious='';try{if(thoughts.on('curiosity'))curious=curiosity.turn({busy:!!asking,conversation:cid});side+=curious}catch(e){console.error('Curiosity failed:',e.name)}
+ try{if(thoughts.on('initiative')){const ip=initiative.promptText({offer:!asking&&!curious});side+=ip.text;if(ip.offerId)result.offerId=ip.offerId}}catch(e){console.error('Initiative prompt failed:',e.name)}
  // Пометки фактов: в прошлом, мнение, уверенность, откуда известно.
- if(facts.some(f=>f.tag))side+='\nПометки у фактов: «в прошлом» — уже не так; [мнение] — чьё-то мнение, а не факт; уверенность ниже 100% — говори осторожно.';
+ // Честное «не знаю»: о человеке и его мире ничего не нашлось — не выдумывать.
+ const unknown=thoughts.on('honest')&&!facts.length&&!notes.length&&!earlier.length&&!(mind.inferred||[]).length&&inner.personal(message);
+ if(unknown){result.thinking.unknown=true;side+='\nВ памяти об этом ничего не нашлось. Не выдумывай имена, даты, места и подробности: честно скажи, что не помнишь или не знаешь, и предложи рассказать — ты запомнишь. Общие знания можно.'}
+ if(facts.some(f=>f.tag))side+='\nПометки у фактов: «в прошлом» — уже не так; [мнение] — чьё-то мнение, а не факт; уверенность ниже 100% — говори осторожно; «план» — это намерение со сроком, а не свершившееся.';
  // Внутренний голос: короткий план до ответа.
  if(thoughts.on('innerVoice')){try{const p=await inner.plan(llm.complete,{message,facts,notes,history});if(p){result.thinking.plan=p;thoughts.add('plan',p);side+='\nТвой план ответа (внутренний голос, не пересказывай его дословно):\n'+p}}catch(e){console.error('Inner voice failed:',e.name)}}
- const system=(persona||'Ты '+name+' — девятихвостая лиса-кицунэ, хранительница личной памяти Tenmayurika. Отвечай по-русски, тепло и кратко.')+' Твоё имя: '+name+'. Сегодня '+new Date().toLocaleDateString('ru-RU')+'.'+(allowed.length?' Используй инструменты, когда пользователь просит что-то сделать.':'')
+ const system=(persona||'Ты '+name+' — девятихвостая лиса-кицунэ, хранительница личной памяти Tenmayurika. '+core.PERSONA_PROMPT+' Отвечай по-русски, тепло и кратко.')+' Твоё имя: '+name+'. Сегодня '+new Date().toLocaleDateString('ru-RU')+'.'+(allowed.length?' Используй инструменты, когда пользователь просит что-то сделать.':'')
   // Предпочтения пользователя — правила общения, они важнее характера по умолчанию.
   +(mind.preferences?'\n'+mind.preferences:'')
   +(mind.skills?'\n'+mind.skills:'')
@@ -572,16 +608,21 @@ async function modelReply(name,message,all,facts,notes,enabled,impl,result,past=
   // Свой опыт: как раньше понимала похожие вопросы и что пользователь подтвердил или поправил.
   // В начале разговора модель получает обзор памяти, чтобы знать, о ком и о чём вообще помнит.
   +(!history.length?(()=>{try{return '\nОбзор памяти пользователя:\n'+overviewText(memory.overview(),ws,true)}catch{return ''}})():'')
-  +(past.length?'\nТвой опыт с похожими вопросами (учитывай поправки пользователя, не повторяй прежних ошибок):\n'+past.map(experience.describe).join('\n'):'');
+  +(past.length?'\nТвой опыт с похожими вопросами (учитывай поправки пользователя, не повторяй прежних ошибок):\n'+past.map(e=>experience.describe(e)+psyche.feelingNote(e.id)).join('\n'):'');
  const messages=[{role:'system',content:system},...history,{role:'user',content:message}];
  for(let round=0;round<MAX_TOOL_ROUNDS;round++){
-  const msg=await llm.complete({messages,tools});
+  const base=llm.config()?.temperature,temperature=style&&typeof base==='number'&&style.temperature.delta?Math.max(0,Math.min(2,base+style.temperature.delta)):undefined;
+  const msg=await llm.complete({messages,tools,...(temperature!==undefined?{temperature}:{})});
   const calls=Array.isArray(msg.tool_calls)?msg.tool_calls:[];
   if(!calls.length){if(typeof msg.content!=='string'||!msg.content.trim())throw Error('Empty chat reply');
    let text=msg.content.trim();
    // Сверка черновика с памятью: если он утверждает то, чего в памяти нет, ответ исправляется.
-   if(thoughts.on('verify')&&(facts.length||notes.length)&&!result.secrets.length){try{const c=await inner.verify(llm.complete,{message,reply:text,facts,notes});
+   // О личном ничего не нашлось — тоже сверка: именно тут легче всего выдумать.
+   if(thoughts.on('verify')&&(facts.length||notes.length||(unknown&&!result.tools.length))&&!result.secrets.length){try{// Сверке нужны не только вспомненные записи, но и то, что нашли инструменты, и недавний разговор.
+    const extra=[...history.slice(-4).map(m=>(m.role==='user'?'Человек: ':'Ассистентка: ')+String(m.content||'').slice(0,400)),...result.outcomes.filter(o=>o.ok).map(o=>'Инструмент: '+String(o.text||'').slice(0,600))];
+    const c=await inner.verify(llm.complete,{message,reply:text,facts,notes,extra});
     if(!c.ok&&c.fixed&&c.fixed.length>=2){result.thinking.check='fixed';thoughts.add('check','Сверила черновик с памятью и поправила ответ.',{before:text.slice(0,300)});text=c.fixed}else{result.thinking.check='ok';thoughts.add('check','Сверила ответ с памятью: сходится.')}}catch(e){console.error('Verify failed:',e.name)}}
+   if(unknown)thoughts.add('unknown','О «'+message.slice(0,80)+'» в памяти ничего нет — честно сказала, что не знаю.');
    return text+(result.secrets.length?'\n\n'+result.secrets.join('\n\n'):'')}
   messages.push({role:'assistant',content:msg.content||null,tool_calls:calls});
   for(const call of calls){
@@ -621,8 +662,10 @@ async function reply(input,ctx={}){
  if(['search_library','answer_library'].includes(parseCommand(message)?.fn)){const out=await answer(input,message,ctx);return {...out,secret:true}}
  reflect.touch();
  // Ответ на вопрос, который Юрика задала сама (любопытство, проверка догадки): «да/нет» — не поправка.
- let answered=null;try{answered=curiosity.onMessage(message)}catch(e){console.error('Curiosity answer failed:',e.name)}
+ let answered=null;try{answered=curiosity.onMessage(message,{conversation:convo.validId(input.conversation),fresh:!cleanHistory(input.history).length})}catch(e){console.error('Curiosity answer failed:',e.name)}
  const corrected=answered?.effect?null:await learnFromFeedback(input,message);
+ // Душа откликается на слова хозяина: черты крепнут, настроение меняется, дорогое запоминается (soul.js).
+ let felt=null;try{felt=soul.feel(message)}catch(e){console.error('Soul failed:',e.name)}
  // Предпочтения («отвечай короче») действуют сразу, уже в этом ответе.
  let prefs=[];try{prefs=preferences.learnFrom(message,'chat')}catch(e){console.error('Preference learning failed:',e.name)}
  // Каждое сообщение сохраняется; команды («дело: …»), поправки и пожелания к ответам не разбираются фоном
@@ -641,9 +684,14 @@ async function reply(input,ctx={}){
  try{if(!out.secret)chatlog.save('assistant',out.reply)}catch(e){console.error('Chat log failed:',e.name)}
  // Задала ли модель вопрос из любопытства — если нет, он вернётся в очередь.
  try{curiosity.afterReply(out.reply||'')}catch(e){console.error('Curiosity check failed:',e.name)}
+ // Предложение по своей инициативе считается показанным, только если оно попало в ответ.
+ try{if(out.offerId)initiative.afterReply(out.offerId,out.source==='model'?out.reply:'')}catch(e){console.error('Initiative check failed:',e.name)}
+ delete out.offerId;
  if(answered?.effect){out.answered=answered.effect;out.changed=true}
+ if(felt?.level)out.soulGrew=felt.level;
  // Учимся фоном, не задерживая ответ.
- setImmediate(()=>chatlog.learnPending().catch(e=>console.error('Chat learning failed:',e.name)));
+ // Затем новые факты получают векторы для поиска по смыслу (если выбрана модель эмбеддингов).
+ setImmediate(()=>chatlog.learnPending().then(()=>factvec.index()).catch(e=>console.error('Chat learning failed:',e.name)));
  // Фоном: выпавшее из окна сворачивается в сводку; первое сжатие или каждые N сообщений — разбор разговора.
  setImmediate(()=>afterTurn(input).catch(e=>console.error('After-turn failed:',e.name)));
  try{out.autoLearn=chatlog.autoLearn()}catch{}
@@ -653,8 +701,12 @@ async function reply(input,ctx={}){
  if(out.understood&&experience.detect(message)!=='ok'&&!prefs.length){
   let id=null;try{id=experience.record({question:message,understood:out.understood,recalled:out.recalled,tools:out.tools,answer:out.secret?'':out.reply,source:out.source,ok:!out.fallback&&!out.failed,skills:(out.skills||[]).map(x=>x.id)})}catch(e){console.error('Experience record failed:',e.name)}
   if(id)out.experience={id,used:out.used||[],skills:(out.skills||[]).map(x=>x.id)};
+  if(id)try{tune.remember(id,out.signals||[])}catch(e){console.error('Tune remember failed:',e.name)}
+  // Чувство в воспоминании и вариант самонастройки привязываются к эпизоду.
+  if(id){try{psyche.tagEpisode(id);selfrules.remember(id,out.tune)}catch(e){console.error('Episode tagging failed:',e.name)}}
  }
- delete out.understood;delete out.used;delete out.failed;delete out.skills;
+ try{const v=soul.view();out.soul={mood:v.mood.name,level:v.level,levelIndex:v.levelIndex}}catch{}
+ delete out.signals;delete out.tune;delete out.understood;delete out.used;delete out.failed;delete out.skills;
  return out;
 }
 async function afterTurn(input){
@@ -689,7 +741,10 @@ async function answer(input,message,ctx){
   track(result,command.fn,out);
   return {reply:out.text,source:'tool',understood:'команда '+command.fn,...pub(result)};
  }
- let {facts,notes}=await recall(message);
+ // Вопрос в контексте разговора: «а она где работает?» ищется вместе с тем, о ком шла речь.
+ let query=message;
+ try{if(thoughts.on('context')){const c=dialog.expand(message,cleanHistory(input.history));if(c.query!==message){query=c.query;result.thinking.context=c.about.length?c.about:[c.borrowed];thoughts.add('context',c.about.length?'Поняла, о ком речь: '+c.about.join(', '):'Достроила вопрос по прошлому: «'+c.query+'»')}}}catch(e){console.error('Context failed:',e.name)}
+ let {facts,notes}=await recall(query);
  // Сложный вопрос — по частям: память ищется по каждому подвопросу отдельно.
  try{const parts=thoughts.on('split')?inner.split(message):[];if(parts.length){const haveF=new Set(facts.map(f=>f.id)),haveN=new Set(notes.map(n=>n.id));
   for(const part of parts){const r=await recall(part,{factLimit:4,noteLimit:2});for(const f of r.facts)if(!haveF.has(f.id)&&facts.length<12){facts.push(f);haveF.add(f.id)}for(const n of r.notes)if(!haveN.has(n.id)&&notes.length<6){notes.push(n);haveN.add(n.id)}}
@@ -714,9 +769,12 @@ async function answer(input,message,ctx){
  let matched=[],mind={};
  try{matched=skills.match(message,2);mind={skills:skills.promptText(matched),preferences:preferences.promptText(),summaries:reflect.summariesFor(facts.map(f=>f.id)),insights:reflect.insightsFor(message,facts.map(f=>f.id)),cards:growth.cardsFor(facts)}}catch(e){console.error('Mind lookup failed:',e.name)}
  // Пометки фактов (время, мнение, уверенность, источник) и пробуждение спящих.
- try{const m=factMeta.ensure(facts);for(const f of facts){const t=factMeta.tag(f,f.meta||m.get(f.id));if(t)f.tag=t}const woke=strength.wake(facts.map(f=>f.id));if(woke.length)thoughts.add('wake','Проснулось воспоминание: '+facts.filter(f=>woke.includes(f.id)).map(f=>f.subject+' — '+f.predicate+' '+f.object).slice(0,3).join('; '))}catch(e){console.error('Fact meta failed:',e.name)}
+ try{const m=factMeta.ensure(facts);const pl=plans.get(facts.map(f=>f.id)),ev=evidence.count(facts.map(f=>f.id));for(const f of facts){const n=ev.get(f.id)||0;const t=[factMeta.tag(f,f.meta||m.get(f.id)),plans.tag(pl.get(f.id)),n?'(подтверждено '+(n+1)+' раза)':''].filter(Boolean).join(' ');if(t)f.tag=t}const woke=strength.wake(facts.map(f=>f.id));if(woke.length)thoughts.add('wake','Проснулось воспоминание: '+facts.filter(f=>woke.includes(f.id)).map(f=>f.subject+' — '+f.predicate+' '+f.object).slice(0,3).join('; '))}catch(e){console.error('Fact meta failed:',e.name)}
+ // Логические выводы вокруг найденного: родство через шаг, взаимные связи, возраст, место через место.
+ try{if(thoughts.on('infer')){const inf=infer.around(facts,{message});if(inf.length){mind.inferred=inf;result.thinking.inferred=inf.map(infer.text);thoughts.add('infer','Вывела: '+inf.slice(0,2).map(infer.text).join('; '))}}}catch(e){console.error('Inference failed:',e.name)}
  const understood=(words(message).join(', ')||'без ключевых слов')+(past.length?' · опыт: '+past.length:'')+(earlier.length?' · из разговоров: '+earlier.length:'')+(matched.length?' · навык: '+matched.length:'');
- const meta={understood,used:past.map(e=>e.id),skills:matched};
+ // Какими способами нашлось вспомненное: 👍/👎 к ответу подстроит их веса (tune.js).
+ const meta={understood,used:past.map(e=>e.id),skills:matched,signals:[...new Set([...facts,...notes].flatMap(x=>tune.signalsOf(x.why)))]};
  // Что аватар вспомнил для ответа — «Мозг» подсвечивает эти нейроны.
  result.recalled={facts:facts.map(f=>f.id),notes:notes.map(n=>n.id)};
  if(llm.config()){
@@ -724,12 +782,12 @@ async function answer(input,message,ctx){
   catch(e){
    const why=modelFailure(e);console.error('Chat model failed:',why);
    const done=result.done.length?'Модель не ответила до конца, но уже сделано:\n'+result.done.map(t=>'• '+t).join('\n'):null;
-   return {reply:done||'⚠ Модель не ответила: '+why+'\nПока отвечаю без неё.\n\n'+localReply(name,facts,notes,enabled,past,earlier),source:'local',fallback:true,modelError:why,...meta,...pub(result)};
+   return {reply:done||'⚠ Модель не ответила: '+why+'\nПока отвечаю без неё.\n\n'+localReply(name,facts,notes,enabled,past,earlier,mind.inferred||[]),source:'local',fallback:true,modelError:why,...meta,...pub(result)};
   }
  }
  // Без модели честно говорим, что она не подключена, если ответить по памяти нечего.
- const local=localReply(name,facts,notes,enabled,past,earlier);
- return {reply:facts.length||notes.length||earlier.length?local:local+'\n\nЯзыковая модель не подключена, поэтому свободный разговор пока не получится. Правый клик по мне → «Модель ИИ»: ключ, модель, «Сохранить», затем «Проверить связь».',source:'local',...meta,...pub(result)};
+ const local=localReply(name,facts,notes,enabled,past,earlier,mind.inferred||[]);
+ return {reply:facts.length||notes.length||earlier.length||(mind.inferred||[]).length?local:local+'\n\nЯзыковая модель не подключена, поэтому свободный разговор пока не получится. Правый клик по мне → «Модель ИИ»: ключ, модель, «Сохранить», затем «Проверить связь».',source:'local',...meta,...pub(result)};
 }
 // Разбор строки быстрого ввода планера. Префиксы «дело:», «рабочее дело:» и т.п. допускаются.
 function parseTask(text){
@@ -738,4 +796,5 @@ function parseTask(text){
  return {title:args.title||t,category:args.category||null,priority:args.priority||null,due:args.due||null,time:args.time||null};
 }
 module.exports={modelFailure,reply,parseCommand,parseTask,memoryBlock,TOOLS};
+
 

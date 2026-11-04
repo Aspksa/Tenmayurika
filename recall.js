@@ -1,7 +1,7 @@
 'use strict';
 // Гибридное вспоминание: несколько сигналов складываются в один балл.
 //  • слова — полнотекстовый поиск FTS5 с ранжированием BM25 (факты и заметки);
-//  • смысл — векторный поиск заметок в LanceDB, если настроены эмбеддинги;
+//  • смысл — векторный поиск заметок в LanceDB и фактов (factvec.js), если настроены эмбеддинги;
 //  • связи — факты-соседи по графу у сущностей из лучших находок и из самого вопроса;
 //  • свежесть и уверенность факта — небольшая добавка;
 //  • польза — записи из подтверждённых ответов выше, из поправленных ниже (usefulness.js);
@@ -19,12 +19,14 @@ const links=require('./links');
 const strength=require('./strength');
 const meta=require('./meta');
 
-const W={text:1,vector:.8,graph:.45,fresh:.12,topic:.35,cause:.4};
+// Базовые веса способов; множители к ним Юрика подбирает сама (tune.js).
+const BASE={text:1,vector:.8,graph:.45,fresh:.12,topic:.35,cause:.4};
+function weightsFor(m){const k=m||(()=>{try{return require('./tune').multipliers()}catch{return {}}})();return Object.fromEntries(Object.entries(BASE).map(([s,v])=>[s,v*(Number(k[s])||1)]))}
 const CUTOFF=.2,MMR_LAMBDA=.35;
 const rrf=i=>1/(8+i);
 const VECTOR_TIMEOUT_MS=2500;
 async function vectorNotes(text){
- if(!process.env.EMBEDDING_URL)return [];
+ if(!require('./llm').embedConfig())return [];
  try{
   const search=require('./vector-store').search(text,8);
   const r=await Promise.race([search,new Promise(res=>{const t=setTimeout(()=>res({results:[]}),VECTOR_TIMEOUT_MS);t.unref?.()})]);
@@ -48,8 +50,9 @@ function diverse(list,limit,textOf){
  }
  return out.map(o=>o.x);
 }
-async function recall(text,{factLimit=8,noteLimit=5,ws,diversify=true,topic=true}={}){
+async function recall(text,{factLimit=8,noteLimit=5,ws,diversify=true,topic=true,vector=true,weights=null}={}){
  const query=String(text||'').trim().slice(0,300);if(!query)return {facts:[],notes:[]};
+ const W=weightsFor(weights);
  const data=ws||await storage.load();
  try{memory.syncRecords('note',data.notes||[])}catch(e){console.error('Note index failed:',e.name)}
  const facts=new Map(),notes=new Map();
@@ -65,7 +68,10 @@ async function recall(text,{factLimit=8,noteLimit=5,ws,diversify=true,topic=true
  if(!facts.size){const hit=new Map();for(const t of [query,...new Set(query.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w=>w.length>=3))].slice(0,9)){try{for(const f of memory.searchFacts(t,20))hit.set(f.id,(hit.get(f.id)||0)+1)}catch(e){if(!(e instanceof TypeError))throw e}}
   [...hit].sort((x,y)=>y[1]-x[1]).slice(0,20).forEach(([id],i)=>add(facts,id,'слова',W.text*rrf(i)*6))}
  // Смысл.
- (await vectorNotes(query)).forEach((id,i)=>add(notes,id,'смысл',W.vector*rrf(i)*8));
+ // Смысл: заметки (LanceDB) и факты (векторы в SQLite, factvec.js) — параллельно.
+ if(vector){const [vn,vf]=await Promise.all([vectorNotes(query),require('./factvec').search(query,10)]);
+  vn.forEach((id,i)=>add(notes,id,'смысл',W.vector*rrf(i)*8));
+  vf.forEach((h,i)=>add(facts,h.id,'смысл',W.vector*rrf(i)*8))}
  // Связи: сущности лучших фактов и сущности, названные в вопросе.
  const top=memory.factsById([...facts.values()].sort((a,b)=>b.score-a.score).slice(0,3).map(x=>x.id));
  const ents=new Set();for(const f of top){ents.add(f.subject);ents.add(f.object)}
@@ -99,4 +105,4 @@ async function recall(text,{factLimit=8,noteLimit=5,ws,diversify=true,topic=true
  const outNotes=diversify?diverse(allNotes,noteLimit,n=>n.title+' '+String(n.content||'').slice(0,200)):allNotes.slice(0,noteLimit);
  return {facts:outFacts,notes:outNotes};
 }
-module.exports={recall,diverse};
+module.exports={recall,diverse,BASE};

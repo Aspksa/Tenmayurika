@@ -39,13 +39,18 @@ function parseLines(text){
 // Разбор моделью с навыками запоминания: под текст подобраны 2–3 навыка (memskills.js), а рядом —
 // похожие факты, которые уже есть, чтобы модель могла не только добавить новое, но и обновить
 // или отставить известное (FACT / UPDATE / RETIRE / NONE).
-async function byModel(text,skills,similar){
+async function byModel(text,skills,similar,context=[]){
  const known=similar.length?'\n\nУже известно (номер. субъект | связь | объект):\n'+similar.map((f,i)=>(i+1)+'. '+f.subject+' | '+f.predicate+' | '+f.object).join('\n'):'';
  const ops=similar.length?'\nUPDATE: номер | субъект | связь | объект — известный факт изменился (новая версия целиком)\nRETIRE: номер — известный факт явно отменён или неверен':'';
  const msg=await llm.complete({messages:[
   {role:'system',content:'Ты запоминаешь устойчивые факты о человеке и его мире. Пользуйся навыками запоминания:\n'+memskills.promptFor(skills)+'\n\nОтвечай только строками:\nFACT: субъект | связь | объект — новый факт'+ops+'\nНе больше '+MAX_FACTS+' строк. Пиши по-русски, коротко. Если пользователь говорит о себе, субъект — «Я». Что было раньше и уже не так — начни связь со слова «раньше» (Я | раньше жил в | Москва). Если сказано, с какого времени, допиши в объект «(с 2021)». Мнения и оценки пиши через «считает» (Я | считает | …). Если нечего записать, ответь NONE.'},
-  {role:'user',content:text+known}]});
+  {role:'user',content:dialogText(context)+text+known}]});
  return {facts:parseLines(msg.content),...parseOps(msg.content,similar)};
+}
+// Реплики перед сообщением: только чтобы понять, о ком «он/она» и на какой вопрос короткий ответ.
+function dialogText(context){
+ const lines=(Array.isArray(context)?context:[]).filter(m=>m&&typeof m.text==='string'&&m.text.trim()).slice(-3).map(m=>(m.role==='assistant'?'Ассистентка: ':'Человек: ')+m.text.slice(0,600));
+ return lines.length?'Перед этим в разговоре (только чтобы понять, о ком речь и на какой вопрос отвечают; сами факты бери из сообщения человека, «он/она» заменяй на имя):\n'+lines.join('\n')+'\n\nСообщение человека:\n':'';
 }
 function parseOps(text,similar){
  const updates=[],retire=[];
@@ -62,23 +67,24 @@ function similarFacts(text,limit=10){
  try{return memory.factsById(memory.searchIndex(String(text).slice(0,300),{kinds:['fact'],limit}).map(h=>h.ref)).slice(0,limit)}catch{return []}
 }
 // Уже известное не предлагаем повторно.
+// Возвращает сам известный факт (повтор подтверждает его, evidence.js) или null.
 function known(f){
- try{const k=x=>String(x).toLocaleLowerCase();return memory.queryFacts({subject:f.subject,limit:500}).some(x=>!x.valid_to&&k(x.predicate)===k(f.predicate)&&k(x.object)===k(f.object))}catch{return false}
+ try{const k=x=>String(x).toLocaleLowerCase();return memory.queryFacts({subject:f.subject,limit:500}).find(x=>!x.valid_to&&k(x.predicate)===k(f.predicate)&&k(x.object)===k(f.object))||null}catch{return null}
 }
-// input: {text, source?, domain?}. Опции: bank — банк навыков для пробы (без записи статистики), dry — не считать применение.
+// input: {text, source?, domain?, context?:[{role,text}]}. Опции: bank — банк навыков для пробы (без записи статистики), dry — не считать применение.
 async function extract(input,{bank=null,dry=false}={}){
  if(!input||typeof input!=='object'||typeof input.text!=='string'||!input.text.trim())throw new TypeError('Invalid text');
  const text=input.text.slice(0,MAX_TEXT);
  const domain=['chat','note','task'].includes(input.domain)?input.domain:memskills.domainOf(input.source);
  let facts,source='rules',note,updates=[],retire=[],used=[];
  if(llm.config()){try{
-  const similar=similarFacts(text),skills=memskills.select(text,{domain,similar:similar.length,bank});
-  const r=await byModel(text,skills,similar);facts=r.facts;updates=r.updates;retire=r.retire;used=skills.map(s=>s.name);source='model';
+  const similar=similarFacts(text),skills=memskills.select((Array.isArray(input.context)?input.context.map(m=>m&&m.text||'').join(' ').slice(-600)+' ':'')+text,{domain,similar:similar.length,bank});
+  const r=await byModel(text,skills,similar,input.context);facts=r.facts;updates=r.updates;retire=r.retire;used=skills.map(s=>s.name);source='model';
   if(!dry)memskills.recordUse(used,typeof input.source==='string'?input.source:null);
  }catch(e){note='Модель не ответила, разобрала по правилам';console.error('Learn model failed:',e.name)}}
  if(!facts)facts=byRules(text);
- const seen=new Set(),out=[];
- for(const f of facts){const key=[f.subject,f.predicate,f.object].join('|').toLocaleLowerCase();if(seen.has(key)||known(f))continue;seen.add(key);out.push(f);if(out.length>=MAX_FACTS)break}
- return {facts:out,source,domain,skills:used,updates:updates.map(u=>({id:u.old.id,old:{subject:u.old.subject,predicate:u.old.predicate,object:u.old.object},fact:u.fact})),retire:retire.map(f=>({id:f.id,subject:f.subject,predicate:f.predicate,object:f.object})),...(note?{note}:{})};
+ const seen=new Set(),out=[],confirmed=[];
+ for(const f of facts){const key=[f.subject,f.predicate,f.object].join('|').toLocaleLowerCase();if(seen.has(key))continue;seen.add(key);const k=known(f);if(k){if(!confirmed.includes(k.id))confirmed.push(k.id);continue}out.push(f);if(out.length>=MAX_FACTS)break}
+ return {facts:out,confirmed,source,domain,skills:used,updates:updates.map(u=>({id:u.old.id,old:{subject:u.old.subject,predicate:u.old.predicate,object:u.old.object},fact:u.fact})),retire:retire.map(f=>({id:f.id,subject:f.subject,predicate:f.predicate,object:f.object})),...(note?{note}:{})};
 }
 module.exports={extract,byRules,parseLines,parseOps};

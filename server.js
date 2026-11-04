@@ -25,6 +25,11 @@ const aliases=require('./aliases');
 const memskills=require('./memskills');
 const selfstudy=require('./selfstudy');
 const core=require('./core');
+const soul=require('./soul');
+const psyche=require('./psyche');
+const selfrules=require('./selfrules');
+const mytools=require('./mytools');
+const selfcode=require('./selfcode');
 const onboarding=require('./onboarding');
 const review=require('./review');
 const atlas=require('./atlas');
@@ -76,7 +81,7 @@ async function handleBrain(req,res,p,url){
    for(const f of memory.factsById(fids))title.set('fact:'+f.id,f.subject+' — '+f.predicate+' → '+f.object);
    const end=(k,r)=>({kind:k,id:r,title:title.get(k+':'+r)||null});
    return respond(res,200,{diary:reflect.diary(limitParam(url,20,200)),insights:reflect.insightList(20),skills:skills.list(),preferences:preferences.list(),summaries:reflect.summaries().slice(0,30).map(({factIds,...t})=>({...t,size:factIds.length})),
-    links:{count:links.count(),recent:recent.map(l=>({type:l.type,a:end(l.a_kind,l.a_ref),b:end(l.b_kind,l.b_ref),evidence:l.evidence,source:l.source}))},working:working.snapshot(),reflect:reflect.status(),growth:{...growth.stats(),cards:growth.cards(8)},memskills:mskillView(),core:core.list(),onboarding:onboarding.status(),review:review.status()});
+    links:{count:links.count(),recent:recent.map(l=>({type:l.type,a:end(l.a_kind,l.a_ref),b:end(l.b_kind,l.b_ref),evidence:l.evidence,source:l.source}))},working:working.snapshot(),reflect:reflect.status(),growth:{...growth.stats(),cards:growth.cards(8)},memskills:mskillView(),core:core.list(),soul:soul.view(),onboarding:onboarding.status(),review:review.status()});
   }
   if(req.method==='GET'&&p==='/api/brain/memskills/organs')return respond(res,200,memskills.list({all:true}).map(s=>({name:s.name,title:s.title,status:s.status,uses:s.uses,value:s.value,version:s.version,action:s.action})));
   if(req.method==='GET'&&p==='/api/brain/memskills')return respond(res,200,{...mskillView(),misses:memskills.queue({limit:50}),selftests:selfstudy.selftests(50),windows:selfstudy.watchInfo().windows});
@@ -94,6 +99,22 @@ async function handleBrain(req,res,p,url){
   // Сердцевина: блоки «Кто я», «Кто ты», «Как мы общаемся», их версии и возврат (core.js).
   if(req.method==='GET'&&p==='/api/brain/core')return respond(res,200,core.list().map(b=>({...b,history:core.history(b.name,10)})));
   if(req.method==='POST'&&p==='/api/brain/core'){const input=await body(req);if(typeof input?.body!=='string')return respond(res,400,{error:'Invalid body'});return respond(res,200,core.write(input.name,input.body,{source:'user',reason:'поправлено вручную'}))}
+  // Душа: ступень, черты, настроение и дорогие моменты (soul.js); можно начать рост заново.
+  if(req.method==='GET'&&p==='/api/brain/soul')return respond(res,200,soul.view());
+  if(req.method==='POST'&&p==='/api/brain/soul/reset')return respond(res,200,soul.reset());
+  // Внутренний мир и рост себя (psyche.js, selfrules.js, mytools.js, selfcode.js). Код меняется только по кнопке хозяина.
+  if(req.method==='GET'&&p==='/api/brain/psyche')return respond(res,200,{soul:soul.view(),...psyche.view(),rules:selfrules.rules(),tune:selfrules.tuneView(),tools:mytools.list(),code:selfcode.view()});
+  if(req.method==='POST'&&p.startsWith('/api/brain/psyche/')){
+   const input=await body(req)||{},act=p.slice('/api/brain/psyche/'.length);
+   try{
+    const r=act==='anchors'?psyche.setAnchors(input.anchors):act==='letter-read'?psyche.markLetterRead(input.id):act==='taste-remove'?psyche.removeTaste(input.id):act==='goal-remove'?psyche.removeGoal(input.id)
+     :act==='rule-remove'?selfrules.removeRule(input.id):act==='tool-remove'?mytools.remove(input.name)
+     :act==='code-apply'?selfcode.apply(input.id):act==='code-reject'?selfcode.reject(input.id):act==='code-rollback'?selfcode.rollback(input.id):undefined;
+    if(r===undefined)return respond(res,404,{error:'Not found'});
+    if(r===null||r===false)return respond(res,404,{error:'Not found'});
+    return respond(res,200,{ok:true,result:r});
+   }catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}
+  }
   if(req.method==='POST'&&p==='/api/brain/core/restore'){const input=await body(req);const r=core.restore(input?.name,input?.version);return r?respond(res,200,r):respond(res,404,{error:'Not found'})}
   // Знакомство: пропустить пункт, закончить или начать заново.
   if(req.method==='POST'&&p==='/api/brain/onboarding'){const input=await body(req),a=input?.action;
@@ -105,10 +126,10 @@ async function handleBrain(req,res,p,url){
   // Мышление: поток мыслей, настройки, догадки, вопросы, забытое, предложения, рост по дням.
   if(req.method==='GET'&&p==='/api/brain/thoughts')return respond(res,200,{items:thoughts.since(Number(url.searchParams.get('since'))||0,limitParam(url,60,200)),settings:thoughts.settings(),labels:thoughts.LABELS});
   if(req.method==='POST'&&p==='/api/brain/settings'){const input=await body(req);return respond(res,200,thoughts.setSetting(input?.key,input?.value))}
-  if(req.method==='GET'&&p==='/api/brain/thinking')return respond(res,200,{guesses:guesses.list(null,30),guessStats:guesses.stats(),questions:curiosity.list(null,30),questionStats:curiosity.stats(),forgotten:strength.forgotten({limit:20}),strength:strength.stats(),suggestions:initiative.list(null,20),suggestionStats:initiative.stats(),settings:thoughts.settings(),labels:thoughts.LABELS});
+  if(req.method==='GET'&&p==='/api/brain/thinking')return respond(res,200,{plans:require('./plans').upcoming(10),tune:require('./tune').view(),vectors:require('./factvec').status(),guesses:guesses.list(null,30),guessStats:guesses.stats(),questions:curiosity.list(null,30),questionStats:curiosity.stats(),forgotten:strength.forgotten({limit:20}),strength:strength.stats(),suggestions:initiative.list(null,20),suggestionStats:initiative.stats(),settings:thoughts.settings(),labels:thoughts.LABELS});
   if(req.method==='POST'&&p==='/api/brain/guesses/answer'){const input=await body(req);if(typeof input?.yes!=='boolean')return respond(res,400,{error:'Invalid value'});const r=guesses.answer(input.id,input.yes);return r?respond(res,200,r):respond(res,404,{error:'Not found'})}
   if(req.method==='POST'&&p==='/api/brain/questions/dismiss'){const input=await body(req);return curiosity.dismiss(input?.id)?respond(res,200,{ok:true}):respond(res,404,{error:'Not found'})}
-  if(req.method==='POST'&&p==='/api/brain/forgotten/restore'){const input=await body(req);const ids=Array.isArray(input?.ids)?input.ids.filter(x=>typeof x==='string').slice(0,50):[];const r=strength.remember(ids);if(r.length)thoughts.add('wake','Вы вернули забытое: '+r.map(f=>f.subject+' — '+f.predicate+' '+f.object).slice(0,3).join('; '));return respond(res,200,{restored:r.length})}
+  if(req.method==='POST'&&p==='/api/brain/forgotten/restore'){const input=await body(req);const ids=Array.isArray(input?.ids)?input.ids.filter(x=>typeof x==='string').slice(0,50):[];const r=strength.remember(ids);if(r.length)thoughts.add('wake','Хозяин вернул забытое: '+r.map(f=>f.subject+' — '+f.predicate+' '+f.object).slice(0,3).join('; '));return respond(res,200,{restored:r.length})}
   if(req.method==='GET'&&p==='/api/brain/initiative'){const ws=await storage.load();if(thoughts.on('initiative'))initiative.scan(ws);return respond(res,200,{items:thoughts.on('initiative')?initiative.fresh(3):[],on:thoughts.on('initiative')})}
   if(req.method==='POST'&&p==='/api/brain/initiative/shown'){const input=await body(req);return respond(res,200,{ok:initiative.shown(input?.id)})}
   if(req.method==='POST'&&p==='/api/brain/initiative/accept'){const input=await body(req);const r=await initiative.accept(input?.id,chatContext);return r?respond(res,200,r):respond(res,404,{error:'Not found'})}
@@ -163,14 +184,44 @@ async function indexWorkspace(){const ws=await storage.load();memory.syncRecords
 function ingestNoteFacts(item){if(!item.content||!item.content.includes('FACT:'))return;try{memory.extractFacts(item.content,'note:'+item.id)}catch(e){console.error('Fact ingestion failed:',e.name)}}
 // Общие операции с записями: используются API и инструментами аватара.
 // Дела: category (personal|work), due (ГГГГ-ММ-ДД), time (ЧЧ:ММ), priority (low|normal|high). Заметки: category и pinned.
+// Категория — это список планера: встроенные «Личное» (personal) и «Дела» (work) или свой список из workspace.lists.
 const CATEGORIES=['personal','work'],PRIORITIES=['low','normal','high'];
+const LIST_COLOR=/^#[0-9a-f]{6}$/i,MAX_LISTS=50;
+function knownCategory(id){return CATEGORIES.includes(id)||(typeof id==='string'&&(storage.peek().lists||[]).some(l=>l.id===id&&!CATEGORIES.includes(l.id)))}
+function listFields(input){
+ const out={};
+ if('title' in input){if(typeof input.title!=='string'||!input.title.trim()||input.title.trim().length>40)throw new TypeError('Название списка: от 1 до 40 символов');out.title=input.title.trim()}
+ if('color' in input){if(typeof input.color!=='string'||!LIST_COLOR.test(input.color))throw new TypeError('Цвет: #RRGGBB');out.color=input.color.toLowerCase()}
+ return out;
+}
+// Списки: свои создаются и удаляются; встроенные можно только переименовать и перекрасить.
+function addList(input){
+ const fields=listFields(input);if(!fields.title)throw new TypeError('Название списка: от 1 до 40 символов');
+ return storage.mutate(data=>{data.lists??=[];
+  if(data.lists.filter(l=>!CATEGORIES.includes(l.id)).length>=MAX_LISTS)throw new TypeError('Не больше '+MAX_LISTS+' списков');
+  const item={id:'l-'+require('node:crypto').randomUUID().slice(0,8),color:'#ee8a3c',...fields,createdAt:new Date().toISOString()};
+  data.lists.push(item);return item});
+}
+function updateList(id,input){
+ const fields=listFields(input);
+ return storage.mutate(data=>{data.lists??=[];let found=data.lists.find(l=>l.id===id);
+  if(!found&&CATEGORIES.includes(id)){found={id};data.lists.unshift(found)}
+  if(!found)return null;Object.assign(found,fields);found.updatedAt=new Date().toISOString();return {...found}});
+}
+// Удаление своего списка: его дела и заметки переходят в «Личное», ничего не теряется.
+function removeList(id){
+ if(CATEGORIES.includes(id))throw new TypeError('Встроенный список нельзя удалить');
+ return storage.mutate(data=>{const list=data.lists||[],i=list.findIndex(l=>l.id===id);if(i<0)return null;
+  let moved=0;for(const c of ['tasks','notes'])for(const x of data[c]||[])if(x.category===id){x.category='personal';moved++}
+  list.splice(i,1);return {ok:true,id,moved}});
+}
 function validDate(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return false;const d=new Date(v+'T00:00:00Z');return !Number.isNaN(d.getTime())&&d.toISOString().slice(0,10)===v}
 // Проверяет и возвращает только разрешённые поля; бросает TypeError с понятным текстом.
 function itemFields(collection,input){
  const out={};
  if('title' in input){if(typeof input.title!=='string'||!input.title.trim()||input.title.length>200)throw new TypeError('Название: от 1 до 200 символов');out.title=input.title.trim()}
  if('content' in input){if(input.content!=null&&typeof input.content!=='string')throw new TypeError('Invalid content');out.content=String(input.content||'').slice(0,20000)}
- if('category' in input){if(!CATEGORIES.includes(input.category))throw new TypeError('Категория: personal или work');out.category=input.category}
+ if('category' in input){if(!knownCategory(input.category))throw new TypeError('Категория: personal, work или id своего списка');out.category=input.category}
  if(collection==='tasks'){
   if('done' in input){if(typeof input.done!=='boolean')throw new TypeError('Invalid done');out.done=input.done}
   if('due' in input){if(input.due===null||input.due==='')out.due=null;else if(typeof input.due==='string'&&validDate(input.due))out.due=input.due;else throw new TypeError('Дата: ГГГГ-ММ-ДД')}
@@ -215,6 +266,7 @@ async function handleLlm(req,res,p){
   if(req.method==='POST'&&p==='/api/llm')return respond(res,200,llm.save(await body(req)));
   if(req.method==='POST'&&p==='/api/llm/models')return respond(res,200,{models:await llm.listModels()});
   if(req.method==='POST'&&p==='/api/llm/test')return respond(res,200,await llm.test());
+  if(req.method==='POST'&&p==='/api/llm/embed-test')return respond(res,200,await llm.embedTest());
   return respond(res,404,{error:'Not found'});
  }catch(e){
   if(e instanceof SyntaxError)throw e;
@@ -313,8 +365,14 @@ if(req.method==='POST'&&p==='/api/parse'){const input=await body(req);if(!input|
 if(req.method==='GET'&&p==='/api/workspace')return respond(res,200,await storage.load());
 if(p==='/api/items'&&['POST','PATCH','DELETE'].includes(req.method)){
 const input=await body(req);
-if(!input||typeof input!=='object'||Array.isArray(input)||!['notes','tasks'].includes(input.collection))return respond(res,400,{error:'Invalid collection'});
+if(!input||typeof input!=='object'||Array.isArray(input)||!['notes','tasks','lists'].includes(input.collection))return respond(res,400,{error:'Invalid collection'});
 try{
+ if(input.collection==='lists'){
+  if(req.method==='POST')return respond(res,201,addList(input));
+  if(typeof input.id!=='string')return respond(res,400,{error:'Invalid id'});
+  const out=req.method==='DELETE'?removeList(input.id):updateList(input.id,input);
+  return out?respond(res,200,out):respond(res,404,{error:'Not found'});
+ }
  if(req.method==='POST'){const {collection,title,content,id:_id,createdAt:_c,...extra}=input;if(typeof title!=='string')return respond(res,400,{error:'Invalid item'});return respond(res,201,addItem(collection,title,content,extra))}
  if(typeof input.id!=='string')return respond(res,400,{error:'Invalid id'});
  if(req.method==='DELETE'){const removed=removeItem(input.collection,input.id);return removed?respond(res,200,{ok:true,id:input.id}):respond(res,404,{error:'Not found'})}
@@ -327,4 +385,5 @@ return respond(res,404,{error:'Not found'})
 server.on('error',e=>{console.error('Server error:',e.code||e.name);process.exitCode=1});
 if(require.main===module)Promise.resolve().then(()=>ensureDisk()).then(()=>storage.connect()).then(()=>server.listen(PORT,HOST,()=>{console.log('Tenmayurika: http://'+HOST+':'+PORT);syncWorker.run().catch(console.error);const timer=setInterval(()=>{syncWorker.run().catch(console.error);chatlog.learnPending().catch(console.error);idleReflect();libraryQueue.status().then(s=>s.enabled?libraryQueue.scan().then(()=>libraryQueue.run()):null).catch(e=>console.error('Library queue failed:',e.name))},60000);timer.unref();chatlog.learnPending().catch(console.error);startBackupSchedule();const maintenanceTimer=setInterval(()=>{try{ensureDisk();maintenance.maintenance()}catch(e){console.error('Disk maintenance failed:',e.code||e.name)}},3600000);maintenanceTimer.unref()})).catch(e=>{console.error('Database connection failed:',e.message);process.exitCode=1});
 module.exports={server};
+
 
