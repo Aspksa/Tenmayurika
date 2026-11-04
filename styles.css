@@ -1370,3 +1370,7 @@ input:checked+.switch::after{background:var(--ember-hot)}
 .brain-guardian-current,.brain-guardian-history{display:grid;gap:.35rem;overflow-wrap:anywhere}
 .brain-guardian-history{border-top:1px solid rgba(255,255,255,.1);padding-top:.6rem}
 .brain-guardian-error{margin:0;color:#ff9a8e;font-size:.8rem;overflow-wrap:anywhere}
+
+/* Агенты-огоньки вокруг хвостов аватара (wisps.js) */
+.wisps{position:fixed;inset:0;width:100vw;height:100vh;z-index:901;pointer-events:none}
+.wisp-label{position:fixed;left:0;top:0;z-index:902;pointer-events:none;padding:.35em .7em;border-radius:999px;font-size:.8rem;white-space:nowrap;color:#fff;background:rgba(10,8,14,.78);border:1px solid var(--wisp);box-shadow:0 0 14px var(--wisp);text-shadow:0 0 6px var(--wisp)}
