@@ -10,6 +10,7 @@
 // Если ничего не выжило, ничего не меняется и в дневник не пишется. Без модели разбор — по правилам:
 // поправленные ответы становятся уроками, «Кто ты» собирается из фактов.
 const memory=require('./memory-core');
+const agents=require('./agents');
 const chatlog=require('./chatlog');
 const experience=require('./experience');
 const preferences=require('./preferences');
@@ -49,6 +50,8 @@ async function run({complete=null,reason='messages'}={}){
   const {rows,state:s}=pending();
   const mark={lastId:rows.length?rows[rows.length-1].id:s.lastId,at:new Date().toISOString(),runs:(s.runs||0)+1};
   if(!rows.length){setState('review',{...s,at:mark.at});return {reason,changed:false,reviewed:0}}
+  const job=agents.start('reviewer','разбирает разговор: '+rows.length+' сообщений');
+  try{
   const since=rows[0].at,fixes=experience.list(200).filter(e=>e.at>=since&&e.feedback==='fix');
   let plan={lessons:[],prefs:[],facts:[],conflicts:[],human:[]},source='rules';
   if(complete){
@@ -86,7 +89,11 @@ async function run({complete=null,reason='messages'}={}){
    const why=reason==='compaction'?'длинный разговор сжался':'прошло '+rows.filter(r=>r.role==='user').length+' сообщений';
    reflect.note('Разобрала разговор ('+why+'): '+(parts.join(', ')||'изменений в памяти нет')+(done.conflicts.length?'. Спорит с памятью: '+done.conflicts.join('; '):'')+'.',{kind:'review',reason,source,...done,messages:rows.length});
   }
+  agents.finish(job,changed?'Нашла: '+[done.lessons&&'уроков '+done.lessons,done.prefs&&'пожеланий '+done.prefs,done.facts&&'фактов '+done.facts,done.human&&'о тебе '+done.human,done.conflicts.length&&'противоречий '+done.conflicts.length].filter(Boolean).join(', '):'Ничего нового, память в порядке');
+  // Противоречия передаёт Исследователю: он проверяет их по фактам.
+  for(const c of done.conflicts.slice(0,3))agents.record('researcher','проверяет противоречие: '+c,'Записала в дневник Мозга — разберём вместе',{from:'reviewer'});
   return {reason,source,changed,reviewed:rows.length,...done};
+  }catch(e){agents.finish(job,'Не получилось: '+(e?.message||'ошибка'),false);throw e}
  })();
  try{return await running}finally{running=null}
 }

@@ -1411,3 +1411,34 @@ input:checked+.switch::after{background:var(--ember-hot)}
 .agent .switch{border-radius:999px}
 .agent .switch::after,.agent .switch::before{border-radius:50%}
 .agent input:checked+.switch{background:color-mix(in srgb,var(--agent) 55%,#111);border-color:var(--agent);box-shadow:0 0 10px color-mix(in srgb,var(--agent) 50%,transparent)}
+/* Агенты: рост, журнал, формы, свой агент */
+.agent-grow{display:grid;grid-template-columns:auto 1fr;gap:.25rem .7rem;align-items:center}
+.agent-grow small{grid-column:1/-1;color:var(--muted);font-size:.76rem}
+.agent-lv{font-size:.8rem;font-weight:600;color:color-mix(in srgb,var(--agent) 70%,#fff)}
+.agent-bar{height:.45rem;border-radius:999px;background:rgba(255,255,255,.07);overflow:hidden}
+.agent-bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,color-mix(in srgb,var(--agent) 50%,transparent),var(--agent));box-shadow:0 0 10px var(--agent)}
+.agent-body h5{margin:0 0 .35rem;font-size:.74rem;font-weight:600;letter-spacing:.06em;color:color-mix(in srgb,var(--agent) 75%,#fff)}
+.agent-log{margin:0;padding:0;list-style:none;display:grid;gap:.35rem}
+.agent-log li{display:grid;gap:.1rem;padding:.4rem .6rem;border-radius:10px;background:rgba(255,255,255,.03);font-size:.84rem}
+.agent-log small{color:var(--muted);font-size:.78rem}
+.agent-body>div>p{margin:0;font-size:.84rem;color:var(--muted)}
+.agent-shapes{display:flex;flex-wrap:wrap;gap:.35rem}
+.agent-shape{width:2.2rem;height:2.2rem;padding:0;display:grid;place-items:center;border-radius:50%;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);font-size:1rem;box-shadow:none}
+.agent-shape[aria-checked="true"]{border-color:var(--agent);background:color-mix(in srgb,var(--agent) 22%,transparent);box-shadow:0 0 12px -2px var(--agent)}
+.agent-add{display:flex;align-items:center;gap:.85rem;width:100%;padding:.8rem 1rem;text-align:left;color:inherit;border-style:dashed;--agent:#ffd36b;cursor:pointer}
+.agent-add:hover{border-color:var(--agent)}
+.agent-tpls{display:grid;gap:.5rem;grid-template-columns:repeat(auto-fit,minmax(9.5rem,1fr))}
+.agent-tpl{display:grid;gap:.15rem;justify-items:start;text-align:left;padding:.6rem .75rem;border-radius:14px;border:1px solid color-mix(in srgb,var(--agent) 35%,transparent);background:color-mix(in srgb,var(--agent) 8%,transparent);color:inherit;box-shadow:none}
+.agent-tpl.on{border-color:var(--agent);box-shadow:0 0 14px -4px var(--agent)}
+.agent-tpl span{font-size:1.1rem}.agent-tpl strong{font-size:.86rem}.agent-tpl small{color:var(--muted);font-size:.74rem}
+.agent-fields{display:grid;gap:.6rem;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr))}
+.agent-fields label{display:grid;gap:.25rem;font-size:.8rem;color:var(--muted)}
+.agent-fields .wide{grid-column:1/-1}
+.agent-fields input,.agent-fields select,.agent-fields textarea{border-radius:10px;font:inherit;font-size:.88rem}
+.agent-form .agent-body{padding-left:1rem}
+.agent-err{color:#ff9a8e;margin:0}
+.agent-err:empty{display:none}
+/* Карточки агентов в чате */
+.msg.agent-note{--agent:#ffd36b;white-space:pre-line;border-radius:14px;border:1px solid color-mix(in srgb,var(--agent) 45%,transparent);background:linear-gradient(90deg,color-mix(in srgb,var(--agent) 14%,transparent),rgba(14,12,20,.6));box-shadow:inset 3px 0 0 var(--agent),0 0 18px -10px var(--agent);font-size:.9em}
+.msg.agent-note .msg-tag{color:color-mix(in srgb,var(--agent) 70%,#fff)}
+.msg.assistant.agent-note{padding:.7em 1em .6em 1.2em}

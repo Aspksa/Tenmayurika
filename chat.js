@@ -27,6 +27,7 @@ const selfcode=require('./selfcode');
 const onboarding=require('./onboarding');
 const convo=require('./convo');
 const review=require('./review');
+const agents=require('./agents');
 const atlas=require('./atlas');
 const dates=require('./dates');
 const factMeta=require('./meta');
@@ -637,8 +638,8 @@ async function modelReply(name,message,all,facts,notes,enabled,impl,result,past=
  // Модель исчерпала лимит раундов: честно показываем, что вышло у каждого инструмента.
  return result.outcomes.length?'Не успела закончить ответ. Результаты инструментов:\n'+result.outcomes.map(o=>(o.ok?'• ':'✗ ')+o.text).join('\n'):'Не удалось завершить ответ.';
 }
-const pub=({done,outcomes,secrets,thinking,...rest})=>{const t=thinking&&Object.keys(thinking).length?{thinking}:{};return secrets.length?{...rest,...t,secret:true}:{...rest,...t}};
-function track(result,fn,out){result.tools.push(fn);if(out.ok===false)result.failed=true;result.outcomes.push({ok:out.ok!==false,text:out.text});if(out.ok!==false)result.done.push(out.text);if(out.secret)result.secrets.push(out.text);if(out.changed)result.changed=true;if(out.action)result.actions.push(out.action);
+const pub=({done,outcomes,secrets,thinking,silent:_silent,...rest})=>{const t=thinking&&Object.keys(thinking).length?{thinking}:{};return secrets.length?{...rest,...t,secret:true}:{...rest,...t}};
+function track(result,fn,out){result.tools.push(fn);if(!result.silent){try{agents.fromTool(OWNER[fn],TOOLS[OWNER[fn]]?.label||fn,out.secret?'':out.text,out.ok!==false)}catch(e){console.error('Agents note failed:',e.name)}}if(out.ok===false)result.failed=true;result.outcomes.push({ok:out.ok!==false,text:out.text});if(out.ok!==false)result.done.push(out.text);if(out.secret)result.secrets.push(out.text);if(out.changed)result.changed=true;if(out.action)result.actions.push(out.action);
  // Явный поиск по памяти тоже «вспоминание»: «Мозг» подсвечивает найденное и считает его силу.
  if(out.recalled){const r=result.recalled||(result.recalled={facts:[],notes:[]});for(const k of ['facts','notes'])for(const id of out.recalled[k])if(!r[k].includes(id))r[k].push(id)}}
 
@@ -732,7 +733,7 @@ async function answer(input,message,ctx){
  const name=typeof input.avatar==='string'&&input.avatar.trim()?input.avatar.trim().slice(0,40):'Юрика';
  // Без списка — все инструменты включены; с пустым списком — все выключены.
  const enabled=new Set(Array.isArray(input.tools)?input.tools.filter(id=>TOOL_IDS.includes(id)):TOOL_IDS);
- const impl=makeTools(ctx),result={tools:[],actions:[],changed:false,done:[],outcomes:[],secrets:[],thinking:{}};
+ const impl=makeTools(ctx),result={tools:[],actions:[],changed:false,done:[],outcomes:[],secrets:[],thinking:{},silent:!!input.agentRun};
  const command=parseCommand(message);
  if(command){
   if(command.help)return {reply:helpText(enabled),source:'tool',...pub(result)};
@@ -796,7 +797,7 @@ function parseTask(text){
  const args=m?taskArgs(m[1]+(/^(работа|по работе)/i.test(t)?' рабоч':''),m[2]):taskArgs('',t);
  return {title:args.title||t,category:args.category||null,priority:args.priority||null,due:args.due||null,time:args.time||null};
 }
-module.exports={modelFailure,reply,parseCommand,parseTask,memoryBlock,TOOLS};
+module.exports={modelFailure,reply,answer,parseCommand,parseTask,memoryBlock,TOOLS};
 
 
 
