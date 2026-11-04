@@ -9,6 +9,7 @@ const crypto=require('node:crypto');
 const fs=require('node:fs');
 const path=require('node:path');
 const {DatabaseSync}=require('node:sqlite');
+const usefulness=require('./usefulness');
 const DB=process.env.TENMAYURIKA_MEMORY_DB?path.resolve(process.env.TENMAYURIKA_MEMORY_DB):path.join(__dirname,'data','tenmayurika.sqlite');
 const KEEP=5000,FEEDBACK_WINDOW_MS=30*60*1000;
 // Служебные слова не говорят о смысле вопроса.
@@ -25,6 +26,8 @@ function open(){
  feedback TEXT, correction TEXT
  );
  CREATE INDEX IF NOT EXISTS memory_experience_at ON memory_experience(at);`);
+ // Навыки, которые аватар применил в этом эпизоде (их оценка — оценка навыка).
+ if(!db.prepare('PRAGMA table_info(memory_experience)').all().some(c=>c.name==='skills'))db.exec("ALTER TABLE memory_experience ADD COLUMN skills TEXT NOT NULL DEFAULT '[]'");
  return db;
 }
 // Грубая основа слова (первые 5 букв): «Анны», «Анне», «Анна» совпадут без морфологии.
@@ -32,15 +35,15 @@ function stems(text){
  return [...new Set(String(text||'').toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w=>w.length>=3&&!STOP.has(w)).map(w=>w.slice(0,5)))].slice(0,12);
 }
 const parse=(s,d)=>{try{return JSON.parse(s)}catch{return d}};
-function row(r){return {id:r.id,at:r.at,question:r.question,understood:r.understood,recalled:parse(r.recalled,{facts:[],notes:[]}),tools:parse(r.tools,[]),answer:r.answer,source:r.source,ok:!!r.ok,feedback:r.feedback||null,correction:r.correction||null}}
+function row(r){return {id:r.id,at:r.at,question:r.question,understood:r.understood,recalled:parse(r.recalled,{facts:[],notes:[]}),tools:parse(r.tools,[]),answer:r.answer,source:r.source,ok:!!r.ok,feedback:r.feedback||null,correction:r.correction||null,skills:parse(r.skills,[])}}
 
 function record(e){
  const question=String(e.question||'').trim().slice(0,2000);if(!question)return null;
  const id=crypto.randomUUID(),db=open();
  try{
   const recalled={facts:(e.recalled?.facts||[]).slice(0,20),notes:(e.recalled?.notes||[]).slice(0,20)};
-  db.prepare('INSERT INTO memory_experience(id,at,question,stems,understood,recalled,tools,answer,source,ok) VALUES(?,?,?,?,?,?,?,?,?,?)')
-   .run(id,new Date().toISOString(),question,stems(question).join(' '),String(e.understood||'').slice(0,300),JSON.stringify(recalled),JSON.stringify([...new Set(e.tools||[])].slice(0,12)),String(e.answer||'').slice(0,400),String(e.source||''),e.ok===false?0:1);
+  db.prepare('INSERT INTO memory_experience(id,at,question,stems,understood,recalled,tools,answer,source,ok,skills) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+   .run(id,new Date().toISOString(),question,stems(question).join(' '),String(e.understood||'').slice(0,300),JSON.stringify(recalled),JSON.stringify([...new Set(e.tools||[])].slice(0,12)),String(e.answer||'').slice(0,400),String(e.source||''),e.ok===false?0:1,JSON.stringify((e.skills||[]).filter(x=>typeof x==='string').slice(0,5)));
   db.prepare('DELETE FROM memory_experience WHERE id IN (SELECT id FROM memory_experience ORDER BY at DESC LIMIT -1 OFFSET ?)').run(KEEP);
   return id;
  }finally{db.close()}
@@ -58,14 +61,21 @@ function similar(question,limit=3){
    .slice(0,limit).map(x=>row(x.r));
  }finally{db.close()}
 }
+// Подписчики на оценку эпизода (навыки считают свои подтверждения и поправки).
+const listeners=[];
+function onFeedback(fn){if(typeof fn==='function'&&!listeners.includes(fn))listeners.push(fn)}
 function feedback(id,kind,correction){
  if(typeof id!=='string'||!id||id.length>100)throw new TypeError('Invalid id');
  if(!['ok','fix'].includes(kind))throw new TypeError('Invalid feedback');
  const db=open();
  try{
   const text=typeof correction==='string'&&correction.trim()?correction.trim().slice(0,1000):null;
-  const r=db.prepare('UPDATE memory_experience SET feedback=?,correction=COALESCE(?,correction) WHERE id=?').run(kind,kind==='fix'?text:null,id);
-  return r.changes?{id,feedback:kind}:null;
+  const prev=db.prepare('SELECT * FROM memory_experience WHERE id=?').get(id);if(!prev)return null;
+  db.prepare('UPDATE memory_experience SET feedback=?,correction=COALESCE(?,correction) WHERE id=?').run(kind,kind==='fix'?text:null,id);
+  // Оценка переходит на вспомненные записи; смена мнения снимает прежнюю оценку.
+  if(prev.feedback!==kind){const rec=parse(prev.recalled,{});try{if(prev.feedback)usefulness.rate(rec,{[prev.feedback]:-1});usefulness.rate(rec,{[kind]:1})}catch(e){console.error('Usefulness update failed:',e.name)}
+   for(const fn of listeners)try{fn(row(prev),kind,prev.feedback||null)}catch(e){console.error('Feedback listener failed:',e.name)}}
+  return {id,feedback:kind,previous:prev.feedback||null,episode:row(prev)};
  }finally{db.close()}
 }
 // Поправка или подтверждение словами в следующем сообщении относится к последнему ответу (не старше 30 минут).
@@ -91,4 +101,4 @@ function describe(e){
  return '• «'+e.question.slice(0,120)+'»'+(e.understood?' → поняла как: '+e.understood:'')+(found?'; нашла: '+found:'; ничего не нашла')+(e.tools.length?'; сделала: '+e.tools.join(', '):'')+(e.ok?'':'; ответить не вышло')
   +(e.feedback==='fix'?'; пользователь ПОПРАВИЛ'+(e.correction?': «'+e.correction.slice(0,200)+'»':''):e.feedback==='ok'?'; пользователь подтвердил':'');
 }
-module.exports={record,similar,feedback,detect,last,list,stats,describe,stems};
+module.exports={record,similar,feedback,onFeedback,detect,last,list,stats,describe,stems};

@@ -804,3 +804,7 @@ html.brain-fs-lock,html.brain-fs-lock body{overflow:hidden}
 .chat-quick[hidden]{display:none}
 .chat-form{border-top:1px solid var(--line);padding-top:.7rem}
 .chat-form textarea{min-height:0;height:2.8em;line-height:1.45;overflow-y:auto}
+/* Дневник мозга: строка с текстом и кнопкой справа */
+.brain-dia-row{display:flex;align-items:flex-start;gap:.5rem;justify-content:space-between}
+.brain-dia-row>.brain-fix-ok{flex:1;min-width:0;overflow-wrap:anywhere}
+.brain-dia-row>.brain-find{flex:1;min-width:0}
