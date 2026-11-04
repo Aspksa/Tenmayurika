@@ -16,6 +16,7 @@ async function recognize(file){
  if(busy)throw new TypeError('Распознавание уже выполняется');
  if(typeof file!=='string'||!/\.(png|jpe?g|webp|pdf)$/i.test(file))throw new TypeError('Поддерживаются PNG, JPEG, WebP и PDF');
  busy=true;let worker,task,outcome='done',failure='';const operation=activity.start('ocr',{file,phase:'Подготавливаю распознавание'});
+ async function cleanup(){try{try{if(worker)await worker.terminate()}finally{if(task)await task.destroy()}}catch(e){outcome='error';failure=e?.message||'Ошибка завершения';throw e}finally{busy=false;activity.finish(operation,outcome,failure)}}
  try{
   const full=await library.filePath(file),stat=await fs.stat(full);if(stat.size>16*1024*1024)throw new TypeError('Файл больше 16 МБ');
   await languages();const {createWorker}=require('tesseract.js');worker=await createWorker('eng+rus',1,{langPath:DATA,cacheMethod:'none'});
@@ -29,7 +30,7 @@ async function recognize(file){
   }
   return {path:file,pages};
  }catch(e){outcome='error';failure=e?.message||'Ошибка распознавания';throw e}
- finally{try{try{if(worker)await worker.terminate()}finally{if(task)await task.destroy()}}catch(e){outcome='error';failure=e?.message||'Ошибка завершения';throw e}finally{busy=false;activity.finish(operation,outcome,failure)}}
+ finally{await cleanup()}
 }
 module.exports={recognize};
 
