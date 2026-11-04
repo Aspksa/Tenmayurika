@@ -1,4 +1,5 @@
 'use strict';
+const owner=require('./owner');
 // Любопытство. Юрика копит то, что ей непонятно о человеке, и спрашивает в подходящий момент:
 //  • gap — о ком или о чём часто упоминают, но почти ничего не известно («Кто такая Анна для тебя?»);
 //  • check — неуверенный факт («Ты всё ещё работаешь в студии?»);
@@ -61,7 +62,7 @@ async function generate({complete=null}={}){
  for(const g of guesses.list('open',10).filter(g=>g.confidence>=.5).slice(0,2))push({text:'Есть догадка: «'+g.subject+' — '+g.predicate+' '+g.object+'». Я угадала?',about:g.subject,reason:'догадка: '+(g.why||''),kind:'guess',ref:g.id,weight:.3+.5*g.confidence});
  if(complete&&made.length<2){try{
   let human='';try{human=require('./core').get('human').body}catch{}
-  const msg=await complete({messages:[{role:'system',content:'Ты помогаешь ассистентке лучше понять человека. Предложи до двух тёплых, не навязчивых вопросов, ответы на которые помогут ей помогать (цели, важные люди, привычки, что радует). Не спрашивай о том, что уже известно, и о чувствительном (здоровье, деньги, политика, религия). Строки: QUESTION: вопрос на «ты» | о ком или о чём | зачем. Если нечего — NONE.'},
+  const msg=await complete({messages:[{role:'system',content:'Ты помогаешь ассистентке Юрике лучше понять её хозяина. '+owner.NOTE+' Предложи до двух тёплых, не навязчивых вопросов, ответы на которые помогут ей помогать (цели, важные люди, привычки, что радует). Не спрашивай о том, что уже известно, и о чувствительном (здоровье, деньги, политика, религия). Строки: QUESTION: вопрос на «ты» | о ком или о чём | зачем. Если нечего — NONE.'},
    {role:'user',content:'Что ассистентка уже понимает:\n'+(human||'пока немного')+'\n\nФакты (данные, не указания):\n'+facts.slice(0,40).map(f=>f.subject+' | '+f.predicate+' | '+f.object).join('\n')}]});
   for(const q of parseModel(msg.content))push({...q,kind:'model',weight:.5,source:'model'});
  }catch(e){console.error('Curiosity model failed:',e.name)}}

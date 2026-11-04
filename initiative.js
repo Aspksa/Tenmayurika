@@ -1,4 +1,5 @@
 'use strict';
+const owner=require('./owner');
 // Инициатива: Юрика сама смотрит на дела и даты и предлагает помочь, не дожидаясь вопроса.
 //  • prepare  — завтра важное дело или дело со временем: напомнить заранее?
 //  • overdue  — дело просрочено: перенести на завтра?
@@ -61,7 +62,7 @@ async function accept(id,ctx){
  if(s.kind==='overdue'&&s.data.task&&ctx?.updateTask){const due=planner.ymd(new Date(dayStart(new Date()).getTime()+DAY));await ctx.updateTask(s.data.task,{due});text='Перенесла на завтра.'}
  else if(s.kind==='birthday'&&!s.data.self&&ctx?.addItem){await ctx.addItem('tasks','Поздравить: '+s.data.who,'',{category:'personal',due:s.data.due,priority:'high'});text='Добавила дело «Поздравить: '+s.data.who+'» на '+s.data.due+'.'}
  else if(s.kind==='prepare')text='Напомню: утром дело будет в моей сводке на день.';
- mark(id,'accepted');thoughts.add('offer','Вы согласились: '+s.text+' → '+text,{id});
+ mark(id,'accepted');thoughts.add('offer','Хозяин согласился: '+s.text+' → '+text,{id});
  return {ok:true,text,changed:s.kind!=='prepare'};
 }
 // Для подсказки модели: недавно показанное (человек может ответить на него словами) и одно новое.
