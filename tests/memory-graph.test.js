@@ -14,6 +14,7 @@ test('relation types: synonyms conflict, preferences only with negation',()=>{
  assert.equal(add('Анна','любит','чай').conflicts,0);
  assert.equal(add('Анна','любит','кофе').conflicts,0);
  assert.equal(add('Анна','не любит','чай').conflicts,1);
+ assert.deepEqual(classify('не живёт в'),{...classify('живёт в'),polarity:-1});
  const c=m.conflicts().find(x=>x.newer==='не любит чай');assert.equal(c.earlier,'любит чай');
 });
 test('full-text search understands word forms and ё',()=>{
@@ -51,4 +52,7 @@ test('hybrid recall: words plus graph neighbours, with reasons',async()=>{
  for(let i=0;i<65;i++)add('Анна','знает','язык '+i);
  assert.equal((await recall('Анна',{ws:{notes:[{id:'n4',title:'День рождения',content:'Анна'}]}})).notes[0].id,'n4');
  assert.ok(m.neighborhood('Анна',2,6).facts.length<=6);
+ // Одинаковый факт из многих источников сворачивается без перебора всех пар.
+ for(let i=0;i<300;i++)add('Ира','живёт в','Омск','src'+i);
+ const t0=Date.now(),many=m.duplicates({limit:5});assert.equal(many.length,5);assert.ok(many.every(x=>x.keep.id===many[0].keep.id));assert.ok(Date.now()-t0<1500);
 });

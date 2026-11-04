@@ -304,24 +304,35 @@ function jaccard(a,b){let n=0;for(const x of a)if(b.has(x))n++;return n/(a.size+
 function duplicates({threshold=.6,limit=50}={}){
  const db=open();
  try{
-  const rows=activeFacts(db),items=rows.map(f=>{const text=predicates.entityKey(f.subject)+' | '+(f.polarity<0?'не ':'')+(f.relation||predicates.clean(f.predicate))+' | '+predicates.entityKey(f.object);return {f,text,g:grams(text),gs:grams(predicates.entityKey(f.subject)),go:grams(predicates.entityKey(f.object))}});
+  const rows=activeFacts(db),better=(a,b)=>b.confidence>a.confidence||(b.confidence===a.confidence&&b.observed_at<a.observed_at);
+  const skip=new Set(db.prepare('SELECT a,b FROM memory_not_duplicates').all().map(r=>r.a+'|'+r.b));
+  for(const c of db.prepare('SELECT earlier_id,newer_id FROM memory_conflicts').all()){skip.add(c.earlier_id+'|'+c.newer_id);skip.add(c.newer_id+'|'+c.earlier_id)}
+  const pairKey=(a,b)=>a.id<b.id?a.id+'|'+b.id:b.id+'|'+a.id,out=[];
+  // Один и тот же текст из разных источников: группа сворачивается сразу, без перебора пар.
+  // Оставить советуем более уверенный, при равенстве — более ранний (у него обычно больше истории).
+  const same=new Map();
+  for(const f of rows){const text=predicates.entityKey(f.subject)+' | '+(f.polarity<0?'не ':'')+(f.relation||predicates.clean(f.predicate))+' | '+predicates.entityKey(f.object);if(!same.has(text))same.set(text,[]);same.get(text).push(f)}
+  const reps=[];
+  for(const [text,list] of same){let keep=list[0];for(const f of list)if(better(keep,f))keep=f;reps.push({f:keep,text});
+   for(const f of list)if(f!==keep&&out.length<limit&&!skip.has(pairKey(keep,f)))out.push({score:1,keep:plain(keep),drop:plain(f)})}
+  if(out.length>=limit)return out.slice(0,limit);
+  const items=reps.map(r=>({...r,g:grams(r.text),gs:grams(predicates.entityKey(r.f.subject)),go:grams(predicates.entityKey(r.f.object))}));
   const buckets=new Map();
   items.forEach((it,i)=>{const sig=[];for(let k=0;k<HASHES;k++){let m=4294967295;for(const x of it.g){const v=h32(x,k*2654435761);if(v<m)m=v}sig.push(m)}
    for(let b=0;b<BANDS;b++){const key=b+':'+sig.slice(b*ROWS,b*ROWS+ROWS).join(',');if(!buckets.has(key))buckets.set(key,[]);buckets.get(key).push(i)}});
-  const skip=new Set(db.prepare('SELECT a,b FROM memory_not_duplicates').all().map(r=>r.a+'|'+r.b));
-  for(const c of db.prepare('SELECT earlier_id,newer_id FROM memory_conflicts').all()){skip.add(c.earlier_id+'|'+c.newer_id);skip.add(c.newer_id+'|'+c.earlier_id)}
-  const seen=new Set(),out=[];
-  for(const list of buckets.values())for(let x=0;x<list.length;x++)for(let y=x+1;y<list.length;y++){
-   const A=items[list[x]],B=items[list[y]],key=A.f.id<B.f.id?A.f.id+'|'+B.f.id:B.f.id+'|'+A.f.id;
+  const seen=new Set(),near=[];
+  // Перебор пар внутри корзин ограничен: большие корзины (одинаковые подписи у многих фактов) режутся.
+  let budget=20000;
+  for(const list of buckets.values()){if(budget<=0)break;const l=list.slice(0,60);for(let x=0;x<l.length&&budget>0;x++)for(let y=x+1;y<l.length&&budget>0;y++){
+   budget--;const A=items[l[x]],B=items[l[y]],key=pairKey(A.f,B.f);
    if(seen.has(key))continue;seen.add(key);
    if(skip.has(key)||A.f.relation!==B.f.relation||A.f.polarity!==B.f.polarity)continue;
    // Похожи и субъект, и объект: «Пермь находится в России» и «Сочи находится в России» — не дубли.
    const score=jaccard(A.g,B.g);if(score<threshold||jaccard(A.gs,B.gs)<.5||jaccard(A.go,B.go)<.5)continue;
-   // Оставить советуем более уверенный, при равенстве — более ранний (у него обычно больше истории).
-   const [keep,drop]=(B.f.confidence>A.f.confidence||(B.f.confidence===A.f.confidence&&B.f.observed_at<A.f.observed_at))?[B.f,A.f]:[A.f,B.f];
-   out.push({score:Math.round(score*100)/100,keep:plain(keep),drop:plain(drop)});
-  }
-  return out.sort((a,b)=>b.score-a.score).slice(0,limit);
+   const [keep,drop]=better(A.f,B.f)?[B.f,A.f]:[A.f,B.f];
+   near.push({score:Math.round(score*100)/100,keep:plain(keep),drop:plain(drop)});
+  }}
+  return out.concat(near.sort((a,b)=>b.score-a.score)).slice(0,limit);
  }finally{db.close()}
 }
 // Слить: лишний факт уходит в историю (valid_to), как при разборе противоречия.
