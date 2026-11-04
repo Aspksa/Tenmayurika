@@ -235,7 +235,7 @@
    if(q.send){input.value=q.send;form.requestSubmit()}else{input.value=q.insert;input.focus();const at=q.insert.indexOf(' ')+1||q.insert.length;input.setSelectionRange(q.tool==='facts'?8:q.insert.length,q.tool==='facts'?8:q.insert.length);void at;autoGrow()}
   }})));
  }
- function bubble(role,text,tag,m){const el=h('div',{class:'msg '+role},document.createTextNode(text));if(m&&m.thinking)el.append(thinkingRow(m.thinking));if(m&&m.offer)el.append(offerRow(m));const foot=[tag?h('span',{class:'msg-tag',text:tag.replace(/^⚙\s*/,'')}):null,m&&m.exp?rateRow(m):null].filter(Boolean);if(foot.length)el.append(h('div',{class:'msg-foot'},...foot));log.append(el);log.scrollTop=log.scrollHeight;return el}
+ function bubble(role,text,tag,m){const el=h('div',{class:'msg '+role+(m&&m.agent?' agent-note':'')},document.createTextNode(text));if(m&&m.thinking)el.append(thinkingRow(m.thinking));if(m&&m.offer)el.append(offerRow(m));const foot=[tag?h('span',{class:'msg-tag',text:tag.replace(/^⚙\s*/,'')}):null,m&&m.exp?rateRow(m):null].filter(Boolean);if(foot.length)el.append(h('div',{class:'msg-foot'},...foot));if(m&&m.agent){el.style.setProperty('--agent',m.agent.color||'#ffd36b');agentBubbles.set(m.agent.key,el)}log.append(el);log.scrollTop=log.scrollHeight;return el}
  // «Как думала»: план внутреннего голоса, подвопросы и сверка с памятью — свёрнуто под ответом.
  function thinkingRow(t){
   const lines=[t.split?.length?'Разбила вопрос: '+t.split.map(x=>'«'+x+'»').join(', '):'',t.plan?t.plan:'',t.check==='fixed'?'Сверила с памятью и поправила черновик.':t.check==='ok'?'Сверила с памятью: сходится.':''].filter(Boolean);
@@ -265,6 +265,26 @@
   row.append(h('button',{type:'button',title:'Поняла верно',text:'👍',onclick:()=>rate('ok')}),h('button',{type:'button',title:'Не то: поправить',text:'👎',onclick:()=>rate('fix')}));
   return row;
  }
+
+ // Агенты в чате: Юрика говорит, кого отправила, а вернувшийся огонёк приносит карточку «Готово».
+ // Такие записи не уходят модели (private) и идут подряд одной карточкой, если агент делает много дел.
+ const agentBubbles=new Map();
+ const NOM={guardian:'Хранитель',reviewer:'Разборщик',secretary:'Секретарь',researcher:'Исследователь'};
+ const ACC={guardian:'Хранителя',reviewer:'Разборщика',secretary:'Секретаря',researcher:'Исследователя'};
+ function agentEntry(entry){history.push(entry);history=history.slice(-100);store(CHAT_KEY,history);if(!chat.hidden){if(log.classList.contains('is-empty'))log.replaceChildren();log.classList.remove('is-empty');bubble('assistant',entry.text,entry.tag,entry)}}
+ function agentUpdate(entry){store(CHAT_KEY,history);const el=agentBubbles.get(entry.agent.key);if(el&&!chat.hidden){el.firstChild.textContent=entry.text}}
+ window.addEventListener('tenma:agent',e=>{const d=e.detail||{},job=d.job||{},who=ACC[d.agent]||'агента «'+d.name+'»';
+  if(d.type==='sent'){agentEntry({role:'assistant',private:true,tag:'✦ агенты',agent:{key:'job:'+job.id,id:d.agent,color:d.color},text:'✦ Отправила '+who+': '+job.task});return}
+  if(d.type!=='done')return;
+  const res=(job.ok===false?'✗ ':'✓ ')+(job.result||'готово');
+  const sent=history.find(m=>m.agent?.key==='job:'+job.id);
+  // Дело из чата: ответ уже есть в сообщении Юрики — здесь только отметка, что помощник вернулся.
+  if(sent){sent.text='✦ '+d.name+' вернулся: '+job.task+(String(d.agent).startsWith('c_')?'\n'+res:job.ok===false?' ✗':' ✓');agentUpdate(sent);return}
+  const last=history[history.length-1];
+  if(last?.agent?.id===d.agent&&last.agent.group&&Date.now()-last.agent.at<300000){last.agent.count=(last.agent.count||1)+1;last.agent.at=Date.now();last.text='✦ Готово · '+d.name+' (дел: '+last.agent.count+')\nПоследнее: '+job.task+'\n'+res;agentUpdate(last);return}
+  agentEntry({role:'assistant',private:true,tag:'✦ агенты'+(job.from&&job.from!=='yurika'?' · позвал '+(NOM[job.from]||'помощник'):''),agent:{key:'done:'+job.id,id:d.agent,color:d.color,group:true,at:Date.now()},text:'✦ Готово · '+d.name+'\n'+job.task+'\n'+res});
+  if(chat.hidden&&String(d.agent).startsWith('c_'))avatar.classList.add('has-unread');
+ });
  function renderHistory(){
   log.replaceChildren();
    log.classList.toggle('is-empty',!history.length);
@@ -347,12 +367,15 @@
  let reminders=load(REM_KEY,[]);if(!Array.isArray(reminders))reminders=[];
  const remTimers=new Map();
  function chime(){if(!cfg.sounds)return;try{const C=window.AudioContext||window.webkitAudioContext,ac=new C();[880,1320,1760].forEach((f,i)=>{const o=ac.createOscillator(),g=ac.createGain();o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(0,ac.currentTime+i*.18);g.gain.linearRampToValueAtTime(.12,ac.currentTime+i*.18+.02);g.gain.exponentialRampToValueAtTime(.0001,ac.currentTime+i*.18+.9);o.connect(g).connect(ac.destination);o.start(ac.currentTime+i*.18);o.stop(ac.currentTime+i*.18+1)});setTimeout(()=>ac.close(),2500)}catch{}}
+ // Дела Секретаря на этой стороне (напоминания, сводка) тоже идут в журнал агентов — огонёк летит, агент растёт.
+ function agentNote(task,result){fetch('/api/agents/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agent:'secretary',task,result})}).then(()=>window.TenmaWisps?.poll()).catch(()=>{})}
  function fireReminder(r){
   reminders=reminders.filter(x=>x.id!==r.id);store(REM_KEY,reminders);remTimers.delete(r.id);
   const text='⏰ '+r.text;
   history.push({role:'assistant',text,tag:'⚙ напоминание'});history=history.slice(-100);store(CHAT_KEY,history);
   if(!chat.hidden)bubble('assistant',text,'⚙ напоминание');else{avatar.classList.add('has-unread');if(cfg.visible)say(text,15000)}
   chime();if(cfg.clickBurst)burst();state('greet',2200);
+  agentNote('напоминает: '+r.text.slice(0,100),'Напомнила вовремя');
   if(cfg.notify&&'Notification' in window&&Notification.permission==='granted'&&document.hidden){try{new Notification(cfg.name,{body:r.text,icon:thumbOf(poseOf(cfg.pose))})}catch{}}
  }
  function armReminder(r){const ms=r.at-Date.now();if(ms<=0){setTimeout(()=>fireReminder(r),1200);return}remTimers.set(r.id,setTimeout(()=>fireReminder(r),Math.min(ms,2147000000)))}
@@ -391,6 +414,7 @@
   store(BRIEF_KEY,today);
   if(!due.length&&!late.length)return;
   const work=due.filter(t=>t.category==='work').length;
+  agentNote('собирает утреннюю сводку','Сегодня дел: '+due.length+(late.length?', просрочено: '+late.length:''));
   setTimeout(()=>say('📅 Сегодня '+due.length+' '+(due.length%10===1&&due.length%100!==11?'дело':due.length%10>=2&&due.length%10<=4&&(due.length%100<10||due.length%100>=20)?'дела':'дел')+(work?' (рабочих: '+work+')':'')+(late.length?', просрочено: '+late.length:'')+'. Спросите «что на сегодня».',12000),2500);
  }
  window.addEventListener('tenma:workspace',e=>{const tasks=e.detail?.tasks||[];scheduleTaskAlerts(tasks);dailyBrief(tasks)});
@@ -492,11 +516,11 @@
    does:['Замечает ошибки и поправки и превращает их в уроки','Запоминает, как тебе нравится, чтобы отвечали','Ловит противоречия с памятью','Дополняет «Кто ты»'],
    rights:'Пишет только в память и дневник Мозга.',memory:'«Как мы общаемся», «Кто ты», дневник'},
   secretary:{emoji:'🗓',where:'Планер',
-   about:'Помогает с делами и временем: сводки, сроки, напоминания.',
+   about:'Помогает с делами и временем. Юрика отправляет его, когда ты просишь про дела, календарь, заметки или напоминания.',
    does:['Собирает утреннюю сводку','Следит за сроками и просрочкой','Напоминает о делах со временем','Предлагает перенести дела'],
    rights:'Меняет дела только после подтверждения.',memory:'Дела, заметки, календарь'},
   researcher:{emoji:'🔭',where:'Факты',
-   about:'Ищет ответы в памяти и документах и сводит их вместе.',
+   about:'Ищет ответы в памяти и сводит их вместе. Юрика отправляет его искать факты, итоги и противоречия; на зов других агентов сверяет новые факты.',
    does:['Ищет по фактам и заметкам','Отвечает со ссылками на источник','Составляет короткие конспекты'],
    rights:'Только чтение.',memory:'Факты и библиотека'}
  };
@@ -512,35 +536,75 @@
    rangeW('Размер огоньков','size',.5,2,.1),rangeW('Скорость полёта','speed',.4,2,.1),
    h('div',{class:'menu-actions'},h('button',{type:'button',text:'Показать полёт',onclick:()=>{closeSettings();setTimeout(()=>W.demo(),300)}})));
  }
- let agentOpen='guardian';
+ let agentOpen='guardian',agentForm=null;
+ const SHAPE_LABEL={book:['📖','книжка'],moon:['🌙','луна'],star:['⭐','звезда'],crystal:['💎','кристалл'],flame:['🔥','пламя'],leaf:['🍃','листок'],heart:['💗','сердце'],drop:['💧','капля']};
+ const PAGE_LABEL={home:'Обзор',planner:'Планер',brain:'Мозг',facts:'Факты',library:'Библиотека'};
+ const HELPS={guardian:'Прочитав документ, зовёт Исследователя сверить новые факты',reviewer:'Нашёл противоречие — зовёт Исследователя проверить его',secretary:'Получает дела от Юрики, когда ты просишь про дела и время',researcher:'Приходит на зов Хранителя и Разборщика'};
+ const agentApi=(url,body)=>fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Ошибка');return d});
  function agentsSection(){
   const W=wispsApi();if(!W)return [wispSettingsCard()];
-  const states={idle:'у хвостов',go:'летит к делу',work:'работает',back:'возвращается',off:'выключен'};
-  const list=h('div',{class:'agents'});
-  const draw=()=>list.replaceChildren(...W.agents.map(a=>{
-   const info=AGENT_INFO[a.id]||{},cfgNow=W.get(),on=!cfgNow.off[a.id],color=cfgNow.colors[a.id]||a.hex,open=agentOpen===a.id,st=W.state(a.id);
+  const states={idle:'у хвостов',call:'зовут на помощь',go:'летит к делу',work:'работает',deliver:'несёт результат',back:'возвращается',off:'выключен'};
+  const list=h('div',{class:'agents'}),err=h('p',{class:'hint agent-err'});
+  const fresh=async()=>{await W.poll();draw()};
+  function growthRow(a){const g=W.server().growth?.[a.id];if(!g)return null;const levels=W.server().levels||[];const nextTitle=levels[g.level]?.title;
+   return h('div',{class:'agent-grow'},h('span',{class:'agent-lv',text:'Ур. '+g.level+' · '+g.title}),h('span',{class:'agent-bar'},h('i',{style:'width:'+Math.round(g.progress*100)+'%'})),
+    h('small',{text:g.next===null?'дел: '+g.done+' · высший уровень':'дел: '+g.done+' · до «'+nextTitle+'» ещё '+(g.next-g.done)}))}
+  function recentRows(a){const items=(W.server().recent||[]).filter(x=>x.agent===a.id).slice(0,3);
+   return h('div',{},h('h5',{text:'Последние дела'}),items.length?h('ul',{class:'agent-log'},...items.map(x=>h('li',{},h('span',{text:(x.ok?'✓ ':'✗ ')+x.task}),x.result?h('small',{text:x.result}):null))):h('p',{text:'Пока ничего — дела появятся здесь.'}))}
+  function shapePicker(a){const cur=W.get().shapes[a.id]||a.shape;return h('div',{class:'agent-shapes',role:'radiogroup','aria-label':'Форма огонька'},...W.shapes.map(k=>h('button',{type:'button',role:'radio','aria-checked':String(k===cur),title:SHAPE_LABEL[k]?.[1]||k,class:'agent-shape',onclick:()=>{W.set({shapes:{[a.id]:k}});draw()}},h('span',{text:SHAPE_LABEL[k]?.[0]||'✦'}))))}
+  function card1(a){
+   const info=AGENT_INFO[a.id]||{},custom=a.custom&&W.server().custom?.find(c=>c.id===a.id),cfgNow=W.get(),on=!cfgNow.off[a.id],color=cfgNow.colors[a.id]||a.hex,open=agentOpen===a.id,st=W.state(a.id);
    const toggle=h('input',{type:'checkbox',role:'switch','aria-label':'Включить агента '+a.name});toggle.checked=on;
    toggle.addEventListener('change',()=>{W.set({off:{[a.id]:!toggle.checked}});draw()});
    const pick=h('input',{type:'color',value:color,'aria-label':'Цвет огонька'});pick.addEventListener('input',()=>{W.set({colors:{[a.id]:pick.value}});el.style.setProperty('--agent',pick.value)});
+   const g=W.server().growth?.[a.id],shape=cfgNow.shapes[a.id]||a.shape;
    const el=h('article',{class:'agent'+(on?'':' off')+(open?' open':'')},
     h('header',{class:'agent-top',onclick:e=>{if(e.target.closest('label,input'))return;agentOpen=open?'':a.id;draw()}},
-     h('span',{class:'agent-orb','aria-hidden':'true'},h('span',{text:info.emoji||'✦'})),
-     h('span',{class:'agent-title'},h('strong',{text:a.name}),h('small',{text:a.role+' · летает в «'+(info.where||a.page)+'»'})),
-     h('span',{class:'agent-state'+(st&&st.state!=='idle'&&st.state!=='off'?' busy':'')},h('i'),document.createTextNode(info.live||!on?states[st?.state]||'':'для показа')),
+     h('span',{class:'agent-orb','aria-hidden':'true'},h('span',{text:info.emoji||SHAPE_LABEL[shape]?.[0]||'✦'})),
+     h('span',{class:'agent-title'},h('strong',{text:a.name}),h('small',{text:(g?'ур. '+g.level+' · '+g.title+' · ':'')+a.role+' · «'+(PAGE_LABEL[a.page]||a.page)+'»'})),
+     h('span',{class:'agent-state'+(st&&!['idle','off'].includes(st.state)?' busy':'')},h('i'),document.createTextNode((states[st?.state]||'')+(st?.queue?' · в очереди '+st.queue:''))),
      h('label',{class:'agent-toggle'},toggle,h('span',{class:'switch','aria-hidden':'true'}))),
     open?h('div',{class:'agent-body'},
-     h('p',{class:'agent-about',text:info.about}),
+     h('p',{class:'agent-about',text:custom?(custom.about||'Свой агент')+' · задание: «'+custom.task+'»':info.about}),
+     growthRow(a),
      h('div',{class:'agent-cols'},
-      h('div',{},h('h5',{text:'Что делает'}),h('ul',{},...(info.does||[]).map(t=>h('li',{text:t})))),
-      h('div',{},h('h5',{text:'Права'}),h('p',{text:info.rights}),h('h5',{text:'Память'}),h('p',{text:info.memory}))),
+      custom?h('div',{},h('h5',{text:'Что делает'}),h('p',{text:'Выполняет задание «'+custom.task+'» и приносит ответ Юрике в чат.'}))
+       :h('div',{},h('h5',{text:'Что делает'}),h('ul',{},...(info.does||[]).map(t=>h('li',{text:t}))),HELPS[a.id]?h('h5',{text:'Помогает другим'}):null,HELPS[a.id]?h('p',{text:HELPS[a.id]}):null),
+      h('div',{},h('h5',{text:'Права'}),h('p',{text:custom?(custom.rights==='confirm'?'Может добавлять дела и заметки':'Только чтение: смотрит, ищет, считает'):info.rights}),h('h5',{text:'Память'}),h('p',{text:custom?'Общая память Юрики':info.memory}))),
+     recentRows(a),
+     h('div',{},h('h5',{text:'Форма огонька'}),shapePicker(a)),
      h('div',{class:'agent-set'},
-      h('label',{class:'agent-color'},h('span',{text:'Цвет огонька'}),pick),
-      h('button',{type:'button',class:'ghost',text:'Сбросить цвет',onclick:()=>{W.set({colors:{[a.id]:''}});draw()}}),
-      h('button',{type:'button',text:'Отправить в полёт',disabled:!on||!W.get().fly,onclick:()=>{closeSettings();setTimeout(()=>W.send(a.id,'показывает, куда летает',4500),300)}}),
-      a.id==='guardian'?h('button',{type:'button',class:'ghost',text:'Память Хранителя',onclick:()=>{closeSettings();window.TenmaApp?.openGuardian?.()}}):null),
-     info.live?null:h('small',{class:'hint',text:'Пока этот агент только показывает, как будет летать. Настоящие дела подключим следующим шагом.'})):null);
-   el.style.setProperty('--agent',color);return el}));
+      h('label',{class:'agent-color'},h('span',{text:'Цвет'}),pick),
+      custom?h('button',{type:'button',text:'Запустить',disabled:!on,onclick:async e=>{e.currentTarget.disabled=true;err.textContent='';try{await agentApi('/api/agents/run',{id:a.id});await fresh()}catch(x){err.textContent=x.message;draw()}}}):
+       h('button',{type:'button',text:'Отправить в полёт',disabled:!on||!W.get().fly,onclick:()=>{closeSettings();setTimeout(()=>W.send(a.id,'показывает, куда летает',4500),300)}}),
+      custom?h('button',{type:'button',class:'ghost',text:'Изменить',onclick:()=>{agentForm={...custom};draw()}}):null,
+      custom?h('button',{type:'button',class:'ghost',text:'Удалить',onclick:async()=>{if(!confirm('Удалить агента «'+a.name+'»?'))return;try{await agentApi('/api/agents/custom/delete',{id:a.id});agentOpen='';await fresh()}catch(x){err.textContent=x.message}}}):null,
+      a.id==='guardian'?h('button',{type:'button',class:'ghost',text:'Память Хранителя',onclick:()=>{closeSettings();window.TenmaApp?.openGuardian?.()}}):null)):null);
+   el.style.setProperty('--agent',color);return el}
+  function form(){const f=agentForm,tpl=W.server().templates||[];
+   const name=h('input',{type:'text',maxlength:40,value:f.name||'',placeholder:'Например, Летописец','aria-label':'Имя агента'}),
+    task=h('textarea',{maxlength:400,rows:2,placeholder:'Что сделать: «итоги дня», «что на сегодня», «найди Анна»…','aria-label':'Задание'}),
+    about=h('input',{type:'text',maxlength:140,value:f.about||'',placeholder:'Коротко, кто он','aria-label':'Описание'}),
+    page=h('select',{'aria-label':'Куда летает'},...Object.entries(PAGE_LABEL).map(([v,t])=>h('option',{value:v,text:t,selected:f.page===v}))),
+    rights=h('select',{'aria-label':'Права'},h('option',{value:'read',text:'Только чтение',selected:f.rights!=='confirm'}),h('option',{value:'confirm',text:'Может добавлять дела и заметки',selected:f.rights==='confirm'})),
+    color=h('input',{type:'color',value:f.color||'#ffd36b','aria-label':'Цвет огонька'});task.value=f.task||'';
+   let shape=f.shape||'star';const shapes=h('div',{class:'agent-shapes'});const drawShapes=()=>shapes.replaceChildren(...W.shapes.map(k=>h('button',{type:'button','aria-checked':String(k===shape),role:'radio',class:'agent-shape',title:SHAPE_LABEL[k]?.[1],onclick:()=>{shape=k;drawShapes()}},h('span',{text:SHAPE_LABEL[k]?.[0]}))));drawShapes();
+   const useTpl=t=>{agentForm={...agentForm,template:t.id,name:t.id==='empty'?'':t.name,task:t.task,about:t.about,page:t.page,rights:t.rights,shape:t.shape,color:t.color};draw()};
+   const el=h('article',{class:'agent open agent-form'},
+    h('header',{class:'agent-top'},h('span',{class:'agent-orb'},h('span',{text:'+'})),h('span',{class:'agent-title'},h('strong',{text:f.id?'Изменить агента':'Новый агент'}),h('small',{text:'Выбери шаблон или задай своё задание'}))),
+    h('div',{class:'agent-body'},
+     f.id?null:h('div',{class:'agent-tpls'},...tpl.map(t=>h('button',{type:'button',class:'agent-tpl'+(f.template===t.id?' on':''),style:'--agent:'+t.color,onclick:()=>useTpl(t)},h('span',{text:SHAPE_LABEL[t.shape]?.[0]||'✦'}),h('strong',{text:t.name}),h('small',{text:t.about})))),
+     h('div',{class:'agent-fields'},h('label',{},h('span',{text:'Имя'}),name),h('label',{},h('span',{text:'Кто он'}),about),h('label',{class:'wide'},h('span',{text:'Задание'}),task),
+      h('label',{},h('span',{text:'Куда летает'}),page),h('label',{},h('span',{text:'Права'}),rights)),
+     h('div',{},h('h5',{text:'Форма и цвет огонька'}),h('div',{class:'agent-set'},shapes,h('label',{class:'agent-color'},color))),
+     h('div',{class:'agent-set'},h('button',{type:'button',text:f.id?'Сохранить':'Создать агента',onclick:async()=>{err.textContent='';try{const c=await agentApi('/api/agents/custom',{id:f.id,template:f.template,name:name.value,task:task.value,about:about.value,page:page.value,rights:rights.value,shape,color:color.value});agentForm=null;agentOpen=c.id;await fresh()}catch(x){err.textContent=x.message}}}),
+      h('button',{type:'button',class:'ghost',text:'Отмена',onclick:()=>{agentForm=null;draw()}}))));
+   el.style.setProperty('--agent',color.value);color.addEventListener('input',()=>el.style.setProperty('--agent',color.value));return el}
+  const draw=()=>list.replaceChildren(...W.agents.map(card1),agentForm?form():h('button',{type:'button',class:'agent agent-add',onclick:()=>{agentForm={template:null};draw()}},h('span',{class:'agent-orb'},h('span',{text:'+'})),h('span',{class:'agent-title'},h('strong',{text:'Новый агент'}),h('small',{text:'Из шаблона: Летописец, Глашатай, Сыщик — или своё задание'}))),err);
   draw();
+  // Пока меню открыто — статусы и уровни обновляются вместе с журналом агентов.
+  const onAgents=()=>{if(!list.isConnected){window.removeEventListener('tenma:agents',onAgents);return}if(!list.contains(document.activeElement)||document.activeElement===document.body)draw()};
+  window.addEventListener('tenma:agents',onAgents);
   return [list,wispSettingsCard()];
  }
  function modelSection(){
