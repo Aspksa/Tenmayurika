@@ -2,11 +2,12 @@
 // Содержимое остаётся на диске: не передаём его модели или внешнему сервису.
 const fs=require('node:fs/promises');
 const library=require('./library');
+const office=require('./library-office');
 const LIMIT=2*1024*1024;
 async function read(path){
- if(typeof path!=='string'||!/\.(txt|md|csv|json)$/i.test(path))throw new TypeError('Пока поддерживаются TXT, Markdown, CSV и JSON');
- const full=await library.filePath(path),stat=await fs.stat(full);if(stat.size>LIMIT)throw new TypeError('Файл больше 2 МБ');
- const text=await fs.readFile(full,'utf8');return {path,text,bytes:stat.size,modified:stat.mtime.toISOString()};
+ if(typeof path!=='string'||!/\.(txt|md|csv|json|docx|xlsx)$/i.test(path))throw new TypeError('Формат пока не поддерживается');
+ const isOffice=/\.(docx|xlsx)$/i.test(path),full=await library.filePath(path),stat=await fs.stat(full);if(stat.size>(isOffice?16*1024*1024:LIMIT))throw new TypeError('Файл слишком большой');
+ const data=await fs.readFile(full),text=isOffice?office.parse(data,path.split('.').pop().toLowerCase()):data.toString('utf8');return {path,text,bytes:stat.size,modified:stat.mtime.toISOString()};
 }
 async function describe(path){const doc=await read(path),lines=doc.text.split(/\r?\n/),nonempty=lines.map(s=>s.trim()).filter(Boolean);return {path:doc.path,bytes:doc.bytes,modified:doc.modified,lineCount:lines.length,excerpt:nonempty.slice(0,5).map(x=>x.slice(0,250))}}
 async function compare(a,b){

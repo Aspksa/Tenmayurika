@@ -51,8 +51,8 @@ async function searchText(query){
   const dir=pending.pop();for(const entry of await list(dir)){
    if(++scanned>5000)break;
    if(entry.type==='folder'){pending.push(entry.path);continue}
-   if(!/\.(txt|md|csv|json)$/i.test(entry.name)||entry.size>2*1024*1024)continue;
-   let lines;try{lines=(await fsp.readFile(await filePath(entry.path),'utf8')).split(/\r?\n/)}catch{continue}
+   if(!/\.(txt|md|csv|json|docx|xlsx)$/i.test(entry.name)||entry.size>16*1024*1024)continue;
+   let lines;try{lines=(await require('./library-documents').read(entry.path)).text.split(/\r?\n/)}catch{continue}
    const index=lines.findIndex(line=>line.toLocaleLowerCase('ru').includes(needle));
    if(index!==-1)results.push({path:entry.path,line:index+1,excerpt:lines[index].slice(0,300)});
    if(results.length>=100)break;
