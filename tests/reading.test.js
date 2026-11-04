@@ -92,6 +92,13 @@ test('«Перечитать» reindexes the chosen file from disk first',async(
  await fsp.unlink(f);await queue.scan();reading.readPending();
 });
 
+test('short words like «чай» are searchable',async()=>{
+ const f=path.join(LIB,'чай3.txt');await fsp.writeFile(f,'Анна любит чай.');await queue.scan();await queue.run(10);reading.readPending();
+ assert.equal(reading.find('чай')[0].path,'чай3.txt');
+ assert.match(reading.reply('что в моих документах про чай?').text,/чай3\.txt/);
+ await fsp.unlink(f);await queue.scan();reading.readPending();
+});
+
 test('excerpt keeps the matching line even after a long paragraph',async()=>{
  await fsp.mkdir(LIB,{recursive:true});
  await fsp.writeFile(path.join(LIB,'вступление.txt'),'Вступление '.repeat(60).trim()+'\nПлатёж за парковку вносится до десятого числа.');
