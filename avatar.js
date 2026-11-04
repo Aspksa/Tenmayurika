@@ -58,17 +58,34 @@
  const hexRgb=hex=>{const m=/^#?([0-9a-f]{6})$/i.exec(hex||'');const n=parseInt(m?m[1]:'e8c25a',16);return [n>>16&255,n>>8&255,n&255]};
 
  /* ---------- Аватар ---------- */
- const img=h('img',{alt:'',draggable:'false',decoding:'async'});
+ // Два слоя картинки: новая поза сначала загружается и декодируется, потом плавно проявляется поверх старой — без мигания.
+ const img=h('img',{alt:'',draggable:'false',decoding:'async',class:'on'});
+ const imgNext=h('img',{alt:'',draggable:'false',decoding:'async'});
+ // Свечение — отдельный слой (силуэт с размытием), пульс меняет только его прозрачность: это дёшево для видеокарты.
+ const halo=h('div',{class:'avatar-halo','aria-hidden':'true'},h('i'));
  const canvas=h('canvas',{'aria-hidden':'true'});
  const badge=h('span',{class:'avatar-badge','aria-hidden':'true',text:'1'});
  const speech=h('div',{class:'avatar-speech',role:'status',hidden:true});
  const circle=document.createElementNS('http://www.w3.org/2000/svg','svg');circle.setAttribute('class','avatar-circle');circle.setAttribute('viewBox','0 0 200 200');circle.setAttribute('aria-hidden','true');
  circle.innerHTML='<g fill="none" stroke="currentColor"><circle cx="100" cy="100" r="96" stroke-width="1.2"/><circle cx="100" cy="100" r="86" stroke-width=".6" stroke-dasharray="2 5"/><circle cx="100" cy="100" r="60" stroke-width=".8"/><path d="M100 14 174 143H26z M100 186 26 57h148z" stroke-width=".8"/></g><g fill="currentColor" font-size="9" font-family="serif" text-anchor="middle">'+'天狐九尾金光守護記憶'.split('').map((c,i)=>{const a=i/10*Math.PI*2;return '<text x="'+(100+Math.sin(a)*73).toFixed(1)+'" y="'+(103-Math.cos(a)*73).toFixed(1)+'">'+c+'</text>'}).join('')+'</g>';
  const shine=h('div',{class:'avatar-shine','aria-hidden':'true'});
- const body=h('div',{class:'avatar-body'},h('div',{class:'avatar-aura'}),circle,h('div',{class:'avatar-figure'},img,shine));
+ const body=h('div',{class:'avatar-body'},h('div',{class:'avatar-aura'}),circle,h('div',{class:'avatar-figure'},halo,img,imgNext,shine));
  const avatar=h('div',{class:'avatar',role:'button',tabindex:'0','aria-haspopup':'dialog'},canvas,body,badge,speech);
  document.body.append(avatar);
- function showPoseImage(p){img.srcset=srcsetOf(p);img.src=p.base+'-768.webp';shine.style.setProperty('--mask','url("'+p.base+'-768.webp")')}
+ function setMask(p){const m='url("'+p.base+'-768.webp")';shine.style.setProperty('--mask',m);halo.style.setProperty('--mask',m)}
+ function showPoseImage(p){img.srcset=srcsetOf(p);img.src=p.base+'-768.webp';setMask(p)}
+ let cur=img,nxt=imgNext,poseSwap=0;
+ async function crossfadeTo(p){
+  const my=++poseSwap,next=nxt;
+  next.srcset=srcsetOf(p);next.src=p.base+'-768.webp';
+  try{await next.decode()}catch{}
+  if(my!==poseSwap)return; // пока грузилась, выбрали другую позу
+  next.classList.add('on');cur.classList.remove('on');setMask(p);
+  nxt=cur;cur=next; // слои меняются ролями
+ }
+ // Все позы заранее подгружаются в кэш, когда браузер свободен, — смена позы не ждёт сети и диска.
+ const idle=window.requestIdleCallback||(f=>setTimeout(f,1500));
+ idle(()=>{for(const p of POSES){const i=new Image();i.decoding='async';i.src=p.base+'-768.webp'}});
  showPoseImage(poseOf(cfg.pose));
 
  let pos={x:0,y:0},currentPose=cfg.pose,stateTimer,cursorFlip=false;
@@ -76,7 +93,11 @@
  // Размер аватара масштабируется вместе с экраном (больше на 4K, меньше на телефоне).
  const scale=()=>Math.min(1.8,Math.max(.6,Math.min(vw()/1600,vh()/900)**.6));
  const sizePx=()=>Math.round(Math.min(cfg.size*scale(),vw()*.7,vh()*.7));
+ // На телефоне меню стоит внизу экрана — аватар не заходит на него.
+ let bottomReserve=0;
+ function measureReserve(){const r=document.querySelector('.rail');bottomReserve=r&&getComputedStyle(r).position==='fixed'?r.offsetHeight:0}
  function applyLook(){
+  measureReserve();
   const s=sizePx(),[r,g,b]=hexRgb(cfg.glowColor),st=avatar.style;
   st.setProperty('--avatar-size',s+'px');
   st.setProperty('--avatar-opacity',cfg.opacity/100);
@@ -86,10 +107,11 @@
   st.setProperty('--float-h',-cfg.floatHeight+'%');
   st.setProperty('--float-dur',cfg.floatSpeed+'s');
   st.setProperty('--tilt',cfg.tilt+'deg');
-  st.setProperty('--tone',`brightness(${cfg.brightness/100}) saturate(${cfg.saturation/100}) hue-rotate(${cfg.hue}deg)`);
-  img.sizes=Math.ceil(s)+'px';
+  // Фильтр цвета только если его меняли: лишний filter заставляет перерисовывать фигуру в каждом кадре анимации.
+  st.setProperty('--tone',cfg.brightness===100&&cfg.saturation===100&&!cfg.hue?'none':`brightness(${cfg.brightness/100}) saturate(${cfg.saturation/100}) hue-rotate(${cfg.hue}deg)`);
+  img.sizes=imgNext.sizes=Math.ceil(s)+'px';
   st.setProperty('--circle-dur',cfg.circleSpeed+'s');
-  for(const [cls,on] of [['glow',cfg.glow],['pulse',cfg.glow&&cfg.pulse],['float',cfg.float],['breathe',cfg.breathe],['shadow',cfg.shadow],['hidden',!cfg.visible],['circle',cfg.magicCircle],['shine',cfg.shine],['outline',cfg.outline],['hover-react',cfg.hoverReact]])avatar.classList.toggle(cls,on);
+  for(const [cls,on] of [['glow',cfg.glow],['glow-pulse',cfg.glow&&cfg.pulse],['float',cfg.float],['breathe',cfg.breathe],['shadow',cfg.shadow],['hidden',!cfg.visible],['circle',cfg.magicCircle],['shine',cfg.shine],['outline',cfg.outline],['hover-react',cfg.hoverReact]])avatar.classList.toggle(cls,on);
   avatar.classList.toggle('flip',cfg.flip!==(cfg.faceCursor&&cursorFlip));
   avatar.setAttribute('aria-label','Аватар '+cfg.name+'. Enter — чат, Shift+F10 — настройки, стрелки — перемещение');
   document.documentElement.style.setProperty('--chat-scale',cfg.chatScale/100);
@@ -98,7 +120,7 @@
   resizeCanvas();place();
  }
  function place(){
-  const s=sizePx(),maxX=Math.max(0,vw()-s),maxY=Math.max(0,vh()-s);
+  const s=sizePx(),maxX=Math.max(0,vw()-s),maxY=Math.max(0,vh()-s-bottomReserve);
   pos.x=Math.round(Math.min(1,Math.max(0,cfg.x))*maxX);pos.y=Math.round(Math.min(1,Math.max(0,cfg.y))*maxY);
   avatar.style.transform=`translate3d(${pos.x}px,${pos.y}px,0)`;
   positionPanels();
@@ -106,8 +128,7 @@
  function setPose(id,{remember=false}={}){
   if(remember){cfg.pose=id;save()}
   if(id===currentPose)return;currentPose=id;
-  img.classList.add('leaving');
-  setTimeout(()=>{showPoseImage(poseOf(id));img.classList.remove('leaving')},180);
+  crossfadeTo(poseOf(id));
  }
  // Временное состояние (приветствие, размышление, ответ) с возвратом к выбранной позе.
  function state(name,ms){
@@ -117,7 +138,7 @@
  }
 
  /* ---------- Перетаскивание и клики ---------- */
- let drag=null,longPress;
+ let drag=null,longPress,dragFrame=0;
  avatar.addEventListener('pointerdown',e=>{
   if(e.button!==0||speech.contains(e.target))return;
   stopWander();avatar.setPointerCapture(e.pointerId);
@@ -130,10 +151,11 @@
   if(!drag.moved&&Math.hypot(dx,dy)<5)return;
   if(!drag.moved){drag.moved=true;clearTimeout(longPress);avatar.classList.add('dragging');closeSettings();hideSpeech()}
   const s=sizePx();
-  pos.x=Math.min(vw()-s,Math.max(0,drag.ox+dx));pos.y=Math.min(vh()-s,Math.max(0,drag.oy+dy));
-  avatar.style.transform=`translate3d(${pos.x}px,${pos.y}px,0)`;positionPanels();
+  pos.x=Math.min(vw()-s,Math.max(0,drag.ox+dx));pos.y=Math.min(vh()-s-bottomReserve,Math.max(0,drag.oy+dy));
+  // Не чаще одного раза за кадр: события мыши приходят чаще, чем экран обновляется.
+  if(!dragFrame)dragFrame=requestAnimationFrame(()=>{dragFrame=0;avatar.style.transform=`translate3d(${pos.x}px,${pos.y}px,0)`;positionPanels()});
  });
- const savePos=()=>{const s=sizePx();cfg.x=vw()>s?pos.x/(vw()-s):0;cfg.y=vh()>s?pos.y/(vh()-s):0;save()};
+ const savePos=()=>{const s=sizePx(),room=vh()-s-bottomReserve;cfg.x=vw()>s?pos.x/(vw()-s):0;cfg.y=room>0?Math.min(1,pos.y/room):0;save()};
  const endDrag=e=>{
   clearTimeout(longPress);if(!drag||e.pointerId!==drag.id)return;
   const wasMoved=drag.moved;drag=null;avatar.classList.remove('dragging');
@@ -158,14 +180,14 @@
  /* ---------- Чат, привязанный к аватару ---------- */
  const chatImg=h('img',{alt:'',src:thumbOf(poseOf(cfg.pose))});
  const chatName=h('strong',{text:cfg.name});
- const chatSub=h('small',{text:'Хранительница памяти'});
  const log=h('div',{class:'chat-log',role:'log','aria-live':'polite'});
  const quick=h('div',{class:'chat-quick',role:'toolbar','aria-label':'Быстрые действия'});
- const input=h('textarea',{rows:'1',maxlength:'2000',placeholder:'Спросите или попросите что-то сделать…','aria-label':'Сообщение'});
+ const input=h('textarea',{rows:'1',maxlength:'2000',placeholder:'Напишите сообщение…','aria-label':'Сообщение'});
  const send=h('button',{type:'submit',class:'primary','aria-label':'Отправить'},icon('i-send'));
  const form=h('form',{class:'chat-form'},input,send);
  const chat=h('section',{class:'floating chat',role:'dialog','aria-label':'Чат с аватаром',hidden:true},
-  h('header',{class:'floating-head'},chatImg,h('div',{class:'title'},chatName,chatSub),
+  h('header',{class:'floating-head'},chatImg,h('div',{class:'title'},chatName),
+   h('button',{type:'button',class:'icon-btn','aria-label':'Новый чат',title:'Новый чат: очистить переписку',onclick:()=>{if(!history.length)return;conversation++;history=[];pendingFix=null;input.placeholder=BASE_PLACEHOLDER;store(CHAT_KEY,history);renderHistory();renderQuick();input.focus()}},icon('i-plus')),
    h('button',{type:'button',class:'icon-btn','aria-label':'Настройки аватара',title:'Настройки аватара',onclick:()=>{const r=avatar.getBoundingClientRect();openSettings(r.left+r.width/2,r.top)}},icon('i-sliders')),
    h('button',{type:'button',class:'icon-btn','aria-label':'Закрыть чат',title:'Закрыть',onclick:()=>closeChat()},icon('i-close'))),
   log,quick,form);
@@ -192,12 +214,15 @@
   {tool:'convert',label:'📐 Перевести',insert:'переведи '},
   {tool:'password',label:'🔐 Пароль',send:'придумай пароль'}
  ];
+ // В окне только 4 главные кнопки и только в пустом чате: остальное — по команде «помощь».
+ const QUICK_MAIN=['📅 Сегодня','+ Дело','+ Заметка','Что умеешь?'];
  function renderQuick(){
-  quick.replaceChildren(...QUICK.filter(q=>!q.tool||cfg.tools[q.tool]).map(q=>h('button',{type:'button',class:'chip',text:q.label,onclick:()=>{
+  quick.hidden=history.length>0;
+  quick.replaceChildren(...QUICK.filter(q=>QUICK_MAIN.includes(q.label)&&(!q.tool||cfg.tools[q.tool])).map(q=>h('button',{type:'button',class:'chip',text:q.label,onclick:()=>{
    if(q.send){input.value=q.send;form.requestSubmit()}else{input.value=q.insert;input.focus();const at=q.insert.indexOf(' ')+1||q.insert.length;input.setSelectionRange(q.tool==='facts'?8:q.insert.length,q.tool==='facts'?8:q.insert.length);void at;autoGrow()}
   }})));
  }
- function bubble(role,text,tag,m){const el=h('div',{class:'msg '+role},tag?h('span',{class:'msg-tag',text:tag}):null,document.createTextNode(text));if(m&&m.exp)el.append(rateRow(m));log.append(el);log.scrollTop=log.scrollHeight;return el}
+ function bubble(role,text,tag,m){const el=h('div',{class:'msg '+role},document.createTextNode(text));const foot=[tag?h('span',{class:'msg-tag',text:tag.replace(/^⚙\s*/,'')}):null,m&&m.exp?rateRow(m):null].filter(Boolean);if(foot.length)el.append(h('div',{class:'msg-foot'},...foot));log.append(el);log.scrollTop=log.scrollHeight;return el}
  // Оценка ответа: 👍 — она запоминает, что поняла верно; 👎 — следующее сообщение станет поправкой, и на похожий вопрос она её учтёт.
  let pendingFix=null;
  const BASE_PLACEHOLDER=input.placeholder;
@@ -214,7 +239,7 @@
  }
  function renderHistory(){
   log.replaceChildren();
-  if(!history.length)bubble('assistant','Здравствуйте! Я '+cfg.name+'. Веду личные и рабочие дела с календарём, заметки, запоминаю факты, ищу в памяти и делаю резервные копии. Напишите «помощь» или нажмите кнопку ниже.\nПеретащите меня куда удобно; правый клик — мои настройки.');
+  if(!history.length)bubble('assistant','Здравствуйте! Я '+cfg.name+'. Чем помочь? Нажмите кнопку ниже или напишите «помощь».');
   for(const m of history)bubble(m.role,m.text,m.tag,m);
  }
  const TOOL_TAG={agenda:'повестка',move_task:'перенос',days_until:'дни',convert_units:'конвертер',generate_password:'пароль',pick_random:'выбор',list_notes:'заметки',day_summary:'итоги',fact_conflicts:'противоречия',fact_relations:'связи',set_reminder:'напоминание',calculate:'калькулятор',roll_dice:'кубик',flip_coin:'монетка',change_look:'облик',reindex_memory:'индекс',add_note:'заметка',add_task:'дело',complete_task:'дело',list_tasks:'дела',remember_fact:'факт',search_memory:'поиск',open_page:'переход',create_backup:'бэкап',system_status:'статус',current_time:'время'};
@@ -226,7 +251,7 @@
   const prior=[];let budget=20000;
   for(const m of history.filter(m=>!m.private).slice(-12).reverse()){const t=m.text.slice(0,1500);if(t.length>budget)break;budget-=t.length;prior.unshift({role:m.role,text:t})}
   const gen=conversation,fixFor=pendingFix;pendingFix=null;input.placeholder=BASE_PLACEHOLDER;
-  history.push({role:'user',text});bubble('user',text);
+  history.push({role:'user',text});bubble('user',text);quick.hidden=true;
   const typing=h('div',{class:'msg assistant typing','aria-label':cfg.name+' думает'},h('span',{text:'•'}),h('span',{text:'•'}),h('span',{text:'•'}));
   log.append(typing);log.scrollTop=log.scrollHeight;state('think');
   window.dispatchEvent(new CustomEvent('tenma:thinking',{detail:{on:true,text}}));
@@ -362,7 +387,7 @@
  function stopWander(){if(!walking)return;walking=false;const r=avatar.getBoundingClientRect();pos.x=r.left;pos.y=r.top;avatar.classList.remove('walking');avatar.style.transform=`translate3d(${pos.x}px,${pos.y}px,0)`;savePos()}
  function wanderStep(){
   if(!cfg.wander||!cfg.visible||drag||!chat.hidden||!settings.hidden||document.hidden||reduceMotion.matches)return;
-  const s=sizePx(),tx=Math.random()*(vw()-s),ty=vh()*.25+Math.random()*(vh()*.75-s);
+  const s=sizePx(),tx=Math.random()*(vw()-s),ty=Math.max(0,vh()*.25+Math.random()*(vh()*.75-s-bottomReserve));
   const dist=Math.hypot(tx-pos.x,ty-pos.y),dur=Math.min(7,Math.max(1.5,dist/220));
   if(!cfg.faceCursor){avatar.classList.toggle('flip',cfg.flip!==(tx>pos.x))}
   walking=true;avatar.classList.add('walking');avatar.style.setProperty('--walk-dur',dur+'s');
@@ -512,7 +537,7 @@
      sw('Напоминать о делах со временем','taskAlerts',cfg,'Дела с датой и временем из раздела «Дела» и календаря'),range('Заранее','taskLead',0,60,5,v=>v?v+' мин':'в срок'),
      sw('Утренняя сводка','dailyBrief',cfg,'Раз в день расскажу, что запланировано и что просрочено'),h('div',{class:'reminder-list'},...reminderItems()))),
    card('Данные',h('div',{class:'menu-actions'},
-    h('button',{type:'button',text:'Очистить чат',onclick:()=>{conversation++;history=[];store(CHAT_KEY,history);renderHistory()}}),
+    h('button',{type:'button',text:'Очистить чат',onclick:()=>{conversation++;history=[];store(CHAT_KEY,history);renderHistory();renderQuick()}}),
     h('button',{type:'button',text:'Экспорт настроек',onclick:()=>{const a=h('a',{href:URL.createObjectURL(new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'})),download:'tenmayurika-avatar.json'});a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}}),
     h('label',{class:'button-like'},h('span',{text:'Импорт…'}),h('input',{type:'file',accept:'application/json',hidden:true,onchange:async e=>{try{const f=e.target.files[0];if(!f)return;cfg=merge(JSON.parse(await f.text()));setPose(cfg.pose);chatName.textContent=cfg.name;chatImg.src=thumbOf(poseOf(cfg.pose));refreshAll();buildSettings()}catch{alert('Не удалось прочитать файл настроек')}}}))))
   ]}
@@ -574,7 +599,7 @@
  }
 
  /* ---------- Частицы ---------- */
- const ctx=canvas.getContext('2d');let parts=[],bursts=[],raf=0,dpr=1;
+ const ctx=canvas.getContext('2d');let parts=[],bursts=[],raf=0,dpr=1,lastTick=0;
  function resizeCanvas(){dpr=Math.min(2,window.devicePixelRatio||1);const s=sizePx()*1.5;canvas.width=Math.round(s*dpr);canvas.height=Math.round(s*dpr)}
  const rnd=(a,b)=>a+Math.random()*(b-a);
  function particle(fresh){
@@ -605,8 +630,16 @@
   for(let i=0;i<18;i++){const a=Math.random()*6.28,s=rnd(1.5,4)*dpr;bursts.push({x:W/2,y:H*.55,vx:Math.cos(a)*s,vy:Math.sin(a)*s-1*dpr,r:rnd(1,2.2)*dpr,life:0,max:rnd(40,70)})}
   kick();
  }
- function kick(){if(!parts.length&&!bursts.length){ctx.clearRect(0,0,canvas.width,canvas.height);cancelAnimationFrame(raf);raf=0}else if(!raf)raf=requestAnimationFrame(tick)}
- function glowDot(x,y,r,rgb,a,inner='255,244,214'){const g=ctx.createRadialGradient(x,y,0,x,y,r*4);g.addColorStop(0,`rgba(${inner},${a})`);g.addColorStop(.35,`rgba(${rgb},${a*.55})`);g.addColorStop(1,`rgba(${rgb},0)`);ctx.fillStyle=g;ctx.beginPath();ctx.arc(x,y,r*4,0,6.283);ctx.fill()}
+ function kick(){if(!parts.length&&!bursts.length){ctx.clearRect(0,0,canvas.width,canvas.height);cancelAnimationFrame(raf);raf=0;lastTick=0}else if(!raf)raf=requestAnimationFrame(tick)}
+ // Светящаяся точка рисуется готовым спрайтом (градиент считается один раз на цвет), а не новым градиентом на каждую частицу в каждом кадре.
+ const sprites=new Map();
+ function sprite(rgb,inner){
+  const key=rgb+'|'+inner;let c=sprites.get(key);if(c)return c;
+  c=document.createElement('canvas');c.width=c.height=64;const g2=c.getContext('2d'),g=g2.createRadialGradient(32,32,0,32,32,32);
+  g.addColorStop(0,`rgba(${inner},1)`);g.addColorStop(.35,`rgba(${rgb},.55)`);g.addColorStop(1,`rgba(${rgb},0)`);g2.fillStyle=g;g2.fillRect(0,0,64,64);
+  if(sprites.size>24)sprites.clear();sprites.set(key,c);return c;
+ }
+ function glowDot(x,y,r,rgb,a,inner='255,244,214'){if(a<=0.01)return;const R=r*4;ctx.globalAlpha=Math.min(1,a);ctx.drawImage(sprite(rgb,inner),x-R,y-R,R*2,R*2);ctx.globalAlpha=1}
  function draw(p,rgb){
   const t=p.life,a=Math.sin(Math.PI*Math.min(1,t/p.max))*(.55+.45*Math.sin(t/9+p.tw));
   switch(cfg.particleType){
@@ -616,23 +649,25 @@
    case 'foxfire':{const fl=.75+.25*Math.sin(t/4+p.tw),aa=Math.min(1,Math.abs(a)*1.6+.15);glowDot(p.x,p.y,p.r*fl,'90,200,255',aa,'230,252,255');glowDot(p.x,p.y-p.r*1.5,p.r*.6*fl,'120,170,255',aa*.75,'210,244,255');break}
    case 'stars':{ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot);const s=p.r*2.4*(.6+.4*Math.sin(t/8+p.tw));ctx.fillStyle=`rgba(${rgb},${a})`;ctx.beginPath();for(let i=0;i<8;i++){const rr=i%2?s*.22:s;const ang=i*Math.PI/4;ctx.lineTo(Math.cos(ang)*rr,Math.sin(ang)*rr)}ctx.closePath();ctx.fill();ctx.restore();glowDot(p.x,p.y,p.r*.5,rgb,a*.6);break}
    case 'butterflies':{ctx.save();ctx.translate(p.x,p.y);ctx.rotate(Math.atan2(p.vy,p.vx)+Math.PI/2);const flap=Math.abs(Math.sin(t/5+p.tw)),w=p.r*1.6*(.25+.75*flap);ctx.globalCompositeOperation='source-over';ctx.fillStyle=p.hue<.5?`rgba(${rgb},${Math.min(1,a+.3)})`:`rgba(255,236,190,${Math.min(1,a+.3)})`;ctx.beginPath();ctx.ellipse(-w*.6,-p.r*.3,w*.6,p.r*.9,-.4,0,6.283);ctx.ellipse(w*.6,-p.r*.3,w*.6,p.r*.9,.4,0,6.283);ctx.ellipse(-w*.45,p.r*.6,w*.4,p.r*.55,-.6,0,6.283);ctx.ellipse(w*.45,p.r*.6,w*.4,p.r*.55,.6,0,6.283);ctx.fill();ctx.restore();ctx.globalCompositeOperation='lighter';glowDot(p.x,p.y,p.r*.35,rgb,a*.5);break}
-   case 'runes':{ctx.save();ctx.font=`${Math.round(p.r*3)}px serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.shadowColor=`rgba(${rgb},${a})`;ctx.shadowBlur=p.r*3;ctx.fillStyle=`rgba(${rgb},${Math.min(1,a+.15)})`;ctx.fillText(p.ch,p.x,p.y);ctx.restore();break}
+   case 'runes':{glowDot(p.x,p.y,p.r*.9,rgb,a*.7);ctx.save();ctx.font=`${Math.round(p.r*3)}px serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=`rgba(${rgb},${Math.min(1,a+.15)})`;ctx.fillText(p.ch,p.x,p.y);ctx.restore();break}
    default:glowDot(p.x,p.y,p.r,rgb,a);
   }
  }
- function tick(){
-  raf=0;if((!parts.length&&!bursts.length)||document.hidden)return;
+ // dt — сколько «кадров по 60 Гц» прошло: на 120/144 Гц частицы летят с той же скоростью, а после подвисания не прыгают.
+ function tick(now){
+  raf=0;if((!parts.length&&!bursts.length)||document.hidden){lastTick=0;return}
+  const dt=lastTick?Math.min(3,Math.max(.25,(now-lastTick)/16.667)):1;lastTick=now;
   ctx.clearRect(0,0,canvas.width,canvas.height);ctx.globalCompositeOperation='lighter';
   const rgb=hexRgb(cfg.glowColor).join(','),W=canvas.width,H=canvas.height,type=cfg.particleType;
   for(let i=0;i<parts.length;i++){
-   const p=parts[i];p.life++;p.rot+=p.vr;
-   if(type==='butterflies'){p.vx+=rnd(-.05,.05)*dpr;p.vx*=.99}
-   if(type==='fireflies'){p.vx+=rnd(-.03,.03)*dpr;p.vy+=rnd(-.03,.03)*dpr;p.vx*=.98;p.vy*=.98}
-   p.x+=p.vx+(type==='petals'?Math.sin((p.life+p.tw*30)/30)*.5*dpr:Math.sin((p.life+p.tw*30)/40)*.15*dpr);p.y+=p.vy;
+   const p=parts[i];p.life+=dt;p.rot+=p.vr*dt;
+   if(type==='butterflies'){p.vx+=rnd(-.05,.05)*dpr*dt;p.vx*=.99**dt}
+   if(type==='fireflies'){p.vx+=rnd(-.03,.03)*dpr*dt;p.vy+=rnd(-.03,.03)*dpr*dt;p.vx*=.98**dt;p.vy*=.98**dt}
+   p.x+=(p.vx+(type==='petals'?Math.sin((p.life+p.tw*30)/30)*.5*dpr:Math.sin((p.life+p.tw*30)/40)*.15*dpr))*dt;p.y+=p.vy*dt;
    if(p.life>=p.max||p.y<-20||p.y>H+20||p.x<-20||p.x>W+20){parts[i]=particle(false);continue}
    draw(p,rgb);
   }
-  bursts=bursts.filter(b=>{b.life++;b.x+=b.vx;b.y+=b.vy;b.vx*=.95;b.vy=b.vy*.95+.04*dpr;glowDot(b.x,b.y,b.r,rgb,1-b.life/b.max);return b.life<b.max});
+  bursts=bursts.filter(b=>{b.life+=dt;b.x+=b.vx*dt;b.y+=b.vy*dt;b.vx*=.95**dt;b.vy=b.vy*.95**dt+.04*dpr*dt;glowDot(b.x,b.y,b.r,rgb,1-b.life/b.max);return b.life<b.max});
   raf=requestAnimationFrame(tick);
  }
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)kick()});

@@ -256,18 +256,19 @@ function mainList(box){
  box.append(h('div',{class:'main-head'},h('h3',{text:label}),search),body);
 }
 // Шапка листания для дня, недели, месяца.
-function pager(title,step){
+// current: открыт ли уже текущий день/неделя/месяц — тогда кнопка «Сегодня» не нужна.
+function pager(title,step,current){
  return h('div',{class:'main-head'},h('div',{class:'cal-nav'},
   h('button',{type:'button',class:'icon-btn','aria-label':'Назад',onclick:()=>step(-1)},'‹'),
   h('strong',{class:'cal-title',text:title}),
   h('button',{type:'button',class:'icon-btn','aria-label':'Вперёд',onclick:()=>step(1)},'›'),
-  h('button',{type:'button',text:'Сегодня',onclick:()=>{const d=new Date();setPv({date:today(),month:new Date(d.getFullYear(),d.getMonth(),1)})}})));
+  current?null:h('button',{type:'button',class:'chip-btn',text:'Сегодня',title:'Вернуться к сегодняшнему дню (T)',onclick:()=>{const d=new Date();setPv({date:today(),month:new Date(d.getFullYear(),d.getMonth(),1)})}})));
 }
 function shiftDate(days){const d=addDays(fromYmd(pv.date),days);setPv({date:ymd(d),month:new Date(d.getFullYear(),d.getMonth(),1),sel:null})}
 function mainDay(box){
  const date=pv.date,d=fromYmd(date),tasks=workspace.tasks.filter(x=>x.due===date&&inCat(x)).sort(byAgenda);
  const title=dayLabel(date)+(['Сегодня','Завтра','Вчера'].includes(dayLabel(date))?', '+d.getDate()+' '+MONTHS_GEN[d.getMonth()]:'');
- box.append(pager(title,n=>shiftDate(n)));
+ box.append(pager(title,n=>shiftDate(n),date===today()));
  const allDay=dropTarget(h('div',{class:'allday'},h('span',{class:'slot-label',text:'Весь день'}),h('div',{class:'slot-items'},...tasks.filter(x=>!x.time).map(x=>taskRow(x,{compact:true,showDate:false})))),()=>({due:date,time:null}));
  const hours=h('div',{class:'timeline'});
  const timed=tasks.filter(x=>x.time),firstHour=Math.min(7,...timed.map(x=>Number(x.time.slice(0,2))));
@@ -283,7 +284,7 @@ function mainDay(box){
 function mainWeek(box){
  const d=fromYmd(pv.date),start=addDays(d,-((d.getDay()+6)%7)),end=addDays(start,6),t=today();
  const title=start.getDate()+' '+(start.getMonth()!==end.getMonth()?MONTHS_GEN[start.getMonth()]+' ':'')+'– '+end.getDate()+' '+MONTHS_GEN[end.getMonth()];
- box.append(pager(title,n=>shiftDate(7*n)));
+ box.append(pager(title,n=>shiftDate(7*n),t>=ymd(start)&&t<=ymd(end)));
  const cols=h('div',{class:'week'});
  for(let i=0;i<7;i++){
   const day=addDays(start,i),key=ymd(day),list=workspace.tasks.filter(x=>x.due===key&&inCat(x)).sort(byAgenda);
@@ -299,7 +300,7 @@ function mainMonth(box){
  const byDay=new Map();for(const x of workspace.tasks)if(x.due&&inCat(x)){if(!byDay.has(x.due))byDay.set(x.due,[]);byDay.get(x.due).push(x)}
  const notesByDay=new Set(workspace.notes.filter(n=>n.day).map(n=>n.day));
  const cap=w=>w[0].toUpperCase()+w.slice(1);
- box.append(pager(cap(MONTHS[m.getMonth()])+' '+m.getFullYear(),n=>setPv({month:new Date(m.getFullYear(),m.getMonth()+n,1)})));
+ box.append(pager(cap(MONTHS[m.getMonth()])+' '+m.getFullYear(),n=>setPv({month:new Date(m.getFullYear(),m.getMonth()+n,1)}),t.slice(0,7)===ymd(m).slice(0,7)));
  const grid=h('div',{class:'cal-grid'},...['пн','вт','ср','чт','пт','сб','вс'].map(d=>h('div',{class:'cal-wd',text:d})));
  for(let i=0;i<42;i++){
   const d=addDays(start,i),key=ymd(d),list=(byDay.get(key)||[]).sort(byAgenda);
