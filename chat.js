@@ -28,6 +28,10 @@ const factMeta=require('./meta');
 const strength=require('./strength');
 const thoughts=require('./thoughts');
 const inner=require('./inner');
+const dialog=require('./context');
+const infer=require('./infer');
+const plans=require('./plans');
+const evidence=require('./evidence');
 const guesses=require('./guesses');
 const curiosity=require('./curiosity');
 const initiative=require('./initiative');
@@ -502,11 +506,12 @@ function cleanHistory(history){
  if(!Array.isArray(history))return [];
  return history.filter(m=>m&&['user','assistant'].includes(m.role)&&typeof m.text==='string').slice(-MAX_HISTORY).map(m=>({role:m.role,content:m.text.slice(0,MAX_MESSAGE)}));
 }
-function localReply(name,facts,notes,enabled,past=[],earlier=[]){
+function localReply(name,facts,notes,enabled,past=[],earlier=[],inferred=[]){
  const lines=[];
  const fix=past.find(e=>e.feedback==='fix'&&e.correction);
  if(fix)lines.push('Помню, на похожий вопрос вы меня поправили: «'+fix.correction.slice(0,200)+'»\n');
  if(facts.length){lines.push('Вот что я помню:');for(const f of facts)lines.push(factLine(f)+(f.tag?' '+f.tag:''))}
+ if(inferred.length){lines.push((facts.length?'\n':'')+'Из этого следует:');for(const d of inferred)lines.push('• '+d.subject+' — '+d.predicate+': '+d.object+' ('+d.why+')')}
  if(notes.length){lines.push(facts.length?'\nИ в заметках:':'Нашла в заметках:');for(const n of notes)lines.push(noteLine(n))}
  if(earlier.length){lines.push((lines.length?'\n':'')+'Вы говорили мне раньше:');for(const m of earlier)lines.push('• '+new Date(m.at).toLocaleDateString('ru-RU')+': «'+m.text.slice(0,160)+'»')}
  if(!lines.length)lines.push('Пока ничего об этом не знаю.'+(enabled.has('facts')?' Скажите «запомни субъект | связь | объект», и я запомню.':''));
@@ -520,7 +525,7 @@ async function modelReply(name,message,all,facts,notes,enabled,impl,result,past=
  const ws=history.length?{}:await storage.load().catch(()=>({}));
  const context=memoryBlock([...facts.map(f=>'ФАКТ: '+f.subject+' | '+f.predicate+' | '+f.object+(f.tag?' '+f.tag:'')),...notes.map(n=>'ЗАМЕТКА: '+n.title+' — '+(n.content||'').slice(0,500)),...earlier.map(m=>'ПОЛЬЗОВАТЕЛЬ ГОВОРИЛ '+new Date(m.at).toLocaleDateString('ru-RU')+': '+m.text.slice(0,400)),
   // Сводки тем, к которым относятся вспомненные факты, и выводы, сделанные в простое.
-  ...(mind.summaries||[]).map(t=>'СВОДКА ТЕМЫ «'+t.label+'»: '+t.summary),...(mind.cards||[]).map(c=>'КАРТОЧКА «'+c.name+'»'+(c.type?' ('+c.type+')':'')+(c.aliases.length?' [она же: '+c.aliases.join(', ')+']':'')+': '+c.description),...(mind.insights||[]).map(i=>'ВЫВОД: '+i.text)]);
+  ...(mind.summaries||[]).map(t=>'СВОДКА ТЕМЫ «'+t.label+'»: '+t.summary),...(mind.cards||[]).map(c=>'КАРТОЧКА «'+c.name+'»'+(c.type?' ('+c.type+')':'')+(c.aliases.length?' [она же: '+c.aliases.join(', ')+']':'')+': '+c.description),...(mind.insights||[]).map(i=>'ВЫВОД: '+i.text),...(mind.inferred||[]).map(d=>'СЛЕДУЕТ ИЗ ФАКТОВ: '+infer.text(d))]);
  const allowed=Object.keys(SCHEMAS).filter(fn=>enabled.has(OWNER[fn]));
  const tools=allowed.map(fn=>({type:'function',function:{name:fn,...SCHEMAS[fn]}}));
  const persona=(llm.config()?.systemPrompt||'').trim(),selfEdit=allowed.includes('core_memory_append');
@@ -535,7 +540,10 @@ async function modelReply(name,message,all,facts,notes,enabled,impl,result,past=
  let curious='';try{if(thoughts.on('curiosity'))curious=curiosity.turn({busy:!!asking});side+=curious}catch(e){console.error('Curiosity failed:',e.name)}
  try{if(thoughts.on('initiative'))side+=initiative.promptText({offer:!asking&&!curious})}catch(e){console.error('Initiative prompt failed:',e.name)}
  // Пометки фактов: в прошлом, мнение, уверенность, откуда известно.
- if(facts.some(f=>f.tag))side+='\nПометки у фактов: «в прошлом» — уже не так; [мнение] — чьё-то мнение, а не факт; уверенность ниже 100% — говори осторожно.';
+ // Честное «не знаю»: о человеке и его мире ничего не нашлось — не выдумывать.
+ const unknown=thoughts.on('honest')&&!facts.length&&!notes.length&&!earlier.length&&!(mind.inferred||[]).length&&inner.personal(message);
+ if(unknown){result.thinking.unknown=true;side+='\nВ памяти об этом ничего не нашлось. Не выдумывай имена, даты, места и подробности: честно скажи, что не помнишь или не знаешь, и предложи рассказать — ты запомнишь. Общие знания можно.'}
+ if(facts.some(f=>f.tag))side+='\nПометки у фактов: «в прошлом» — уже не так; [мнение] — чьё-то мнение, а не факт; уверенность ниже 100% — говори осторожно; «план» — это намерение со сроком, а не свершившееся.';
  // Внутренний голос: короткий план до ответа.
  if(thoughts.on('innerVoice')){try{const p=await inner.plan(llm.complete,{message,facts,notes,history});if(p){result.thinking.plan=p;thoughts.add('plan',p);side+='\nТвой план ответа (внутренний голос, не пересказывай его дословно):\n'+p}}catch(e){console.error('Inner voice failed:',e.name)}}
  const system=(persona||'Ты '+name+' — девятихвостая лиса-кицунэ, хранительница личной памяти Tenmayurika. Отвечай по-русски, тепло и кратко.')+' Твоё имя: '+name+'. Сегодня '+new Date().toLocaleDateString('ru-RU')+'.'+(allowed.length?' Используй инструменты, когда пользователь просит что-то сделать.':'')
@@ -555,8 +563,10 @@ async function modelReply(name,message,all,facts,notes,enabled,impl,result,past=
   if(!calls.length){if(typeof msg.content!=='string'||!msg.content.trim())throw Error('Empty chat reply');
    let text=msg.content.trim();
    // Сверка черновика с памятью: если он утверждает то, чего в памяти нет, ответ исправляется.
-   if(thoughts.on('verify')&&(facts.length||notes.length)&&!result.secrets.length){try{const c=await inner.verify(llm.complete,{message,reply:text,facts,notes});
+   // О личном ничего не нашлось — тоже сверка: именно тут легче всего выдумать.
+   if(thoughts.on('verify')&&(facts.length||notes.length||(unknown&&!result.tools.length))&&!result.secrets.length){try{const c=await inner.verify(llm.complete,{message,reply:text,facts,notes});
     if(!c.ok&&c.fixed&&c.fixed.length>=2){result.thinking.check='fixed';thoughts.add('check','Сверила черновик с памятью и поправила ответ.',{before:text.slice(0,300)});text=c.fixed}else{result.thinking.check='ok';thoughts.add('check','Сверила ответ с памятью: сходится.')}}catch(e){console.error('Verify failed:',e.name)}}
+   if(unknown)thoughts.add('unknown','О «'+message.slice(0,80)+'» в памяти ничего нет — честно сказала, что не знаю.');
    return text+(result.secrets.length?'\n\n'+result.secrets.join('\n\n'):'')}
   messages.push({role:'assistant',content:msg.content||null,tool_calls:calls});
   for(const call of calls){
@@ -662,7 +672,10 @@ async function answer(input,message,ctx){
   track(result,command.fn,out);
   return {reply:out.text,source:'tool',understood:'команда '+command.fn,...pub(result)};
  }
- let {facts,notes}=await recall(message);
+ // Вопрос в контексте разговора: «а она где работает?» ищется вместе с тем, о ком шла речь.
+ let query=message;
+ try{if(thoughts.on('context')){const c=dialog.expand(message,cleanHistory(input.history));if(c.query!==message){query=c.query;result.thinking.context=c.about.length?c.about:[c.borrowed];thoughts.add('context',c.about.length?'Поняла, о ком речь: '+c.about.join(', '):'Достроила вопрос по прошлому: «'+c.query+'»')}}}catch(e){console.error('Context failed:',e.name)}
+ let {facts,notes}=await recall(query);
  // Сложный вопрос — по частям: память ищется по каждому подвопросу отдельно.
  try{const parts=thoughts.on('split')?inner.split(message):[];if(parts.length){const haveF=new Set(facts.map(f=>f.id)),haveN=new Set(notes.map(n=>n.id));
   for(const part of parts){const r=await recall(part,{factLimit:4,noteLimit:2});for(const f of r.facts)if(!haveF.has(f.id)&&facts.length<12){facts.push(f);haveF.add(f.id)}for(const n of r.notes)if(!haveN.has(n.id)&&notes.length<6){notes.push(n);haveN.add(n.id)}}
@@ -687,7 +700,9 @@ async function answer(input,message,ctx){
  let matched=[],mind={};
  try{matched=skills.match(message,2);mind={skills:skills.promptText(matched),preferences:preferences.promptText(),summaries:reflect.summariesFor(facts.map(f=>f.id)),insights:reflect.insightsFor(message,facts.map(f=>f.id)),cards:growth.cardsFor(facts)}}catch(e){console.error('Mind lookup failed:',e.name)}
  // Пометки фактов (время, мнение, уверенность, источник) и пробуждение спящих.
- try{const m=factMeta.ensure(facts);for(const f of facts){const t=factMeta.tag(f,f.meta||m.get(f.id));if(t)f.tag=t}const woke=strength.wake(facts.map(f=>f.id));if(woke.length)thoughts.add('wake','Проснулось воспоминание: '+facts.filter(f=>woke.includes(f.id)).map(f=>f.subject+' — '+f.predicate+' '+f.object).slice(0,3).join('; '))}catch(e){console.error('Fact meta failed:',e.name)}
+ try{const m=factMeta.ensure(facts);const pl=plans.get(facts.map(f=>f.id)),ev=evidence.count(facts.map(f=>f.id));for(const f of facts){const n=ev.get(f.id)||0;const t=[factMeta.tag(f,f.meta||m.get(f.id)),plans.tag(pl.get(f.id)),n?'(подтверждено '+(n+1)+' раза)':''].filter(Boolean).join(' ');if(t)f.tag=t}const woke=strength.wake(facts.map(f=>f.id));if(woke.length)thoughts.add('wake','Проснулось воспоминание: '+facts.filter(f=>woke.includes(f.id)).map(f=>f.subject+' — '+f.predicate+' '+f.object).slice(0,3).join('; '))}catch(e){console.error('Fact meta failed:',e.name)}
+ // Логические выводы вокруг найденного: родство через шаг, взаимные связи, возраст, место через место.
+ try{if(thoughts.on('infer')){const inf=infer.around(facts,{message});if(inf.length){mind.inferred=inf;result.thinking.inferred=inf.map(infer.text);thoughts.add('infer','Вывела: '+inf.slice(0,2).map(infer.text).join('; '))}}}catch(e){console.error('Inference failed:',e.name)}
  const understood=(words(message).join(', ')||'без ключевых слов')+(past.length?' · опыт: '+past.length:'')+(earlier.length?' · из разговоров: '+earlier.length:'')+(matched.length?' · навык: '+matched.length:'');
  const meta={understood,used:past.map(e=>e.id),skills:matched};
  // Что аватар вспомнил для ответа — «Мозг» подсвечивает эти нейроны.
@@ -697,12 +712,12 @@ async function answer(input,message,ctx){
   catch(e){
    const why=modelFailure(e);console.error('Chat model failed:',why);
    const done=result.done.length?'Модель не ответила до конца, но уже сделано:\n'+result.done.map(t=>'• '+t).join('\n'):null;
-   return {reply:done||'⚠ Модель не ответила: '+why+'\nПока отвечаю без неё.\n\n'+localReply(name,facts,notes,enabled,past,earlier),source:'local',fallback:true,modelError:why,...meta,...pub(result)};
+   return {reply:done||'⚠ Модель не ответила: '+why+'\nПока отвечаю без неё.\n\n'+localReply(name,facts,notes,enabled,past,earlier,mind.inferred||[]),source:'local',fallback:true,modelError:why,...meta,...pub(result)};
   }
  }
  // Без модели честно говорим, что она не подключена, если ответить по памяти нечего.
- const local=localReply(name,facts,notes,enabled,past,earlier);
- return {reply:facts.length||notes.length||earlier.length?local:local+'\n\nЯзыковая модель не подключена, поэтому свободный разговор пока не получится. Правый клик по мне → «Модель ИИ»: ключ, модель, «Сохранить», затем «Проверить связь».',source:'local',...meta,...pub(result)};
+ const local=localReply(name,facts,notes,enabled,past,earlier,mind.inferred||[]);
+ return {reply:facts.length||notes.length||earlier.length||(mind.inferred||[]).length?local:local+'\n\nЯзыковая модель не подключена, поэтому свободный разговор пока не получится. Правый клик по мне → «Модель ИИ»: ключ, модель, «Сохранить», затем «Проверить связь».',source:'local',...meta,...pub(result)};
 }
 // Разбор строки быстрого ввода планера. Префиксы «дело:», «рабочее дело:» и т.п. допускаются.
 function parseTask(text){

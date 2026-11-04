@@ -24,7 +24,7 @@ const CUTOFF=.2,MMR_LAMBDA=.35;
 const rrf=i=>1/(8+i);
 const VECTOR_TIMEOUT_MS=2500;
 async function vectorNotes(text){
- if(!process.env.EMBEDDING_URL)return [];
+ if(!require('./llm').embedConfig())return [];
  try{
   const search=require('./vector-store').search(text,8);
   const r=await Promise.race([search,new Promise(res=>{const t=setTimeout(()=>res({results:[]}),VECTOR_TIMEOUT_MS);t.unref?.()})]);

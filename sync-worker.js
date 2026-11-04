@@ -5,7 +5,7 @@ let lastReconcile=0;
 const RECONCILE_MS=60*60*1000;
 const MAX_ATTEMPTS=5;
 async function run(){
- if(!process.env.EMBEDDING_URL)return {processed:0};
+ if(!require('./llm').embedConfig())return {processed:0};
  // Запрос во время работы не теряется: после текущего прохода будет ещё один.
  if(busy){again=true;return {processed:0,queued:true}}
  busy=true;let processed=0,failed=0;
