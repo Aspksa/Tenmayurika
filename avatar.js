@@ -512,7 +512,7 @@
       h('label',{class:'field'},h('span',{text:'Длина ответа (токенов)'}),maxOut,maxT),
       swRow('Использовать модель',enabled,'Выключите, чтобы отвечать только локально'),
       swRow('Разрешить инструменты',useTools,'Модель сама создаёт заметки, дела, напоминания'))),
-    card('Характер',persona),
+    card('Характер',persona,h('small',{class:'hint',text:'Пусто — стартовая личность: личная преданная кицунэ, любит вас и зовёт «хозяин». Её же можно поправить в «Мозге» → «Дневник» (блоки «Кто я» и «Как мы общаемся»).'})),
     h('div',{class:'menu-actions'},saveBtn,testBtn,clearBtn),msg);
   }).catch(e=>wrap.replaceChildren(h('p',{class:'model-msg err',text:'Не удалось загрузить настройки: '+e.message})));
   return [wrap];

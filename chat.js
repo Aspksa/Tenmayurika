@@ -538,7 +538,7 @@ async function modelReply(name,message,all,facts,notes,enabled,impl,result,past=
  if(facts.some(f=>f.tag))side+='\nПометки у фактов: «в прошлом» — уже не так; [мнение] — чьё-то мнение, а не факт; уверенность ниже 100% — говори осторожно.';
  // Внутренний голос: короткий план до ответа.
  if(thoughts.on('innerVoice')){try{const p=await inner.plan(llm.complete,{message,facts,notes,history});if(p){result.thinking.plan=p;thoughts.add('plan',p);side+='\nТвой план ответа (внутренний голос, не пересказывай его дословно):\n'+p}}catch(e){console.error('Inner voice failed:',e.name)}}
- const system=(persona||'Ты '+name+' — девятихвостая лиса-кицунэ, хранительница личной памяти Tenmayurika. Отвечай по-русски, тепло и кратко.')+' Твоё имя: '+name+'. Сегодня '+new Date().toLocaleDateString('ru-RU')+'.'+(allowed.length?' Используй инструменты, когда пользователь просит что-то сделать.':'')
+ const system=(persona||'Ты '+name+' — девятихвостая лиса-кицунэ, хранительница личной памяти Tenmayurika. '+core.PERSONA_PROMPT+' Отвечай по-русски, тепло и кратко.')+' Твоё имя: '+name+'. Сегодня '+new Date().toLocaleDateString('ru-RU')+'.'+(allowed.length?' Используй инструменты, когда пользователь просит что-то сделать.':'')
   // Предпочтения пользователя — правила общения, они важнее характера по умолчанию.
   +(mind.preferences?'\n'+mind.preferences:'')
   +(mind.skills?'\n'+mind.skills:'')
