@@ -241,6 +241,7 @@ if(p.startsWith('/api/library/')){
   if(req.method==='GET'&&p==='/api/library/duplicates')return respond(res,200,await library.duplicates());
   if(req.method==='GET'&&p==='/api/library/document')return respond(res,200,await libraryDocuments.describe(url.searchParams.get('path')||''));
   if(req.method==='GET'&&p==='/api/library/summary')return respond(res,200,await libraryAnalysis.analyze(url.searchParams.get('path')||''));
+  if(req.method==='GET'&&p==='/api/library/suggest-name')return respond(res,200,await libraryAnalysis.suggestName(url.searchParams.get('path')||''));
   if(req.method==='GET'&&p==='/api/library/similar')return respond(res,200,await libraryAnalysis.similar(url.searchParams.get('path')||''));
   if(req.method==='GET'&&p==='/api/library/answer')return respond(res,200,await libraryAnalysis.answer(url.searchParams.get('q')||''));
   if(req.method==='GET'&&p==='/api/library/suggest-folder')return respond(res,200,{folder:libraryAnalysis.suggestFolder(url.searchParams.get('name')||'')});
