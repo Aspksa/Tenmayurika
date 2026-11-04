@@ -207,9 +207,9 @@ function makeTools(ctx){
    const q=String(query||'').trim();if(!q)return {ok:false,text:'Что поискать в библиотеке?'};
    const [names,content]=await Promise.all([library.search(q),library.searchText(q)]);
    const files=names.results.slice(0,5).map(x=>'• '+x.path+(x.type==='folder'?' (папка)':''));
-   const fragments=content.results.slice(0,5).map(x=>'• '+x.path+', строка '+x.line+': '+x.excerpt);
+   const fragments=content.results.slice(0,5).map(x=>'• '+x.path+(x.page?', страница '+x.page:', строка '+x.line)+': '+x.excerpt);
    const result=[files.length?'По названию:\n'+files.join('\n'):'',fragments.length?'В содержимом:\n'+fragments.join('\n'):''].filter(Boolean);
-   return {ok:true,text:result.length?result.join('\n\n')+(names.truncated||content.truncated?'\nПоиск ограничен, показаны не все результаты.':''):'В библиотеке по запросу «'+q+'» ничего не нашла.'};
+   return {ok:true,text:(result.length?result.join('\n\n'):'В библиотеке по запросу «'+q+'» ничего не нашла.')+(names.truncated||content.truncated?'\nПоиск ограничен, показаны не все результаты.':'')+(content.unreadable?'\nНе удалось прочитать файлов: '+content.unreadable+'.':'')};
   },
   // Самоправка памяти прямо в разговоре (идея самоправки из letta-code).
   async correct_fact({subject,predicate,object,new_object}){

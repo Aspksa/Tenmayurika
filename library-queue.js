@@ -11,7 +11,7 @@ async function load(){if(state)return state;try{const input=JSON.parse(await fs.
 async function save(){const data=JSON.stringify(state);saveChain=saveChain.catch(()=>{}).then(async()=>{await fs.mkdir(path.dirname(FILE),{recursive:true});const temp=FILE+'.tmp';await fs.writeFile(temp,data,{mode:0o600});await fs.rename(temp,FILE)});return saveChain}
 async function scan(){
  const s=await load(),pending=[''],found=new Set();let seen=0,truncated=false;
- while(pending.length&&seen<MAX_ENTRIES){const dir=pending.pop();for(const item of await library.list(dir)){if(++seen>MAX_ENTRIES){truncated=true;break}if(item.type==='folder'){pending.push(item.path);continue}if(!/\.(txt|md|csv|json|docx|xlsx)$/i.test(item.name))continue;found.add(item.path);const old=s.items[item.path];if(!old||old.modified!==item.modified||old.size!==item.size)s.items[item.path]={path:item.path,modified:item.modified,size:item.size,status:'queued',attempts:0,error:null}}}
+ while(pending.length&&seen<MAX_ENTRIES){const dir=pending.pop();for(const item of await library.list(dir)){if(++seen>MAX_ENTRIES){truncated=true;break}if(item.type==='folder'){pending.push(item.path);continue}if(!/\.(txt|md|csv|json|docx|xlsx|pdf)$/i.test(item.name))continue;found.add(item.path);const old=s.items[item.path];if(!old||old.modified!==item.modified||old.size!==item.size)s.items[item.path]={path:item.path,modified:item.modified,size:item.size,status:'queued',attempts:0,error:null}}}
  truncated=truncated||pending.length>0;if(!truncated)for(const key of Object.keys(s.items))if(!found.has(key))delete s.items[key];
  s.lastScan=new Date().toISOString();await save();return {seen,truncated};
 }

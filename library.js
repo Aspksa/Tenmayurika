@@ -46,19 +46,19 @@ module.exports={ROOT,segments,list,mkdir,upload,filePath,search};
 // Поиск по содержимому локальных текстовых документов; большие и двоичные файлы пропускаются.
 async function searchText(query){
  if(typeof query!=='string'||!query.trim()||query.length>200)throw new TypeError('Введите текст для поиска');
- const needle=query.trim().toLocaleLowerCase('ru'),pending=[''],results=[];let scanned=0;
+ const needle=query.trim().toLocaleLowerCase('ru'),pending=[''],results=[];let scanned=0,unreadable=0;
  while(pending.length&&scanned<5000&&results.length<100){
   const dir=pending.pop();for(const entry of await list(dir)){
    if(++scanned>5000)break;
    if(entry.type==='folder'){pending.push(entry.path);continue}
-   if(!/\.(txt|md|csv|json|docx|xlsx)$/i.test(entry.name)||entry.size>16*1024*1024)continue;
-   let lines;try{lines=(await require('./library-documents').read(entry.path)).text.split(/\r?\n/)}catch{continue}
+   if(!/\.(txt|md|csv|json|docx|xlsx|pdf)$/i.test(entry.name)||entry.size>16*1024*1024)continue;
+   let lines;try{lines=(await require('./library-documents').read(entry.path)).text.split(/\r?\n/)}catch{unreadable++;continue}
    const index=lines.findIndex(line=>line.toLocaleLowerCase('ru').includes(needle));
-   if(index!==-1)results.push({path:entry.path,line:index+1,excerpt:lines[index].slice(0,300)});
+   if(index!==-1){const marker=/\.pdf$/i.test(entry.path)?lines.slice(0,index+1).reverse().find(x=>/^\[Страница \d+\]$/.test(x)):null;results.push({path:entry.path,line:index+1,...(marker?{page:Number(marker.match(/\d+/)[0])}:{}),excerpt:lines[index].slice(0,300)})}
    if(results.length>=100)break;
   }
  }
- return {results,scanned,truncated:pending.length>0||scanned>5000||results.length>=100};
+ return {results,scanned,unreadable,truncated:pending.length>0||scanned>5000||results.length>=100};
 }
 module.exports.searchText=searchText;
 
