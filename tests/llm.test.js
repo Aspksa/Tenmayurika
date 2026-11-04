@@ -37,3 +37,14 @@ test('model settings: key is stored on disk only, models are listed, chat uses t
   assert.equal(v.hasKey,false);assert.equal(v.active,false);
  }finally{await new Promise(r=>server.close(r));await new Promise(r=>fake.close(r))}
 });
+test('a dropped pooled connection is retried once on a fresh one',async()=>{
+ let n=0;
+ const fake=http.createServer((req,res)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>{if(++n===1)return req.socket.destroy();res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({choices:[{message:{role:'assistant',content:'Снова на связи.'}}]}))})});
+ await new Promise(r=>fake.listen(0,'127.0.0.1',r));
+ const llm=require('../llm');
+ try{
+  llm.save({provider:'custom',baseUrl:'http://127.0.0.1:'+fake.address().port+'/v1',apiKey:'k-1',model:'m',enabled:true});
+  const msg=await llm.complete({messages:[{role:'user',content:'Ты тут?'}]});
+  assert.equal(msg.content,'Снова на связи.');assert.equal(n,2);
+ }finally{await new Promise(r=>fake.close(r))}
+});
