@@ -9,7 +9,7 @@ const MAX_FILE=1024*1024*1024;
 function segments(value){
  if(typeof value!=='string'||value.length>2000||value.includes('\\')||value.includes('\0')||value.startsWith('/'))throw new TypeError('Некорректный путь');
  const items=value?value.split('/'):[];
- for(const item of items)if(!item||item==='.'||item==='..'||item.length>180||/[<>:"|?*\x00-\x1f]/.test(item)||/[. ]$/.test(item)||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(item))throw new TypeError('Недопустимое имя файла или папки');
+ for(const item of items)if(!item||item==='.'||item==='..'||item.length>180||/[<>:"|?*]/.test(item)||[...item].some(c=>c.charCodeAt(0)<32)||/[. ]$/.test(item)||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(item))throw new TypeError('Недопустимое имя файла или папки');
  return items;
 }
 async function resolvePath(value,{allowMissingLast=false}={}){
