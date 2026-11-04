@@ -2,7 +2,9 @@
 // Настройки языковой модели для аватара (Cloud.ru Foundation Models или любой OpenAI-совместимый сервис).
 // Хранятся локально в data/llm-settings.json (папка data не попадает в git). Ключ никогда не отдаётся в браузер.
 // Если файл не настроен, используются переменные .env: CHAT_URL, CHAT_API_KEY, CHAT_MODEL.
-const fs=require('node:fs'),path=require('node:path');
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+const usage=require('./cloud-usage');
+const embedCache=new Map(),embedPending=new Map();
 
 const PRESETS={
  cloudru:{label:'Cloud.ru Foundation Models',baseUrl:'https://foundation-models.api.cloud.ru/v1',keyUrl:'https://console.cloud.ru/'},
@@ -73,7 +75,7 @@ function headers(key){return {'Content-Type':'application/json',...(key?{Authori
 async function listModels(){
  const s=stored()||{...DEFAULTS};
  if(!s.baseUrl)throw new TypeError('Сначала укажите адрес API');
- const r=await fetch(trimSlash(s.baseUrl)+'/models',{headers:headers(s.apiKey),signal:AbortSignal.timeout(15000)});
+ const url=trimSlash(s.baseUrl)+'/models';let r;try{r=await fetch(url,{headers:headers(s.apiKey),signal:AbortSignal.timeout(15000)});usage.record({service:new URL(url).hostname,kind:'models',purpose:'список моделей',model:'',status:String(r.status)})}catch(e){usage.record({service:new URL(url).hostname,kind:'models',purpose:'список моделей',model:'',status:'network_error'});throw e}
  if(r.status===401||r.status===403)throw new TypeError('Ключ не подошёл (HTTP '+r.status+')');
  if(!r.ok)throw new TypeError('Сервис моделей ответил HTTP '+r.status);
  const data=await r.json(),list=Array.isArray(data.data)?data.data:Array.isArray(data)?data:[];
@@ -94,7 +96,7 @@ async function complete({messages,tools,temperature}){
  // temperature — разовая поправка (самонастройка), иначе из настроек.
  const t=typeof temperature==='number'&&Number.isFinite(temperature)?temperature:c.temperature;
  const body={model:c.model,messages,...(t!==undefined?{temperature:t}:{}),...(c.maxTokens?{max_tokens:c.maxTokens}:{})};
- const once=withTools=>fetch(c.url,{method:'POST',headers:headers(c.key),body:JSON.stringify({...body,...(withTools&&tools?.length?{tools}:{})}),signal:AbortSignal.timeout(TIMEOUT_MS)});
+ const purpose=usage.purpose(new Error().stack||'');const once=async withTools=>{let r;try{r=await fetch(c.url,{method:'POST',headers:headers(c.key),body:JSON.stringify({...body,...(withTools&&tools?.length?{tools}:{})}),signal:AbortSignal.timeout(TIMEOUT_MS)});let u={};try{u=(await r.clone().json()).usage||{}}catch{}usage.record({service:new URL(c.url).hostname,kind:'chat',purpose,model:c.model,status:String(r.status),input:Number.isFinite(u.prompt_tokens)?u.prompt_tokens:null,output:Number.isFinite(u.completion_tokens)?u.completion_tokens:null});return r}catch(e){usage.record({service:new URL(c.url).hostname,kind:'chat',purpose,model:c.model,status:'network_error'});throw e}};
  // Соединение из пула могло закрыться на той стороне, пока простаивало (keep-alive): один повтор на свежем.
  const send=async withTools=>{try{return await once(withTools)}catch(e){if(!staleSocket(e))throw e;return once(withTools)}};
  const useTools=c.useTools&&tools?.length;
@@ -119,14 +121,16 @@ function embedConfig(){
 // Строка → вектор, массив строк → массив векторов (в том же порядке). Без настройки — null.
 async function embed(input,{timeoutMs=15000}={}){
  const c=embedConfig();if(!c)return null;
- const many=Array.isArray(input),list=(many?input:[input]).map(t=>String(t||'').slice(0,4000));
- if(!list.length)return many?[]:null;
- const r=await fetch(c.url,{method:'POST',headers:headers(c.key),body:JSON.stringify({model:c.model,input:many?list:list[0]}),signal:AbortSignal.timeout(timeoutMs)});
- if(!r.ok)throw Error('Embedding API HTTP '+r.status);
- const data=await r.json(),rows=Array.isArray(data.data)?[...data.data].sort((a,b)=>(a.index??0)-(b.index??0)):[];
- const out=rows.map(x=>x&&x.embedding);
- if(out.length!==list.length||!out.every(v=>Array.isArray(v)&&v.length&&v.every(Number.isFinite)))throw Error('Invalid embedding vector');
- return many?out:out[0];
+ const many=Array.isArray(input),list=(many?input:[input]).map(t=>String(t||'').slice(0,4000));if(!list.length)return many?[]:null;
+ const key=!many?crypto.createHash('sha256').update(JSON.stringify([c.url,c.key,c.model,list[0]])).digest('hex'):null,now=Date.now();
+ if(key){const cached=embedCache.get(key);if(cached&&cached.expires>now)return cached.value.slice();if(cached)embedCache.delete(key);if(embedPending.has(key))return (await embedPending.get(key)).slice()}
+ const purpose=usage.purpose(new Error().stack||'');
+ const work=(async()=>{let r;try{r=await fetch(c.url,{method:'POST',headers:headers(c.key),body:JSON.stringify({model:c.model,input:many?list:list[0]}),signal:AbortSignal.timeout(timeoutMs)})}catch(e){usage.record({service:new URL(c.url).hostname,kind:'embedding',purpose,model:c.model,status:'network_error'});throw e}
+ let data;try{data=await r.json()}catch(e){usage.record({service:new URL(c.url).hostname,kind:'embedding',purpose,model:c.model,status:String(r.status)});throw e}
+ const u=data.usage||{};usage.record({service:new URL(c.url).hostname,kind:'embedding',purpose,model:c.model,status:String(r.status),input:Number.isFinite(u.prompt_tokens)?u.prompt_tokens:null,output:Number.isFinite(u.completion_tokens)?u.completion_tokens:null});if(!r.ok)throw Error('Embedding API HTTP '+r.status);
+ const rows=Array.isArray(data.data)?[...data.data].sort((a,b)=>(a.index??0)-(b.index??0)):[],out=rows.map(x=>x&&x.embedding);if(out.length!==list.length||!out.every(v=>Array.isArray(v)&&v.length&&v.every(Number.isFinite)))throw Error('Invalid embedding vector');
+ if(key){embedCache.set(key,{value:out[0].slice(),expires:Date.now()+300000});while(embedCache.size>128)embedCache.delete(embedCache.keys().next().value)}return many?out:out[0]})();
+ if(key)embedPending.set(key,work);try{return await work}finally{if(key)embedPending.delete(key)}
 }
 async function embedTest(){
  const c=embedConfig();if(!c)throw new TypeError('Модель эмбеддингов не выбрана');

@@ -72,12 +72,12 @@ function known(f){
  try{const k=x=>String(x).toLocaleLowerCase();return memory.queryFacts({subject:f.subject,limit:500}).find(x=>!x.valid_to&&k(x.predicate)===k(f.predicate)&&k(x.object)===k(f.object))||null}catch{return null}
 }
 // input: {text, source?, domain?, context?:[{role,text}]}. Опции: bank — банк навыков для пробы (без записи статистики), dry — не считать применение.
-async function extract(input,{bank=null,dry=false}={}){
+async function extract(input,{bank=null,dry=false,prepared=null}={}){
  if(!input||typeof input!=='object'||typeof input.text!=='string'||!input.text.trim())throw new TypeError('Invalid text');
  const text=input.text.slice(0,MAX_TEXT);
  const domain=['chat','note','task'].includes(input.domain)?input.domain:memskills.domainOf(input.source);
  let facts,source='rules',note,updates=[],retire=[],used=[];
- if(llm.config()){try{
+ if(prepared){facts=prepared.result.facts;updates=prepared.result.updates;retire=prepared.result.retire;used=prepared.skills.map(s=>s.name);source='model';if(!dry)memskills.recordUse(used,typeof input.source==='string'?input.source:null)}else if(llm.config()){try{
   const similar=similarFacts(text),skills=memskills.select((Array.isArray(input.context)?input.context.map(m=>m&&m.text||'').join(' ').slice(-600)+' ':'')+text,{domain,similar:similar.length,bank});
   const r=await byModel(text,skills,similar,input.context);facts=r.facts;updates=r.updates;retire=r.retire;used=skills.map(s=>s.name);source='model';
   if(!dry)memskills.recordUse(used,typeof input.source==='string'?input.source:null);
@@ -87,4 +87,12 @@ async function extract(input,{bank=null,dry=false}={}){
  for(const f of facts){const key=[f.subject,f.predicate,f.object].join('|').toLocaleLowerCase();if(seen.has(key))continue;seen.add(key);const k=known(f);if(k){if(!confirmed.includes(k.id))confirmed.push(k.id);continue}out.push(f);if(out.length>=MAX_FACTS)break}
  return {facts:out,confirmed,source,domain,skills:used,updates:updates.map(u=>({id:u.old.id,old:{subject:u.old.subject,predicate:u.old.predicate,object:u.old.object},fact:u.fact})),retire:retire.map(f=>({id:f.id,subject:f.subject,predicate:f.predicate,object:f.object})),...(note?{note}:{})};
 }
-module.exports={extract,byRules,parseLines,parseOps};
+// Model output must contain every source separately; otherwise fall back to independent extraction.
+async function extractBatch(inputs){
+ if(!Array.isArray(inputs)||inputs.length<2||!llm.config())return Promise.all(inputs.map(x=>extract(x)));
+ const data=inputs.map((input,i)=>{const text=input.text.slice(0,MAX_TEXT),similar=similarFacts(text),skills=memskills.select((input.context||[]).map(m=>m.text||'').join(' ').slice(-600)+' '+text,{domain:'chat',similar:similar.length});return {id:i,text,similar,skills,context:input.context||[]}});
+ try{const blocks=data.map(x=>({id:x.id,text:x.text,context:x.context,skills:memskills.promptFor(x.skills),known:x.similar.map((f,i)=>({number:i+1,subject:f.subject,predicate:f.predicate,object:f.object}))}));const msg=await llm.complete({messages:[{role:'system',content:'Извлеки устойчивые факты отдельно для каждого сообщения. Верни только JSON-массив объектов {"id": номер, "lines": "строки"}. Для каждого id обязательно один объект. В lines используй FACT: субъект | связь | объект; UPDATE: номер известного факта | субъект | связь | объект; RETIRE: номер; либо NONE. Не смешивай источники. Контекст — только для понимания местоимений, не записывай его как факты.'},{role:'user',content:JSON.stringify(blocks)}]});const raw=String(msg.content||'').trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'');const parsed=JSON.parse(raw);if(!Array.isArray(parsed)||parsed.length!==data.length)throw Error('Incomplete batch');const byId=new Map();for(const item of parsed){if(!Number.isInteger(item.id)||item.id<0||item.id>=data.length||byId.has(item.id)||typeof item.lines!=='string')throw Error('Invalid batch');byId.set(item.id,item.lines)}
+ const out=[];for(const x of data){const lines=byId.get(x.id);if(!/^(?:\s*(?:FACT:|UPDATE:|RETIRE:|NONE)\s*.*\s*)+$/im.test(lines))throw Error('Invalid response');out.push(await extract(inputs[x.id],{prepared:{skills:x.skills,result:{facts:parseLines(lines),...parseOps(lines,x.similar)}}}))}return out;
+ }catch(e){console.error('Batch learning fallback:',e.name);const out=[];for(const input of inputs)out.push(await extract(input));return out}
+}
+module.exports={extract,extractBatch,byRules,parseLines,parseOps};

@@ -460,7 +460,7 @@ function mount(host){
     const r=await fetch('/api/recall?q='+encodeURIComponent(raw));if(!r.ok||seq!==findSeq)return;const d=await r.json();if(seq!==findSeq)return;
     for(const x of [...d.facts.map(f=>'f:'+f.id),...d.notes.map(n=>'n:'+n.id)]){const n=neurons.get(x);if(!n)continue;focusItems.add(x);focusLobes.add(n.lobe.id)}
     find.classList.toggle('miss',!focusLobes.size);dirty=true;
-   }catch{}},pathM?150:280);
+   }catch{}},pathM?150:1500);
   if(pathM){focusQ='';focusLobes=new Set();focusItems=new Set();dirty=true;return}
   find.title='';
   focusQ=q.trim().toLocaleLowerCase();focusLobes=new Set();focusItems=new Set();
