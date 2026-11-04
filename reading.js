@@ -63,7 +63,7 @@ function keywords(text,n=8){
 // Предложение, из которого взят факт: для цитаты в окне.
 function quoteFor(text,f){
  const o=norm(f.object).slice(0,20);
- for(const s of String(text).match(/[^.!?\n;]+[.!?]?/g)||[])if(norm(s).includes(o)&&norm(s).includes(norm(f.subject).slice(0,12)))return clean(s).slice(0,300);
+ for(const s of String(text).match(/[^.!?\n;]+[.!?]?/g)||[])if(norm(s).includes(o)&&norm(s).includes(norm(f.subject).slice(0,12))&&norm(s).includes(norm(f.predicate)))return clean(s).slice(0,300);
  return '';
 }
 
@@ -184,7 +184,8 @@ function reply(message){
  const rest=String(message).replace(ASKED,' ').replace(/\b(про|о|об|насчёт|насчет)\b/giu,' ');
  const hits=STEMS(rest).length?find(rest):[];
  if(hits.length)return {text:'Нашла в твоих документах (только для тебя, наружу это не уходит):\n'+hits.map(h=>'📄 '+h.name+(h.page?', стр. '+h.page:'')+': «'+h.excerpt+'»'+(h.facts.length?'\n   выписала: '+h.facts.map(f=>f.subject+' — '+f.predicate+' '+f.object).join('; '):'')).join('\n'),docs:hits};
- const l=list(8).filter(x=>x.status==='read');
+ // Только то, что всё ещё лежит на Диске в прочитанном виде.
+ const l=list(8).filter(x=>x.status==='read'&&onDisk(row(x.path)||{}));
  if(!l.length)return {text:'Я ещё не прочитала ни одного документа с Диска. Положи туда текстовые файлы, PDF, Word или Excel — я прочитаю их сама, когда Хранитель их проиндексирует.',docs:[]};
  return {text:'Недавно прочитала:\n'+l.map(x=>'📄 '+x.name+(x.summary?' — '+x.summary.slice(0,160):'')).join('\n'),docs:l.map(x=>({path:x.path,name:x.name,page:null}))};
 }

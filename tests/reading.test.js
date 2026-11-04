@@ -72,6 +72,13 @@ test('many pages are all read; search looks past rejected candidates',async()=>{
  for(let i=0;i<9;i++)await fsp.unlink(path.join(LIB,'кор'+i+'.txt'));await fsp.unlink(path.join(LIB,'длинный.txt'));await queue.scan();reading.readPending();
 });
 
+test('quote matches the relation; deleted file is not listed as read',async()=>{
+ const f=path.join(LIB,'чай2.txt');await fsp.writeFile(f,'Анна любит чай. Анна ненавидит чай.');await queue.scan();await queue.run(10);reading.readPending();
+ const d=reading.doc('чай2.txt');assert.equal(d.facts.find(x=>x.predicate==='ненавидит').quote,'Анна ненавидит чай.');
+ await fsp.unlink(f);const r=reading.reply('что ты прочитала?');assert.doesNotMatch(r.text,/чай2\.txt/);
+ await queue.scan();reading.readPending();
+});
+
 test('excerpt keeps the matching line even after a long paragraph',async()=>{
  await fsp.mkdir(LIB,{recursive:true});
  await fsp.writeFile(path.join(LIB,'вступление.txt'),'Вступление '.repeat(60).trim()+'\nПлатёж за парковку вносится до десятого числа.');
