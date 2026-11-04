@@ -56,6 +56,12 @@ test('stale file on disk is not shown; chosen document is read first',async()=>{
  for(const x of ['выбор.txt','большой.txt'])await fsp.unlink(path.join(LIB,x));await queue.scan();reading.readPending();
 });
 
+test('long paragraph is split at sentence boundaries',()=>{
+ const c=reading.chunks('Введение. '.repeat(248)+'Анна работает в больнице.');
+ assert.ok(c.length>=2);assert.ok(c.some(x=>x.text.includes('Анна работает в больнице.')));
+ assert.ok(c.every(x=>/[.!?…]$/.test(x.text)));
+});
+
 test('excerpt keeps the matching line even after a long paragraph',async()=>{
  await fsp.mkdir(LIB,{recursive:true});
  await fsp.writeFile(path.join(LIB,'вступление.txt'),'Вступление '.repeat(60).trim()+'\nПлатёж за парковку вносится до десятого числа.');

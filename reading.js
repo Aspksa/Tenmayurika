@@ -31,8 +31,9 @@ function chunks(text){
   const pm=raw.match(/^\[Страница (\d+)\]$/);if(pm){push();page=Number(pm[1]);continue}
   const line=raw.trim();if(!line)continue;
   // Длинная строка (абзац без переносов) режется на несколько кусков, а не обрезается.
-  for(let at=0;at<line.length;at+=CHUNK){
-   const piece=line.slice(at,at+CHUNK);
+  // Режем по границам предложений, чтобы факт не разорвался посередине слова; только сверхдлинное предложение — по символам.
+  const pieces=[];for(const sent of line.match(/[^.!?…]+[.!?…]*\s*/g)||[line]){for(let at=0;at<sent.length;at+=CHUNK)pieces.push(sent.slice(at,at+CHUNK))}
+  for(const piece of pieces){
    if(cur.length+piece.length+1>CHUNK)push();
    if(start===null)start=page;
    cur+=(cur?'\n':'')+piece;
