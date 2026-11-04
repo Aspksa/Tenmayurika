@@ -77,4 +77,5 @@ test('chat: documents are shown to the owner, never sent to the model',async()=>
  }finally{delete process.env.CHAT_URL;await new Promise(r=>server.close(r))}
 });
 
-test.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+// На Windows база SQLite может быть ещё занята — временную папку тогда уберёт система.
+test.after(()=>{try{fs.rmSync(dir,{recursive:true,force:true})}catch{}});
