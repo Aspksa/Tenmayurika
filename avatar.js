@@ -189,7 +189,7 @@
  const send=h('button',{type:'submit',class:'primary','aria-label':'Отправить'},icon('i-send'));
  const form=h('form',{class:'chat-form'},input,send);
  const chat=h('section',{class:'floating chat',role:'dialog','aria-label':'Чат с аватаром',hidden:true},
-  h('header',{class:'floating-head'},chatImg,h('div',{class:'title'},chatName),
+   h('header',{class:'floating-head'},chatImg,h('div',{class:'title'},chatName,h('small',{text:'Личная помощница'})),
    h('button',{type:'button',class:'icon-btn','aria-label':'Новый чат',title:'Новый чат: очистить переписку',onclick:()=>{if(!history.length)return;conversation++;cid=freshCid();history=[];pendingFix=null;input.placeholder=BASE_PLACEHOLDER;store(CHAT_KEY,history);renderHistory();renderQuick();input.focus()}},icon('i-plus')),
    h('button',{type:'button',class:'icon-btn','aria-label':'Настройки аватара',title:'Настройки аватара',onclick:()=>{const r=avatar.getBoundingClientRect();openSettings(r.left+r.width/2,r.top)}},icon('i-sliders')),
    h('button',{type:'button',class:'icon-btn','aria-label':'Закрыть чат',title:'Закрыть',onclick:()=>closeChat()},icon('i-close'))),
@@ -257,7 +257,8 @@
  }
  function renderHistory(){
   log.replaceChildren();
-  if(!history.length)bubble('assistant','Здравствуйте! Я '+cfg.name+'. Чем помочь? Нажмите кнопку ниже или напишите «помощь».');
+   log.classList.toggle('is-empty',!history.length);
+   if(!history.length)bubble('assistant','Здравствуйте, хозяин.\nЧем я могу помочь сегодня?');
   for(const m of history)bubble(m.role,m.text,m.tag,m);
  }
  const TOOL_TAG={agenda:'повестка',move_task:'перенос',days_until:'дни',convert_units:'конвертер',generate_password:'пароль',pick_random:'выбор',list_notes:'заметки',day_summary:'итоги',fact_conflicts:'противоречия',fact_relations:'связи',set_reminder:'напоминание',calculate:'калькулятор',roll_dice:'кубик',flip_coin:'монетка',change_look:'облик',reindex_memory:'индекс',add_note:'заметка',add_task:'дело',complete_task:'дело',list_tasks:'дела',remember_fact:'факт',search_memory:'поиск',open_page:'переход',create_backup:'бэкап',system_status:'статус',current_time:'время'};
@@ -270,7 +271,9 @@
   const prior=[];let budget=30000;
   for(const [i,m] of history.filter(m=>!m.private).slice(-40).reverse().entries()){const t=m.text.slice(0,i<12?1500:600);if(t.length>budget)break;budget-=t.length;prior.unshift({role:m.role,text:t})}
   const gen=conversation,fixFor=pendingFix;pendingFix=null;input.placeholder=BASE_PLACEHOLDER;
-  history.push({role:'user',text});bubble('user',text);quick.hidden=true;
+   if(!history.length)log.replaceChildren();
+   log.classList.remove('is-empty');
+   history.push({role:'user',text});bubble('user',text);quick.hidden=true;
   const typing=h('div',{class:'msg assistant typing','aria-label':cfg.name+' думает'},h('span',{text:'•'}),h('span',{text:'•'}),h('span',{text:'•'}));
   log.append(typing);log.scrollTop=log.scrollHeight;state('think');
   window.dispatchEvent(new CustomEvent('tenma:thinking',{detail:{on:true,text}}));
@@ -714,3 +717,4 @@
  applyLook();spawnParticles();scheduleBehaviour();
  if(cfg.phrases&&cfg.visible)setTimeout(()=>say(phrase()),2500);
 })();
+
