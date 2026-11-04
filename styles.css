@@ -808,3 +808,56 @@ html.brain-fs-lock,html.brain-fs-lock body{overflow:hidden}
 .brain-dia-row{display:flex;align-items:flex-start;gap:.5rem;justify-content:space-between}
 .brain-dia-row>.brain-fix-ok{flex:1;min-width:0;overflow-wrap:anywhere}
 .brain-dia-row>.brain-find{flex:1;min-width:0}
+
+/* Планер: свободное пространство между основными зонами и элементами управления. */
+.planner{gap:clamp(18px,1.5vw,28px);margin-top:clamp(20px,3vh,36px)}
+.planner > *, .pl-right > *{min-width:0}
+.pl-top{gap:1.25rem;align-items:start}
+.pl-title{min-height:3.25rem}
+.pl-top > .seg{max-width:100%;gap:.35rem;padding:.35rem;border-radius:16px}
+.pl-top > .seg > button{justify-content:center;min-height:2.65rem;padding:.55rem .9rem}
+.quick{min-height:3.5rem;gap:.75rem;padding:.45rem .5rem .45rem 1.1rem}
+.quick-input{min-height:2.5rem}
+.pl-side,.pl-main,.pl-detail,.pl-cal{padding:clamp(18px,1.5vw,28px)}
+.pl-side{gap:1.35rem}
+.smart-lists{gap:.35rem}
+.smart{min-height:2.65rem;padding:.65rem .8rem}
+.pl-main{min-height:32rem}
+.main-head{gap:1rem 1.5rem;margin-bottom:1.5rem}
+.empty-state{min-height:17rem;align-content:center;gap:.8rem;padding:3rem 1.5rem}
+.empty-state p,.agenda-empty p{max-width:30ch;line-height:1.6}
+.pl-right{gap:clamp(18px,1.5vw,28px)}
+.dk-hero{gap:1.1rem;margin-bottom:1.5rem;padding-bottom:1.25rem;border-bottom:1px solid var(--line)}
+.dk-when{gap:.25rem;line-height:1.4}
+.dk-bar{gap:.5rem;margin-bottom:1rem}
+.dk-mode{gap:.2rem;padding:.2rem}
+.dk-mode button{min-height:2rem;padding:.35rem .75rem}
+.dk-grid{gap:6px}
+.dk-wd{padding:.4rem 0}
+.detail-head{gap:.8rem;margin-bottom:1.1rem}
+.agenda{margin-bottom:1.5rem}
+.agenda-empty{gap:.7rem;padding:1.75rem 1rem}
+.journal-head{gap:.75rem;margin-top:1.25rem}
+.add-note{margin-top:.9rem}
+@media (min-width:900px) and (max-width:1399px){
+ .pl-side{gap:1rem;align-items:stretch}
+ .smart-lists{gap:.6rem;padding:.15rem 0 .5rem}
+ .smart{padding:.6rem 1rem}
+}
+@media (min-width:1100px){.pl-top{grid-template-columns:auto minmax(15rem,1fr);align-items:center}.pl-top > .seg{grid-column:1 / -1;justify-self:start}}
+@media (max-width:899px){
+ .planner{grid-template-areas:"top" "side" "main" "cal" "detail"}
+ .pl-main{min-height:0}
+ .empty-state{min-height:12rem}
+ .pl-top > .seg{display:flex;flex-wrap:nowrap;overflow-x:auto;width:100%;justify-content:flex-start}
+ .pl-top > .seg > button{flex:none}
+ .pl-side{gap:1rem}
+}
+@media (max-width:480px){
+ .quick{border-radius:18px;padding:.75rem}
+ .quick-input{flex-basis:calc(100% - 2rem)}
+ .quick .primary{width:100%;min-height:2.75rem}
+ .pl-side,.pl-main,.pl-detail,.pl-cal{padding:1rem}
+ .dk-grid{gap:3px}
+ .dk-bar .dk-title{flex-basis:55%}
+}
