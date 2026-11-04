@@ -195,7 +195,8 @@ test('chat model gets core, atlas, onboarding and summary; self-edit tools chang
   assert.match(toolMsgs[0],/Поправила память: «Пермь» → «Казань»/);
   assert.match(toolMsgs[2],/Разговоры сегодня[\s\S]*Пермь/);
   // Фоновое сжатие копит сводку по номеру разговора.
-  await new Promise(r=>setTimeout(r,200));
+  // Ждём до 10 с: на медленных машинах (Windows CI) сжатие не успевает за 200 мс.
+  for(let i=0;i<100&&!convo.summaryOf('conv-chat-0001');i++)await new Promise(r=>setTimeout(r,100));
   assert.ok(convo.summaryOf('conv-chat-0001'));
  }finally{delete process.env.CHAT_URL;await new Promise(r=>fake.close(r))}
  // Без модели: сердцевина и вспоминание по датам — локальными командами.
