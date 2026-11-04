@@ -45,6 +45,7 @@ const initiative=require('./initiative');
 const crypto=require('node:crypto');
 const library=require('./library');
 const libraryAnalysis=require('./library-analysis');
+const guardianActivity=require('./guardian-activity');
 
 const MAX_MESSAGE=2000,MAX_HISTORY=40,MAX_TOOL_ROUNDS=4;
 const PAGES={home:'Обзор',planner:'Планер',tasks:'Дела',notes:'Заметки',calendar:'Календарь',facts:'Факты памяти',brain:'Мозг',settings:'Настройки проекта'};
@@ -218,14 +219,14 @@ function makeTools(ctx){
   },
   async search_library({query}){
    const q=String(query||'').trim();if(!q)return {ok:false,text:'Что поискать в библиотеке?'};
-   const [names,content]=await Promise.all([library.search(q),library.searchText(q)]);
+   const [names,content]=await guardianActivity.track('search',{phase:'Ищу в библиотеке'},()=>Promise.all([library.search(q),library.searchText(q)]));
    const files=names.results.slice(0,5).map(x=>'• '+x.path+(x.type==='folder'?' (папка)':''));
    const fragments=content.results.slice(0,5).map(x=>'• '+x.path+(x.page?', страница '+x.page:', строка '+x.line)+': '+x.excerpt);
    const result=[files.length?'По названию:\n'+files.join('\n'):'',fragments.length?'В содержимом:\n'+fragments.join('\n'):''].filter(Boolean);
    return {ok:true,text:(result.length?result.join('\n\n'):'В библиотеке по запросу «'+q+'» ничего не нашла.')+(names.truncated||content.truncated?'\nПоиск ограничен, показаны не все результаты.':'')+(content.unreadable?'\nНе удалось прочитать файлов: '+content.unreadable+'.':'')};
   },
   async answer_library({query,path}){
-   const data=await libraryAnalysis.answer(String(query||''),typeof path==='string'?path:'');const rows=data.items.map(x=>'• '+x.path+(x.kind==='fact'?', подтверждённый факт':x.page?', страница '+x.page:x.sheet?', '+x.sheet:', строка '+x.line)+': '+x.excerpt);
+   const data=await guardianActivity.track('search',{phase:'Ищу ответ в документах',...(typeof path==='string'&&path?{file:path}:{})},()=>libraryAnalysis.answer(String(query||''),typeof path==='string'?path:''));const rows=data.items.map(x=>'• '+x.path+(x.kind==='fact'?', подтверждённый факт':x.page?', страница '+x.page:x.sheet?', '+x.sheet:', строка '+x.line)+': '+x.excerpt);
    return {ok:true,text:(rows.length?'Нашла фрагменты документов (проверьте контекст):\n'+rows.join('\n'):'Подходящих фрагментов не нашла.')+(data.truncated?'\nПроверена только часть библиотеки.':'')+(data.unreadable?'\nНе удалось прочитать файлов: '+data.unreadable+'.':'')+(data.outdatedFacts?'\nФактов требуют перепроверки: '+data.outdatedFacts+'.':'')};
   },
   // Самоправка памяти прямо в разговоре (идея самоправки из letta-code).
@@ -796,5 +797,6 @@ function parseTask(text){
  return {title:args.title||t,category:args.category||null,priority:args.priority||null,due:args.due||null,time:args.time||null};
 }
 module.exports={modelFailure,reply,parseCommand,parseTask,memoryBlock,TOOLS};
+
 
 
