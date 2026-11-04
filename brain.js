@@ -1231,13 +1231,14 @@ function mount(host){
   const end=x=>(kindName[x.kind]||x.kind)+' «'+(x.title||'…')+'»';
   const hot=(m.working?.facts?.length||0)+(m.working?.notes?.length||0);
   // Дневник по вкладкам: мышление, душа, сердцевина, память, навыки, рост.
-  const TABS={mind:'мышление',soul:'душа',self:'сердцевина',memory:'память',skills:'навыки',growth:'рост',ties:'связи'},tab=TABS[cfg.diaTab]?cfg.diaTab:'mind';
+  const TABS={mind:'мышление',soul:'душа',self:'сердцевина',memory:'память',read:'чтение',skills:'навыки',growth:'рост',ties:'связи'},tab=TABS[cfg.diaTab]?cfg.diaTab:'mind';
   const tabBar=el('div','brain-tabs');tabBar.setAttribute('role','tablist');
   for(const [k,v] of Object.entries(TABS)){const b=el('button','brain-tab'+(k===tab?' on':''),v);b.type='button';b.setAttribute('role','tab');b.setAttribute('aria-selected',String(k===tab));b.onclick=()=>{cfg.diaTab=k;write(CFG_KEY,cfg);void renderDiary()};tabBar.append(b)}
   let body=[];
   if(tab==='mind')body=[status,...await mindSecs(sec,row)];
   else if(tab==='soul')body=await psycheSecs(sec,row);
   else if(tab==='ties')body=await tiesSecs(sec,row);
+  else if(tab==='read')body=await readingSecs(sec);
   else if(tab==='self')body=[...(m.core?[coreSec(m.core,sec)]:[]),...(m.onboarding?.active?[onboardSec(m.onboarding,sec,row)]:[]),...(m.review?[reviewRow(m.review)]:[]),
    sec('как вы просили отвечать',...m.preferences.map(p=>row(p.text,()=>postJson('/api/brain/preferences/remove',{id:p.id}),'Убрать предпочтение')),prefForm)];
   else if(tab==='memory')body=[sec('дневник',...(m.diary.length?m.diary.slice(0,8).map(d=>row(atText(d.at)+' · '+d.text)):[el('div','brain-fix-ok','Пока пусто.')])),
@@ -1250,6 +1251,17 @@ function mount(host){
   else body=[...(m.growth?[growthSec(m.growth,sec,row)]:[]),matureSec(sec)];
   if(diaBox.hidden)return;
   diaBox.replaceChildren(head,tabBar,...body);
+ }
+ // Чтение Диска: что прочитала, что выписала (reading.js). Всё остаётся на этом компьютере.
+ async function readingSecs(sec){
+  let r;try{const x=await fetch('/api/brain/reading');if(!x.ok)throw 0;r=await x.json()}catch{return [el('p','brain-fix-ok','Не удалось открыть чтение.')]}
+  const s=r.stats||{};
+  const go=el('button','brain-btn','Почитать сейчас');go.type='button';go.disabled=!s.on;
+  go.onclick=async()=>{go.disabled=true;go.textContent='Читаю…';try{await postJson('/api/brain/reading/run',{})}catch{}void renderDiary()};
+  const head=el('div','brain-dia-row');head.append(el('span','brain-fix-ok',s.on?'Сама читаю документы с Диска, которые проиндексировал Хранитель, и выписываю из них знания. Прочитано '+s.read+' из '+s.indexed+(s.waiting?', ждут '+s.waiting:'')+(s.reading?', читаю '+s.reading:'')+'. Выписала '+s.facts+' '+plural(s.facts,'факт','факта','фактов')+'.':'Чтение Диска выключено (вкладка «мышление»).'),go);
+  const privacy=el('div','brain-fix-ok','Читаю только у себя: текст документов, конспекты и выписки не уходят в языковую модель. В разговоре я показываю нужный файл и страницу под ответом.');
+  const items=(r.items||[]).slice(0,30).map(d=>{const c=el('div','brain-dia-row');const t=el('span','brain-fix-ok','📄 '+d.name+' · '+(d.status==='read'?'прочитан':d.status==='error'?'ошибка: '+(d.error||''):'читаю '+d.progress+'%')+(d.facts?' · фактов '+d.facts:'')+(d.keywords?.length?' · '+d.keywords.slice(0,5).join(', '):'')+(d.summary?'\n'+trim(d.summary,220):''));t.style.whiteSpace='pre-line';const o=el('button','brain-btn','Открыть');o.type='button';o.title='Открыть на Диске';o.onclick=()=>window.TenmaApp?.openDiskFile?.(d.path);c.append(t,o);return c});
+  return [sec('чтение диска',head,privacy),sec('прочитанное',...(items.length?items:[el('div','brain-fix-ok','Пока ничего. Положи на Диск текст, PDF, Word или Excel — прочитаю сама.')]))];
  }
  // Мышление: настройки, догадки, вопросы о вас, забытое и предложения по своей инициативе.
  async function mindSecs(sec,row){

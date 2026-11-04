@@ -3,7 +3,7 @@
 // сводки тем, причинные связи, выводы и дневник; навыки запоминания, промахи и самоэкзамен; рост: крепнущие связи, карточки сущностей,
 // псевдонимы, свои типы, постепенно растущие зоны и отбор при размышлении; сердцевина (блоки «кто я», «кто ты»,
 // «как мы общаемся») с историей версий; время и вид фактов, сила памяти и забывание, поток мыслей, вопросы о человеке,
-// догадки и предложения по своей инициативе. Таблицы создаются один раз на процесс.
+// догадки и предложения по своей инициативе; прочитанные документы Диска (reading.js, только локально). Таблицы создаются один раз на процесс.
 const fs=require('node:fs');
 const path=require('node:path');
 const {DatabaseSync}=require('node:sqlite');
@@ -116,7 +116,16 @@ function open(){
   CREATE TABLE IF NOT EXISTS memory_plans(fact_id TEXT PRIMARY KEY, due TEXT NOT NULL, phrase TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'open', at TEXT NOT NULL);
   CREATE INDEX IF NOT EXISTS memory_plans_due ON memory_plans(status,due);
   CREATE TABLE IF NOT EXISTS memory_evidence(fact_id TEXT NOT NULL, source_id TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY(fact_id,source_id));
-  CREATE TABLE IF NOT EXISTS memory_fact_vectors(fact_id TEXT PRIMARY KEY, model TEXT NOT NULL, text TEXT NOT NULL, vec BLOB NOT NULL, at TEXT NOT NULL);`);
+  CREATE TABLE IF NOT EXISTS memory_fact_vectors(fact_id TEXT PRIMARY KEY, model TEXT NOT NULL, text TEXT NOT NULL, vec BLOB NOT NULL, at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS brain_reading(
+  path TEXT PRIMARY KEY, modified TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'reading',
+  chunks_done INTEGER NOT NULL DEFAULT 0, chunks_total INTEGER NOT NULL DEFAULT 0, facts INTEGER NOT NULL DEFAULT 0,
+  summary TEXT NOT NULL DEFAULT '', keywords TEXT NOT NULL DEFAULT '[]', attempts INTEGER NOT NULL DEFAULT 0, error TEXT,
+  started_at TEXT NOT NULL, read_at TEXT);
+  CREATE TABLE IF NOT EXISTS brain_reading_facts(
+  id TEXT PRIMARY KEY, path TEXT NOT NULL, page INTEGER, subject TEXT NOT NULL, predicate TEXT NOT NULL, object TEXT NOT NULL,
+  quote TEXT NOT NULL DEFAULT '', at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS brain_reading_facts_path ON brain_reading_facts(path);`);
   ready.add(file);
  }
  return db;

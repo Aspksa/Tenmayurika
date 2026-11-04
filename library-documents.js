@@ -1,5 +1,6 @@
 'use strict';
 // Содержимое остаётся на диске: не передаём его модели или внешнему сервису.
+// Так же и чтение Диска (reading.js): конспекты и выписки из документов делаются локально и не идут в модель.
 const fs=require('node:fs/promises');
 const library=require('./library');
 const office=require('./library-office');

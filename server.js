@@ -43,6 +43,7 @@ const initiative=require('./initiative');
 const library=require('./library');
 const libraryDocuments=require('./library-documents');
 const libraryQueue=require('./library-queue');
+const reading=require('./reading');
 const libraryCollections=require('./library-collections');
 const libraryAnalysis=require('./library-analysis');
 const libraryOcr=require('./library-ocr');
@@ -132,6 +133,11 @@ async function handleBrain(req,res,p,url){
   // Разбор разговора вручную и оглавление памяти.
   // Мышление: поток мыслей, настройки, догадки, вопросы, забытое, предложения, рост по дням.
   if(req.method==='GET'&&p==='/api/brain/thoughts')return respond(res,200,{items:thoughts.since(Number(url.searchParams.get('since'))||0,limitParam(url,60,200)),settings:thoughts.settings(),labels:thoughts.LABELS});
+  // Чтение Диска (reading.js): что прочитано, документ, прочитать сейчас, перечитать. Всё локально.
+  if(req.method==='GET'&&p==='/api/brain/reading')return respond(res,200,{stats:reading.stats(),items:reading.list(limitParam(url,60,200))});
+  if(req.method==='GET'&&p==='/api/brain/reading/doc')return respond(res,200,{doc:reading.doc(url.searchParams.get('path')||''),on:thoughts.on('reading')});
+  if(req.method==='POST'&&p==='/api/brain/reading/run')return respond(res,200,reading.readPending({force:true}));
+  if(req.method==='POST'&&p==='/api/brain/reading/reread'){const input=await body(req);return respond(res,200,{ok:reading.reread(input?.path)})}
   if(req.method==='POST'&&p==='/api/brain/settings'){const input=await body(req);return respond(res,200,thoughts.setSetting(input?.key,input?.value))}
   if(req.method==='GET'&&p==='/api/brain/thinking')return respond(res,200,{plans:require('./plans').upcoming(10),tune:require('./tune').view(),vectors:require('./factvec').status(),guesses:guesses.list(null,30),guessStats:guesses.stats(),questions:curiosity.list(null,30),questionStats:curiosity.stats(),forgotten:strength.forgotten({limit:20}),strength:strength.stats(),suggestions:initiative.list(null,20),suggestionStats:initiative.stats(),settings:thoughts.settings(),labels:thoughts.LABELS});
   if(req.method==='POST'&&p==='/api/brain/guesses/answer'){const input=await body(req);if(typeof input?.yes!=='boolean')return respond(res,400,{error:'Invalid value'});const r=guesses.answer(input.id,input.yes);return r?respond(res,200,r):respond(res,404,{error:'Not found'})}
@@ -407,7 +413,7 @@ if(req.method==='GET'&&AVATAR_PATH.test(p)){const file=path.join(ROOT,p.slice(1)
 return respond(res,404,{error:'Not found'})
 }catch(e){console.error('Request failed:',e.name,e.code||'',e instanceof SyntaxError?'invalid JSON':'request processing error');respond(res,e.message==='Request too large'?413:e instanceof SyntaxError?400:500,{error:e.message==='Request too large'?'Request too large':e instanceof SyntaxError?'Invalid JSON':'Internal server error'})}});
 server.on('error',e=>{console.error('Server error:',e.code||e.name);process.exitCode=1});
-if(require.main===module)Promise.resolve().then(()=>ensureDisk()).then(()=>storage.connect()).then(()=>server.listen(PORT,HOST,()=>{console.log('Tenmayurika: http://'+HOST+':'+PORT);syncWorker.run().catch(console.error);const timer=setInterval(()=>{syncWorker.run().catch(console.error);chatlog.learnPending().catch(console.error);idleReflect();libraryQueue.status().then(s=>s.enabled?libraryQueue.scan().then(()=>libraryQueue.run()):null).catch(e=>console.error('Library queue failed:',e.name))},60000);timer.unref();chatlog.learnPending().catch(console.error);startBackupSchedule();const maintenanceTimer=setInterval(()=>{try{ensureDisk();maintenance.maintenance()}catch(e){console.error('Disk maintenance failed:',e.code||e.name)}},3600000);maintenanceTimer.unref()})).catch(e=>{console.error('Database connection failed:',e.message);process.exitCode=1});
+if(require.main===module)Promise.resolve().then(()=>ensureDisk()).then(()=>storage.connect()).then(()=>server.listen(PORT,HOST,()=>{console.log('Tenmayurika: http://'+HOST+':'+PORT);syncWorker.run().catch(console.error);const timer=setInterval(()=>{syncWorker.run().catch(console.error);chatlog.learnPending().catch(console.error);idleReflect();libraryQueue.status().then(s=>s.enabled?libraryQueue.scan().then(()=>libraryQueue.run()):null).then(()=>reading.readPending()).catch(e=>console.error('Library queue failed:',e.name))},60000);timer.unref();chatlog.learnPending().catch(console.error);startBackupSchedule();const maintenanceTimer=setInterval(()=>{try{ensureDisk();maintenance.maintenance()}catch(e){console.error('Disk maintenance failed:',e.code||e.name)}},3600000);maintenanceTimer.unref()})).catch(e=>{console.error('Database connection failed:',e.message);process.exitCode=1});
 module.exports={server};
 
 

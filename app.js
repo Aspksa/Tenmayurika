@@ -754,6 +754,9 @@ function sortDiskItems(list,mode){const by={name:(a,b)=>a.name.localeCompare(b.n
 function readDiskPrefs(){let saved={};try{saved=JSON.parse(localStorage.getItem('tenma.disk')||'{}')||{}}catch{}return {view:saved.view==='list'?'list':'grid',sort:DISK_SORTS.some(x=>x[0]===saved.sort)?saved.sort:'name'}}
 function saveDiskPrefs(p){try{localStorage.setItem('tenma.disk',JSON.stringify(p))}catch{}}
 window.TenmaApp.openGuardian=()=>{libraryTab='knowledge';go('library')};
+// Открыть файл на Диске (ссылка из чата «в твоих документах»): папка файла, файл выделен и показан.
+let diskWanted='';
+window.TenmaApp.openDiskFile=file=>{if(typeof file!=='string'||!file)return;libraryPath=file.split('/').slice(0,-1).join('/');libraryTab='files';diskWanted=file;go('library')};
 function renderLibrary(){
  const state=h('p',{class:'muted',text:'Загрузка библиотеки…'}),listing=h('div'),searchResults=h('div');
  const location=h('nav',{class:'disk-crumbs','aria-label':'Путь к папке'});
@@ -817,6 +820,19 @@ function renderLibrary(){
   if(diskSelected&&!diskItems.some(x=>x.path===diskSelected))closeDiskPreview();
  }
  function closeDiskPreview(){diskSelected='';diskPreview.hidden=true;diskPreview.replaceChildren();listing.querySelectorAll('.disk-item').forEach(x=>x.classList.toggle('selected',false))}
+ // «Юрика прочитала»: конспект, ключевые слова и выписанные факты из документа (всё локально, reading.js).
+ function readingBox(item){
+  const box=h('section',{class:'disk-reading','aria-label':'Что Юрика узнала из документа'},h('p',{class:'muted',text:'Смотрю, читала ли я его…'}));
+  const draw=()=>request('/api/brain/reading/doc?path='+encodeURIComponent(item.path)).then(r=>{if(diskSelected!==item.path)return;const d=r.doc;
+   const again=h('button',{type:'button',text:d?'Перечитать':'Прочитать сейчас',onclick:async()=>{again.disabled=true;try{await request('/api/brain/reading/reread',{method:'POST',headers:json,body:JSON.stringify({path:item.path})});await request('/api/brain/reading/run',{method:'POST',headers:json,body:'{}'})}catch{}void draw()}});
+   if(!d){box.replaceChildren(h('h4',{text:'Юрика ещё не читала'}),h('p',{class:'muted',text:r.on?'Прочитаю сама, когда Хранитель проиндексирует файл.':'Чтение Диска выключено в «Мозге» → Дневник → мышление.'}),again);return}
+   box.replaceChildren(h('h4',{text:d.status==='read'?'Юрика прочитала':d.status==='error'?'Не получилось дочитать':'Юрика читает · '+d.progress+'%'}),
+    d.summary?h('p',{text:d.summary}):null,
+    d.keywords.length?h('p',{class:'disk-sub',text:'О чём: '+d.keywords.join(', ')}):null,
+    d.facts.length?h('ul',{class:'disk-reading-facts'},...d.facts.slice(0,8).map(f=>h('li',{title:f.quote||'',text:f.subject+' — '+f.predicate+' '+f.object+(f.page?' (стр. '+f.page+')':'')}))):h('p',{class:'muted',text:'Простых фактов («кто где живёт, что любит») в нём не нашла.'}),
+    h('p',{class:'disk-sub',text:'Знаю это только я: текст и выписки не уходят в модель.'}),again)}).catch(()=>{if(diskSelected===item.path)box.replaceChildren(h('p',{class:'muted',text:'Не удалось узнать, читала ли я файл.'}))});
+  void draw();return box;
+ }
  function selectDiskItem(item,row){
   diskSelected=item.path;[...(row.parentElement?row.parentElement.children:[])].forEach(x=>{if(x.classList)x.classList.toggle('selected',x===row)});
   const kind=diskKind(item),body=h('div',{class:'disk-pv-body'}),href='/api/library/download?path='+encodeURIComponent(item.path);
@@ -828,13 +844,14 @@ function renderLibrary(){
    h('div',{class:'disk-pv-head disk-item','data-kind':kind.key},diskIcon(item,kind),h('div',{class:'disk-meta'},h('strong',{text:item.name}),h('span',{class:'disk-sub',text:kind.label})),h('button',{type:'button',class:'icon-btn disk-pv-close','aria-label':'Закрыть просмотр',text:'×',onclick:closeDiskPreview})),
    body,
    h('dl',{class:'disk-pv-info'},h('dt',{text:'Размер'}),h('dd',{text:diskSize(item.size)}),h('dt',{text:'Изменён'}),h('dd',{text:new Date(item.modified).toLocaleString('ru-RU')}),h('dt',{text:'Путь'}),h('dd',{text:'/'+item.path})),
+   DISK_TEXT.test(item.name)?readingBox(item):null,
    h('a',{class:'disk-pv-dl primary',href,text:'Скачать'}),
    actions.length?h('div',{class:'disk-pv-actions'},...actions):null);
   diskPreview.hidden=false;
  }
  async function load(){
   drawCrumbs();state.textContent='';diskStats.textContent='Загрузка…';
-  try{const result=await request('/api/library/list?path='+encodeURIComponent(libraryPath));diskItems=result.items;drawListing()}catch(e){state.textContent=e.message;diskStats.textContent=''}
+  try{const result=await request('/api/library/list?path='+encodeURIComponent(libraryPath));diskItems=result.items;drawListing();if(diskWanted){const want=diskWanted;diskWanted='';const row=[...listing.querySelectorAll('.disk-item')].find(x=>x.title===want);if(row)row.click()}}catch(e){state.textContent=e.message;diskStats.textContent=''}
  }
  folderForm.onsubmit=async e=>{e.preventDefault();const value=name.value.trim();if(!value)return;try{await request('/api/library/folder',{method:'POST',headers:json,body:JSON.stringify({path:libraryPath?libraryPath+'/'+value:value})});name.value='';folderForm.hidden=true;await load()}catch(err){state.textContent=err.message}};
  uploadInput.onchange=()=>{void uploadFiles([...(uploadInput.files||[])])};

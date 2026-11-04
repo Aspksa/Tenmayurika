@@ -235,7 +235,11 @@
    if(q.send){input.value=q.send;form.requestSubmit()}else{input.value=q.insert;input.focus();const at=q.insert.indexOf(' ')+1||q.insert.length;input.setSelectionRange(q.tool==='facts'?8:q.insert.length,q.tool==='facts'?8:q.insert.length);void at;autoGrow()}
   }})));
  }
- function bubble(role,text,tag,m){const el=h('div',{class:'msg '+role+(m&&m.agent?' agent-note':'')},document.createTextNode(text));if(m&&m.thinking)el.append(thinkingRow(m.thinking));if(m&&m.offer)el.append(offerRow(m));const foot=[tag?h('span',{class:'msg-tag',text:tag.replace(/^⚙\s*/,'')}):null,m&&m.exp?rateRow(m):null,m&&m.agent?agentRateRow(m):null].filter(Boolean);if(foot.length)el.append(h('div',{class:'msg-foot'},...foot));if(m&&m.agent){el.style.setProperty('--agent',m.agent.color||'#ffd36b');agentBubbles.set(m.agent.key,el)}log.append(el);log.scrollTop=log.scrollHeight;return el}
+ function bubble(role,text,tag,m){const el=h('div',{class:'msg '+role+(m&&m.agent?' agent-note':'')},document.createTextNode(text));if(m&&m.thinking)el.append(thinkingRow(m.thinking));if(m&&m.offer)el.append(offerRow(m));if(m&&m.docs&&m.docs.length)el.append(docsRow(m.docs));const foot=[tag?h('span',{class:'msg-tag',text:tag.replace(/^⚙\s*/,'')}):null,m&&m.exp?rateRow(m):null,m&&m.agent?agentRateRow(m):null].filter(Boolean);if(foot.length)el.append(h('div',{class:'msg-foot'},...foot));if(m&&m.agent){el.style.setProperty('--agent',m.agent.color||'#ffd36b');agentBubbles.set(m.agent.key,el)}log.append(el);log.scrollTop=log.scrollHeight;return el}
+ // Нашлось в прочитанных документах Диска: ссылки открывают файл в «Диске». Модели это не показывается.
+ function docsRow(docs){
+  return h('div',{class:'msg-docs'},h('span',{class:'msg-docs-label',text:'📄 в твоих документах'}),...docs.map(d=>h('button',{type:'button',class:'msg-doc',title:d.excerpt||d.path,text:d.name+(d.page?' · стр. '+d.page:''),onclick:()=>window.TenmaApp?.openDiskFile?.(d.path)})));
+ }
  // «Как думала»: план внутреннего голоса, подвопросы и сверка с памятью — свёрнуто под ответом.
  function thinkingRow(t){
   const lines=[t.split?.length?'Разбила вопрос: '+t.split.map(x=>'«'+x+'»').join(', '):'',t.plan?t.plan:'',t.check==='fixed'?'Сверила с памятью и поправила черновик.':t.check==='ok'?'Сверила с памятью: сходится.':''].filter(Boolean);
@@ -337,7 +341,9 @@
   if(!answer||!String(answer).trim())answer='Модель прислала пустой ответ. Нажмите «Проверить связь» в меню «Модель ИИ».';
   typing.remove();busy=false;send.disabled=false;
   if(gen!==conversation)return; // чат очистили, пока шёл ответ
-  const entry={role:'assistant',text:answer,tag,...(data&&data.secret?{private:true}:{}),...(data?.experience?.id?{exp:data.experience.id}:{}),...(data?.thinking?{thinking:data.thinking}:{})};
+  // Секретный ответ (библиотека, прочитанные документы) — и вопрос к нему не уходит модели в истории.
+  if(data&&data.secret){for(let i=history.length-1;i>=0;i--)if(history[i].role==='user'){history[i].private=true;break}}
+  const entry={role:'assistant',text:answer,tag,...(data&&data.secret?{private:true}:{}),...(Array.isArray(data?.docs)&&data.docs.length?{docs:data.docs.slice(0,3)}:{}),...(data?.experience?.id?{exp:data.experience.id}:{}),...(data?.thinking?{thinking:data.thinking}:{})};
   history.push(entry);history=history.slice(-100);store(CHAT_KEY,history);
   bubble('assistant',answer,tag,entry);state('answer',2600);
   if(data.changed)window.TenmaApp?.refresh({keepDrafts:true});

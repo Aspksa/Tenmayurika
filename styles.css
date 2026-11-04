@@ -1607,3 +1607,14 @@ input:checked+.switch::after{background:var(--ember-hot)}
 .msg.agent-note{--agent:#ffd36b;white-space:pre-line;border-radius:14px;border:1px solid color-mix(in srgb,var(--agent) 45%,transparent);background:linear-gradient(90deg,color-mix(in srgb,var(--agent) 14%,transparent),rgba(14,12,20,.6));box-shadow:inset 3px 0 0 var(--agent),0 0 18px -10px var(--agent);font-size:.9em}
 .msg.agent-note .msg-tag{color:color-mix(in srgb,var(--agent) 70%,#fff)}
 .msg.assistant.agent-note{padding:.7em 1em .6em 1.2em}
+/* Чтение Диска: ссылки на документы под ответом и блок «Юрика прочитала» в просмотре файла */
+.msg-docs{display:flex;flex-wrap:wrap;align-items:center;gap:.35em;margin-top:.45em;font-size:.78em}
+.msg-docs-label{color:var(--muted)}
+.msg-doc{font:inherit;font-family:var(--mono);padding:.15em .55em;border:1px solid var(--line-accent);border-radius:var(--radius-sm,3px);background:rgba(var(--accent-rgb),.08);color:var(--ember);cursor:pointer}
+.msg-doc:hover,.msg-doc:focus-visible{background:rgba(var(--accent-rgb),.18)}
+.disk-reading{margin:.6em 0;padding:.6em .7em;border:1px solid var(--line-accent);border-radius:var(--radius-sm,3px);background:rgba(var(--accent-rgb),.05);font-size:.8rem;line-height:1.5}
+.disk-reading h4{margin:0 0 .35em;font-family:var(--mono);font-size:.8em;letter-spacing:.06em;text-transform:uppercase;color:var(--ember)}
+.disk-reading p{margin:.25em 0}
+.disk-reading-facts{margin:.3em 0;padding-left:1.1em}
+.disk-reading-facts li{margin:.1em 0}
+.disk-reading button{margin-top:.4em}
