@@ -245,7 +245,7 @@ if(p.startsWith('/api/library/')){
   if(req.method==='GET'&&p==='/api/library/summary')return respond(res,200,await libraryAnalysis.analyze(url.searchParams.get('path')||''));
   if(req.method==='GET'&&p==='/api/library/suggest-name')return respond(res,200,await libraryAnalysis.suggestName(url.searchParams.get('path')||''));
   if(req.method==='GET'&&p==='/api/library/similar')return respond(res,200,await libraryAnalysis.similar(url.searchParams.get('path')||''));
-  if(req.method==='GET'&&p==='/api/library/answer')return respond(res,200,await libraryAnalysis.answer(url.searchParams.get('q')||''));
+  if(req.method==='GET'&&p==='/api/library/answer')return respond(res,200,await libraryAnalysis.answer(url.searchParams.get('q')||'',url.searchParams.get('path')||''));
   if(req.method==='GET'&&p==='/api/library/propose-facts')return respond(res,200,await libraryAnalysis.proposeFacts(url.searchParams.get('path')||''));
   if(req.method==='GET'&&p==='/api/library/suggest-folder')return respond(res,200,{folder:libraryAnalysis.suggestFolder(url.searchParams.get('name')||'')});
   if(req.method==='POST'&&p==='/api/library/ocr'){const input=await body(req),result=await libraryOcr.recognize(input?.path);await journal('ocr_completed',{path:input.path});return respond(res,200,result)}

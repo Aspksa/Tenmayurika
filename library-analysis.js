@@ -22,16 +22,19 @@ async function suggestName(file){const d=await docs.read(file),extension=file.sp
 module.exports={summarize,analyze,similar,suggestFolder,suggestName};
 
 // Local extractive answers: only quotes from source files, never model-generated claims.
-async function answer(question){
+async function answer(question,selectedFile=''){
  if(typeof question!=='string'||!question.trim()||question.length>500)throw new TypeError('Введите вопрос до 500 символов');
  const wanted=[...new Set(terms(question))].slice(0,12);if(!wanted.length)throw new TypeError('Добавьте к вопросу несколько содержательных слов');
- const pending=[''],matches=[];let scanned=0,unreadable=0,truncated=false;
+ if(typeof selectedFile!=='string')throw new TypeError('Некорректный путь');
+ const pending=selectedFile?[]:[''],matches=[];let scanned=0,unreadable=0,truncated=false;
+ async function inspect(file){const d=await docs.read(file),lines=d.text.split(/\r?\n/);let page=null,sheet=null,best=null;
+  for(let i=0;i<lines.length;i++){const line=lines[i],pageMatch=line.match(/^\[Страница (\d+)\]$/),sheetMatch=line.match(/^\[Лист: (.+)\]$/);if(pageMatch){page=Number(pageMatch[1]);continue}if(sheetMatch){sheet=sheetMatch[1];continue}const found=new Set(terms(line));const score=wanted.filter(w=>found.has(w)).length;if(score&&(!best||score>best.score))best={path:file,line:i+1,...(page?{page}:{}),...(sheet?{sheet}:{}),excerpt:line.slice(0,400),score}}
+  if(best)matches.push(best);
+ }
+ if(selectedFile){scanned=1;await inspect(selectedFile)}
  while(pending.length&&scanned<200){const dir=pending.pop();for(const item of await library.list(dir)){
   if(item.type==='folder'){pending.push(item.path);continue}if(!/\.(txt|md|csv|json|docx|xlsx|pdf)$/i.test(item.name))continue;if(++scanned>200){truncated=true;break}
-  try{const d=await docs.read(item.path),lines=d.text.split(/\r?\n/);let page=null,sheet=null,best=null;
-   for(let i=0;i<lines.length;i++){const line=lines[i],pageMatch=line.match(/^\[Страница (\d+)\]$/),sheetMatch=line.match(/^\[Лист: (.+)\]$/);if(pageMatch){page=Number(pageMatch[1]);continue}if(sheetMatch){sheet=sheetMatch[1];continue}const found=new Set(terms(line));const score=wanted.filter(w=>found.has(w)).length;if(score&&(!best||score>best.score))best={path:item.path,line:i+1,...(page?{page}:{}),...(sheet?{sheet}:{}),excerpt:line.slice(0,400),score}}
-   if(best)matches.push(best);
-  }catch{unreadable++}
+  try{await inspect(item.path)}catch{unreadable++}
  }}
  return {items:matches.sort((a,b)=>b.score-a.score).slice(0,10),scanned:Math.min(scanned,200),unreadable,truncated:truncated||pending.length>0,method:'extractive'};
 }
