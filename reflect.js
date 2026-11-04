@@ -63,6 +63,7 @@ async function findLinks(ws,complete){
  const records=[...(ws.notes||[]).map(n=>({kind:'note',ref:n.id,title:n.title,text:n.content,at:n.updatedAt||n.createdAt})),...(ws.tasks||[]).map(t=>({kind:'task',ref:t.id,title:t.title,text:t.content||'',at:t.updatedAt||t.createdAt}))];
  const facts=memory.queryFacts({limit:5000}).filter(f=>!f.valid_to);
  let found=links.detect(records,{facts});
+ links.reconcile(found);
  if(complete&&records.length>=2){try{
   const recent=[...records].sort((a,b)=>String(b.at||'').localeCompare(String(a.at||''))).slice(0,12);
   const msg=await complete({messages:[{role:'system',content:'Найди причинные связи между записями пользователя. Отвечай только строками «LINK: A | причина | B» (A — причина B), «LINK: A | условие | B» (B возможно только при A) или «LINK: A | потом | B» (A раньше B). Только очевидные связи. Если их нет, ответь NONE.'},{role:'user',content:recent.map((r,i)=>(i+1)+'. '+(r.kind==='task'?'Дело: ':'Заметка: ')+r.title+(r.text?' — '+String(r.text).slice(0,160):'')).join('\n')}]});
@@ -106,9 +107,17 @@ async function insights(since,complete){
  }
  return out;
 }
+// Вывод держится на фактах: если хоть один из них отставлен (поправка, разбор, слияние), вывод снимается.
+function pruneInsights(){
+ const rows=use(db=>db.prepare('SELECT id,fact_ids FROM memory_insights WHERE active=1').all());
+ const dead=rows.filter(r=>{const ids=parse(r.fact_ids,[]);return !ids.length||memory.factsById(ids).length<Math.min(ids.length,50)}).map(r=>r.id);
+ if(dead.length)use(db=>{const st=db.prepare('UPDATE memory_insights SET active=0 WHERE id=?');for(const id of dead)st.run(id)});
+ return dead.length;
+}
 function insightList(limit=30){return use(db=>db.prepare('SELECT * FROM memory_insights WHERE active=1 ORDER BY created_at DESC LIMIT ?').all(limit)).map(r=>({id:r.id,topic:r.topic,text:r.text,factIds:parse(r.fact_ids,[]),source:r.source,created_at:r.created_at}))}
 // Выводы по вопросу: общие основы слов с текстом вывода или вспомненные факты из его основы.
 function insightsFor(question,factIds=[],limit=2){
+ pruneInsights();
  const q=new Set(memory.terms(question)),ids=new Set(factIds);
  return insightList(100).map(i=>({i,n:memory.terms(i.text).filter(x=>q.has(x)).length+2*i.factIds.filter(id=>ids.has(id)).length})).filter(x=>x.n>=2).sort((a,b)=>b.n-a.n).slice(0,limit).map(x=>x.i);
 }
@@ -131,6 +140,7 @@ function diary(limit=30){return use(db=>db.prepare('SELECT * FROM brain_diary OR
 /* ---------- Один проход ---------- */
 // Подпись памяти: если с прошлого раза ничего не менялось, размышлять не о чем.
 function signature(ws){
+ memory.queryFacts({limit:1});
  const ev=use(db=>{try{return db.prepare('SELECT MAX(id) AS m FROM memory_events').get().m||0}catch{return 0}});
  const ex=experience.stats();
  return hash([ev,ex.total,ex.confirmed,ex.corrected,(ws.notes||[]).map(n=>n.id+(n.updatedAt||'')).join(','),(ws.tasks||[]).map(t=>t.id+(t.updatedAt||'')).join(',')].join('|'));
@@ -138,7 +148,11 @@ function signature(ws){
 async function run({ws,complete=null,reason='idle'}={}){
  if(running)return running;
  running=(async()=>{
-  const prev=state('reflect.last',null),since=prev?.at||new Date(Date.now()-7*864e5).toISOString(),started=Date.now();
+  // Схема фактов создаётся при первом обращении к memory-core (новая база могла его ещё не видеть).
+  memory.queryFacts({limit:1});
+  // Отметка берётся до долгой работы: изменения, пришедшие во время размышления, достанутся следующему проходу.
+  const prev=state('reflect.last',null),since=prev?.at||new Date(Date.now()-7*864e5).toISOString(),started=Date.now(),mark={at:new Date(started).toISOString(),sig:signature(ws)};
+  pruneInsights();
   const d={reason,newFacts:0,summaries:0,links:0,skills:0,episodes:0,insights:[]};
   d.newFacts=use(db=>db.prepare("SELECT COUNT(DISTINCT fact_id) AS n FROM memory_events WHERE occurred_at>=? AND action IN ('created','restored')").get(since.slice(0,19).replace('T',' ')).n);
   d.episodes=experience.list(500).filter(e=>e.at>=since&&e.feedback).length;
@@ -153,7 +167,7 @@ async function run({ws,complete=null,reason='idle'}={}){
   }catch(e){console.error('Diary model failed:',e.name)}}
   const at=new Date().toISOString(),id=crypto.randomUUID(),details={...d,insights:d.insights,ms:Date.now()-started};
   use(db=>{db.prepare('INSERT INTO brain_diary(id,at,text,details) VALUES(?,?,?,?)').run(id,at,text,JSON.stringify(details));db.prepare('DELETE FROM brain_diary WHERE id IN (SELECT id FROM brain_diary ORDER BY at DESC LIMIT -1 OFFSET ?)').run(DIARY_KEEP)});
-  setState('reflect.last',{at,sig:signature(ws)});
+  setState('reflect.last',mark);
   return {id,at,text,details};
  })();
  try{return await running}finally{running=null}

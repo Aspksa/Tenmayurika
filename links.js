@@ -18,6 +18,13 @@ function of(kind,ref,limit=20){
  return use(db=>[...db.prepare('SELECT b_kind AS kind,b_ref AS ref,type,evidence FROM memory_links WHERE a_kind=? AND a_ref=? LIMIT ?').all(kind,ref,limit).map(r=>({...r,dir:'out'})),
   ...db.prepare('SELECT a_kind AS kind,a_ref AS ref,type,evidence FROM memory_links WHERE b_kind=? AND b_ref=? LIMIT ?').all(kind,ref,limit).map(r=>({...r,dir:'in'}))].slice(0,limit));
 }
+// Связи, найденные по словам-связкам, перепроверяются: если в заметке или деле связки больше нет, связь уходит.
+function reconcile(found){
+ const key=l=>[l.a.kind,l.a.ref,l.type,l.b.kind,l.b.ref].join('|'),keep=new Set(found.map(key));
+ return use(db=>tx(db,()=>{let n=0;const del=db.prepare('DELETE FROM memory_links WHERE id=?');
+  for(const r of db.prepare("SELECT * FROM memory_links WHERE source='rules'").all())if(!keep.has([r.a_kind,r.a_ref,r.type,r.b_kind,r.b_ref].join('|'))){del.run(r.id);n++}
+  return n}));
+}
 function list(limit=200){return use(db=>db.prepare('SELECT * FROM memory_links ORDER BY created_at DESC LIMIT ?').all(limit).map(r=>({...r})))}
 function count(){return use(db=>db.prepare('SELECT COUNT(*) AS n FROM memory_links').get().n)}
 // Записи, которых больше нет, уносят свои связи.
@@ -78,4 +85,4 @@ function parseModel(text,items){
  }
  return out.slice(0,12);
 }
-module.exports={TYPES,add,of,list,count,prune,detect,parseModel};
+module.exports={TYPES,add,of,list,count,prune,reconcile,detect,parseModel};

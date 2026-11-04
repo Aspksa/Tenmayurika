@@ -18,10 +18,12 @@ const RULES=[
 ];
 // Общая форма: «я хочу, чтобы ты …», «мне удобнее, когда ты …», «пожалуйста, всегда …».
 const GENERAL=/(?:^|[.!]\s*)(?:я\s+(?:предпочитаю|хочу|люблю),?\s+чтобы\s+ты|мне\s+(?:удобнее|нравится|приятнее),?\s+когда\s+ты|пожалуйста,?\s+(?:всегда|никогда|впредь)|впредь|на\s+будущее,?)\s+([^.!?\n]{4,140})/iu;
+// «Не называй меня Аня», «не говори по-английски» — отрицание: такое правило не запоминается наоборот.
+const NEGATED=/(?:^|[\s,.!])(?:не|нельзя|не\s+надо|не\s+нужно|не\s+стоит|перестань|хватит|прекрати)\s*$/i;
 function detect(text){
  const t=String(text||'').trim();if(!t||t.length>1000||/\?\s*$/.test(t))return [];
  const out=[],seen=new Set();
- for(const [re,make] of RULES){const m=t.match(re);if(m){const p=make(m);if(!seen.has(p.aspect)){seen.add(p.aspect);out.push(p)}}}
+ for(const [re,make] of RULES){const m=t.match(re);if(m&&!NEGATED.test(t.slice(Math.max(0,m.index-20),m.index))){const p=make(m);if(!seen.has(p.aspect)){seen.add(p.aspect);out.push(p)}}}
  if(!out.length){const m=t.match(GENERAL);if(m){const clause=m[1].trim().replace(/[\s,;]+$/,'');out.push({aspect:'other:'+crypto.createHash('sha1').update(clause.toLocaleLowerCase()).digest('hex').slice(0,10),text:cap(clause)})}}
  return out;
 }

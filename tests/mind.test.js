@@ -20,6 +20,9 @@ test('preferences are recognised from plain words',()=>{
  assert.equal(preferences.detect('я хочу, чтобы ты напоминала про воду')[0].text,'Напоминала про воду');
  assert.deepEqual(preferences.detect('отвечай короче?'),[],'вопрос — не пожелание');
  assert.deepEqual(preferences.detect('где живёт Анна'),[]);
+ assert.deepEqual(preferences.detect('не называй меня Аня'),[],'отрицание не запоминается наоборот');
+ assert.deepEqual(preferences.detect('пожалуйста, не говори по-английски'),[]);
+ assert.equal(preferences.detect('без смайликов, пожалуйста')[0].aspect,'emoji');
  // Новое пожелание того же вида заменяет старое.
  preferences.add({aspect:'length',text:'Отвечать коротко'});preferences.add({aspect:'length',text:'Отвечать подробно'});
  assert.deepEqual(preferences.list().filter(p=>p.aspect==='length').map(p=>p.text),['Отвечать подробно']);
@@ -129,5 +132,19 @@ test('mind layers work through the chat and brain API',async()=>{
   // Второй раз без изменений — размышлять не о чем (в простое), вручную можно всегда.
   const reflect=require('../reflect');
   assert.equal(await reflect.maybeRun({ws:await get('/api/workspace')}),null);
+  // Вывод снимается, когда его факт отставлен поправкой.
+  const memory=require('../memory-core');
+  const ins=(await get('/api/brain/mind')).insights.find(i=>/Мурка/.test(i.text));
+  memory.retireFact(ins.factIds[0]);
+  assert.ok(reflect.insightsFor('что любит Мурка',[]).every(i=>i.id!==ins.id));
+  // Связь по словам-связкам уходит, когда связки в заметке больше нет.
+  const links=require('../links');
+  const a=await post('/api/items',{collection:'notes',title:'Ремонт машины',content:'Сервис'});
+  const b=await post('/api/items',{collection:'notes',title:'Опоздала на работу',content:'Всё из-за ремонта машины'});
+  await post('/api/brain/reflect',{});
+  assert.ok(links.of('note',a.id).some(l=>l.ref===b.id&&l.type==='причина'));
+  await fetch(base+'/api/items',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({collection:'notes',id:b.id,content:'Приехала вовремя. Ремонт не помешал.'})});
+  await post('/api/brain/reflect',{});
+  assert.ok(!links.of('note',a.id).some(l=>l.ref===b.id),'устаревшая связь снята');
  }finally{await new Promise(resolve=>server.close(resolve))}
 });
