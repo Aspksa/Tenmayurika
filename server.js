@@ -26,6 +26,10 @@ const memskills=require('./memskills');
 const selfstudy=require('./selfstudy');
 const core=require('./core');
 const soul=require('./soul');
+const psyche=require('./psyche');
+const selfrules=require('./selfrules');
+const mytools=require('./mytools');
+const selfcode=require('./selfcode');
 const onboarding=require('./onboarding');
 const review=require('./review');
 const atlas=require('./atlas');
@@ -88,6 +92,19 @@ async function handleBrain(req,res,p,url){
   // Душа: ступень, черты, настроение и дорогие моменты (soul.js); можно начать рост заново.
   if(req.method==='GET'&&p==='/api/brain/soul')return respond(res,200,soul.view());
   if(req.method==='POST'&&p==='/api/brain/soul/reset')return respond(res,200,soul.reset());
+  // Внутренний мир и рост себя (psyche.js, selfrules.js, mytools.js, selfcode.js). Код меняется только по кнопке хозяина.
+  if(req.method==='GET'&&p==='/api/brain/psyche')return respond(res,200,{soul:soul.view(),...psyche.view(),rules:selfrules.rules(),tune:selfrules.tuneView(),tools:mytools.list(),code:selfcode.view()});
+  if(req.method==='POST'&&p.startsWith('/api/brain/psyche/')){
+   const input=await body(req)||{},act=p.slice('/api/brain/psyche/'.length);
+   try{
+    const r=act==='anchors'?psyche.setAnchors(input.anchors):act==='letter-read'?psyche.markLetterRead(input.id):act==='taste-remove'?psyche.removeTaste(input.id):act==='goal-remove'?psyche.removeGoal(input.id)
+     :act==='rule-remove'?selfrules.removeRule(input.id):act==='tool-remove'?mytools.remove(input.name)
+     :act==='code-apply'?selfcode.apply(input.id):act==='code-reject'?selfcode.reject(input.id):act==='code-rollback'?selfcode.rollback(input.id):undefined;
+    if(r===undefined)return respond(res,404,{error:'Not found'});
+    if(r===null||r===false)return respond(res,404,{error:'Not found'});
+    return respond(res,200,{ok:true,result:r});
+   }catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}
+  }
   if(req.method==='POST'&&p==='/api/brain/core/restore'){const input=await body(req);const r=core.restore(input?.name,input?.version);return r?respond(res,200,r):respond(res,404,{error:'Not found'})}
   // Знакомство: пропустить пункт, закончить или начать заново.
   if(req.method==='POST'&&p==='/api/brain/onboarding'){const input=await body(req),a=input?.action;

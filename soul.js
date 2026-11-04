@@ -91,5 +91,12 @@ function evidence(){
  return ['СТУПЕНЬ ДУШИ: '+v.level+' (опыт '+v.xp+')','ЧЕРТЫ: '+v.traits.map(t=>t.label+' '+t.value).join(', '),'НАСТРОЕНИЕ: '+v.mood.label,
   ...v.moments.map(m=>'МОМЕНТ ('+m.kind+'): хозяин сказал «'+m.text+'»')];
 }
+// Награда за рост изнутри (достигнутая мечта, письмо, сон): опыт и черты.
+function grant(xp,grow={},why=''){
+ if(!on())return null;
+ const s=load(),before=s.xp;s.xp=Math.round((s.xp+Number(xp||0))*10)/10;nudge(s,grow);
+ if(why)s.mood={name:'joy',at:new Date().toISOString(),why:String(why).slice(0,80)};
+ return save(s,before);
+}
 function reset(){setState(KEY,fresh());note('Моя душа начала расти заново.',{soul:'reset'});return view()}
-module.exports={TRAITS,LEVELS,MOODS,detect,feel,onFeedback,view,promptText,evidence,reset,levelOf};
+module.exports={grant,mood,TRAITS,LEVELS,MOODS,detect,feel,onFeedback,view,promptText,evidence,reset,levelOf};

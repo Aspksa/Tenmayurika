@@ -958,3 +958,9 @@ html.brain-fs-lock,html.brain-fs-lock body{overflow:hidden}
 .brain-soul-traits{display:grid;gap:.35rem}
 .brain-soul-trait{display:grid;grid-template-columns:7.5rem 1fr 2rem;gap:.5rem;align-items:center;font-size:.85rem}
 @media (prefers-reduced-motion:reduce){.brain-soul-bar>i{transition:none}}
+
+/* Правки своего кода (brain.js psycheSecs) */
+.brain-code summary{cursor:pointer;color:#e8c25a;font-size:.8rem}
+.brain-code pre{margin:.3rem 0;padding:.4rem .5rem;max-height:14rem;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:.72rem;border-radius:6px;background:rgba(255,255,255,.04)}
+.brain-code-old{border-left:2px solid rgba(255,90,90,.6)}
+.brain-code-new{border-left:2px solid rgba(111,227,168,.7)}
