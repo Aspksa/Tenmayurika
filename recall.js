@@ -36,7 +36,9 @@ async function recall(text,{factLimit=8,noteLimit=5,ws}={}){
  if(!notes.size){const ws=[...new Set(query.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w=>w.length>=3))].slice(0,8);
   if(ws.length)(data.notes||[]).map(n=>{const hay=(n.title+' '+(n.content||'')).toLocaleLowerCase();return {n,c:ws.filter(w=>hay.includes(w)).length}}).filter(x=>x.c>0).sort((a,b)=>b.c-a.c).slice(0,10).forEach((x,i)=>add(notes,x.n.id,'слова',W.text*rrf(i)*6))}
  // Часть слова, которой нет в индексе («зань»): старый поиск по подстроке.
- if(!facts.size)try{memory.searchFacts(query,20).forEach((f,i)=>add(facts,f.id,'слова',W.text*rrf(i)*6))}catch(e){if(!(e instanceof TypeError))throw e}
+ // По всей фразе и по каждому слову отдельно; чем больше слов совпало, тем выше.
+ if(!facts.size){const hit=new Map();for(const t of [query,...new Set(query.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w=>w.length>=3))].slice(0,9)){try{for(const f of memory.searchFacts(t,20))hit.set(f.id,(hit.get(f.id)||0)+1)}catch(e){if(!(e instanceof TypeError))throw e}}
+  [...hit].sort((x,y)=>y[1]-x[1]).slice(0,20).forEach(([id],i)=>add(facts,id,'слова',W.text*rrf(i)*6))}
  // Смысл.
  (await vectorNotes(query)).forEach((id,i)=>add(notes,id,'смысл',W.vector*rrf(i)*8));
  // Связи: сущности лучших фактов и сущности, названные в вопросе.
