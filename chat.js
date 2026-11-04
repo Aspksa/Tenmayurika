@@ -116,7 +116,9 @@ function activeAbout(subject){
 const same=(a,b)=>String(a||'').trim().toLocaleLowerCase().replace(/ё/g,'е')===String(b||'').trim().toLocaleLowerCase().replace(/ё/g,'е');
 function findFact(subject,predicate,object){
  const all=activeAbout(subject),byPred=predicate?all.filter(f=>same(f.predicate,predicate)):all;
- if(object){const exact=byPred.find(f=>same(f.object,object))||all.find(f=>same(f.object,object));if(exact)return {fact:exact};return {fact:null,candidates:(byPred.length?byPred:all).slice(0,8)}}
+ // Явно названные связь и объект сужают выбор: чужую связь («любит» вместо «не любит») не трогаем.
+ if(predicate&&!byPred.length)return {fact:null,candidates:all.slice(0,8)};
+ if(object){const exact=byPred.find(f=>same(f.object,object));if(exact)return {fact:exact};return {fact:null,candidates:byPred.slice(0,8)}}
  if(byPred.length===1)return {fact:byPred[0]};
  return {fact:null,candidates:(byPred.length?byPred:all).slice(0,8)};
 }

@@ -62,7 +62,10 @@ async function run({complete=null,reason='messages'}={}){
   if(source==='rules')plan.lessons=fixes.filter(e=>e.correction).slice(0,3).map(e=>'На вопросы вроде «'+e.question.slice(0,60)+'» помни поправку: «'+e.correction.slice(0,120)+'».');
   const done={lessons:0,prefs:0,facts:0,conflicts:plan.conflicts,human:0,core:[]};
   // 1. Уроки — в «Как мы общаемся».
-  for(const l of plan.lessons){try{if(!core.get('bond').body.includes(l)){core.append('bond',l,{source:'review',reason:'урок из разбора разговора'});done.lessons++}}catch(e){if(!(e instanceof TypeError))throw e}}
+  // Не влезло в полный блок — копится и уходит в пересмотр вместе со старым текстом.
+  const overflow={bond:[],human:[]};
+  const put=(n,t,reason)=>{if(core.get(n).body.includes(t))return false;try{core.append(n,t,{source:'review',reason});return true}catch(e){if(!(e instanceof TypeError))throw e;if(/вмещает/.test(e.message))overflow[n].push(t);return false}};
+  for(const l of plan.lessons)if(put('bond',l,'урок из разбора разговора'))done.lessons++;
   // 2. Предпочтения.
   for(const p of plan.prefs){try{if(!preferences.addText(p).duplicate)done.prefs++}catch(e){if(!(e instanceof TypeError))throw e}}
   // 3. Факты, пропущенные фоновым извлечением.
@@ -70,11 +73,13 @@ async function run({complete=null,reason='messages'}={}){
   const known=f=>{try{return memory.queryFacts({subject:f.subject,limit:500}).some(g=>!g.valid_to&&norm(g.predicate)===norm(f.predicate)&&norm(g.object)===norm(f.object))}catch{return false}};
   for(const f of plan.facts){if(known(f))continue;try{const r=memory.addFact({subject:f.subject,predicate:f.predicate,object:f.object,sourceId:'review:'+mark.lastId,confidence:.7,restore:false});if(!r.duplicate)done.facts++}catch(e){if(!(e instanceof TypeError))throw e}}
   // 5. Понимание человека.
-  for(const h of plan.human){try{if(!core.get('human').body.includes(h)){core.append('human',h,{source:'review',reason:'понимание из разбора разговора'});done.human++}}catch(e){if(!(e instanceof TypeError))throw e}}
+  for(const h of plan.human)if(put('human',h,'понимание из разбора разговора'))done.human++;
   // Блок, в который дописали (или который переполнился), пересматривается: дописанное сводится в принципы.
   const touched=[...(done.lessons||plan.lessons.length?['bond']:[]),...(done.human||plan.human.length||done.facts?['human']:[])];
-  for(const n of touched){try{const r=await core.revise(n,{complete});if(r.changed)done.core.push(core.BLOCKS[n].title)}catch(e){console.error('Review revise failed:',e.name)}}
-  setState('review',mark);
+  for(const n of touched){try{const r=await core.revise(n,{complete,additions:overflow[n]});if(r.changed)done.core.push(core.BLOCKS[n].title)}catch(e){console.error('Review revise failed:',e.name)}}
+  // Пересмотр не уместил новое — сообщения остаются неразобранными, чтобы не потерять урок; попробуем позже.
+  const lost=['bond','human'].flatMap(n=>overflow[n].filter(t=>!core.get(n).body.includes(t)));
+  setState('review',lost.length?{...s,at:mark.at,lost:lost.length}:mark);
   const changed=done.lessons+done.prefs+done.facts+done.human+done.core.length>0||done.conflicts.length>0;
   if(changed){
    const parts=[done.lessons?'уроков '+done.lessons:'',done.prefs?'пожеланий '+done.prefs:'',done.facts?'фактов '+done.facts:'',done.human?'о тебе '+done.human:'',done.core.length?'переписала «'+done.core.join('», «')+'»':''].filter(Boolean);

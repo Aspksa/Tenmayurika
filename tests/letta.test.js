@@ -251,3 +251,35 @@ test('review fixes 2: atlas follows aliases, rules-only pass does not block a mo
  let asked=0;await core.revise('bond',{complete:async()=>{asked++;return say('NOCHANGE')}});
  assert.equal(asked,1);
 });
+
+test('review fixes 3: explicit predicate respected, overflowing lessons kept, newest messages in a busy period',async()=>{
+ memory.addFact({subject:'Лиза',predicate:'любит',object:'чай',sourceId:'p'});
+ const chatMod=require('../chat');void chatMod;
+ // Самоправка с чужой связью: «не любит чай» не трогает «любит чай».
+ let calls=0;const srv=http.createServer((req,res)=>{calls++;req.resume();req.on('end',()=>{res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(calls===1?{choices:[{message:{role:'assistant',content:null,tool_calls:[{id:'p1',type:'function',function:{name:'forget_fact',arguments:JSON.stringify({subject:'Лиза',predicate:'не любит',object:'чай'})}}]}}]}:{choices:[{message:{role:'assistant',content:'Ок.'}}]}))})});
+ await new Promise(r=>srv.listen(0,'127.0.0.1',r));
+ process.env.CHAT_URL='http://127.0.0.1:'+srv.address().port+'/v1/chat/completions';
+ try{await reply({message:'забудь, что Лиза не любит чай'},{addItem(){},setTaskDone(){}})}finally{delete process.env.CHAT_URL;await new Promise(r=>srv.close(r))}
+ assert.ok(memory.queryFacts({subject:'Лиза',limit:10}).some(f=>f.object==='чай'&&!f.valid_to));
+ // Полный блок: урок не теряется — пересмотр получает его, без модели сообщения остаются на потом.
+ core.write('bond','п'.repeat(core.LIMIT-5),{source:'user'});
+ chatlog.save('user','разбор при полном блоке',true);
+ const lastBefore=require('../brain-db').state('review',{}).lastId;
+ let got='';
+ await review.run({complete:async({messages})=>{const u=messages[1].content;if(/Разговор/.test(u))return say('LESSON: Новый важный урок');got=u;return say('Сжато. Новый важный урок.')}});
+ assert.match(got,/НОВОЕ, обязательно учти: Новый важный урок/);assert.match(core.get('bond').body,/Новый важный урок/);
+ core.write('bond','п'.repeat(core.LIMIT-5),{source:'user'});
+ chatlog.save('user','ещё разбор при полном блоке',true);
+ const before2=require('../brain-db').state('review',{}).lastId;
+ await review.run({complete:async({messages})=>/Разговор/.test(messages[1].content)?say('LESSON: Урок, который не влез'):(()=>{throw Error('down')})()});
+ assert.equal(require('../brain-db').state('review',{}).lastId,before2,'неуместившийся урок оставляет сообщения на потом');
+ assert.ok(lastBefore<=before2);
+ // Больше 2000 сообщений за период: берутся самые свежие, тема ищется по всему периоду.
+ const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(process.env.TENMAYURIKA_MEMORY_DB);
+ const at=new Date(2025,0,15,12).toISOString(),ins=db.prepare('INSERT INTO chat_log(at,role,text,learned) VALUES(?,?,?,2)');
+ db.exec('BEGIN');for(let i=0;i<2005;i++)ins.run(at,'user','старое '+i);ins.run(at,'user','уникальная тема цеппелин');db.exec('COMMIT');db.close();
+ const d={from:new Date(2025,0,15),to:new Date(2025,0,16)};
+ const all=chatlog.between(d.from,d.to,{limit:3});
+ assert.equal(all.total,2006);assert.equal(all.messages.at(-1).text,'уникальная тема цеппелин');
+ assert.equal(chatlog.between(d.from,d.to,{query:'цеппелин'}).matched,1);
+});

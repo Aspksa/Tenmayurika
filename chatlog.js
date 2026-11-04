@@ -57,11 +57,19 @@ function between(from,to,{query='',limit=16,exceptId=0}={}){
  const a=new Date(from).toISOString(),b=new Date(to).toISOString(),terms=stemsOf(query).filter(t=>!/^(говор|обсуж|болта|разго|расск|спрос|писал|мы$|тобой)/.test(t));
  const db=open();
  try{
-  const rows=db.prepare('SELECT id,at,role,text FROM chat_log WHERE at>=? AND at<? AND id<>? ORDER BY id LIMIT 2000').all(a,b,exceptId);
-  if(!terms.length)return {total:rows.length,messages:rows.slice(-limit)};
-  const hit=new Set();rows.forEach((r,i)=>{const t=r.text.toLocaleLowerCase().replace(/ё/g,'е');if(terms.some(x=>t.includes(x))){hit.add(i);if(r.role==='user'&&i+1<rows.length&&rows[i+1].role==='assistant')hit.add(i+1);if(r.role==='assistant'&&i>0&&rows[i-1].role==='user')hit.add(i-1)}});
-  const out=rows.filter((r,i)=>hit.has(i));
-  return {total:rows.length,matched:out.length,messages:out.slice(-limit)};
+  const range='at>=? AND at<? AND id<>?',args=[a,b,exceptId];
+  const total=db.prepare('SELECT COUNT(*) AS n FROM chat_log WHERE '+range).get(...args).n;
+  // Самые свежие сообщения периода, по порядку времени.
+  if(!terms.length)return {total,messages:db.prepare('SELECT id,at,role,text FROM chat_log WHERE '+range+' ORDER BY id DESC LIMIT ?').all(...args,limit).reverse()};
+  db.function('norm_text',{deterministic:true},v=>typeof v==='string'?v.toLocaleLowerCase().replace(/ё/g,'е'):v);
+  const like=' AND ('+terms.map(()=>'norm_text(text) LIKE ?').join(' OR ')+')',likeArgs=terms.map(t=>'%'+t+'%');
+  const matched=db.prepare('SELECT COUNT(*) AS n FROM chat_log WHERE '+range+like).get(...args,...likeArgs).n;
+  const hits=db.prepare('SELECT id,at,role,text FROM chat_log WHERE '+range+like+' ORDER BY id DESC LIMIT ?').all(...args,...likeArgs,limit);
+  // К найденному — пара: вопрос человека и ответ на него.
+  const next=db.prepare("SELECT id,at,role,text FROM chat_log WHERE id>? AND "+range+" ORDER BY id LIMIT 1"),prev=db.prepare("SELECT id,at,role,text FROM chat_log WHERE id<? AND "+range+" ORDER BY id DESC LIMIT 1");
+  const out=new Map();
+  for(const h of hits){out.set(h.id,h);const n=h.role==='user'?next.get(h.id,...args):prev.get(h.id,...args);if(n&&n.role!==h.role)out.set(n.id,n)}
+  return {total,matched,messages:[...out.values()].sort((x,y)=>x.id-y.id).slice(-limit)};
  }finally{db.close()}
 }
 // Соседи найденного сообщения: n до и n после.
