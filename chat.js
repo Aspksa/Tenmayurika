@@ -10,6 +10,7 @@ const llm=require('./llm');
 const planner=require('./planner');
 const experience=require('./experience');
 const chatlog=require('./chatlog');
+const {recall}=require('./recall');
 const crypto=require('node:crypto');
 
 const MAX_MESSAGE=2000,MAX_HISTORY=12,MAX_TOOL_ROUNDS=4;
@@ -38,23 +39,21 @@ const TOOLS={
 const TOOL_IDS=Object.keys(TOOLS);
 
 function words(text){return [...new Set(text.toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w=>w.length>=3))].slice(0,8)}
-// Ищем по всей фразе и по каждому слову, затем ранжируем по числу совпавших слов, и только потом берём 8 лучших.
-function findFacts(text){
- const terms=words(text),found=new Map();
- for(const term of [text,...terms]){
-  try{for(const fact of memory.searchFacts(term.slice(0,300),50))if(!found.has(fact.id))found.set(fact.id,fact)}catch(e){if(!(e instanceof TypeError))throw e}
- }
- const full=text.trim().toLocaleLowerCase();
- const score=f=>{const hay=(f.subject+' '+f.predicate+' '+f.object).toLocaleLowerCase();return terms.filter(t=>hay.includes(t)).length+(hay.includes(full)?terms.length+1:0)};
- return [...found.values()].map(f=>({f,s:score(f)})).sort((a,b)=>b.s-a.s||String(b.f.observed_at).localeCompare(String(a.f.observed_at))).slice(0,8).map(x=>x.f);
-}
-async function findNotes(text){
- const terms=words(text);if(!terms.length)return [];
- const data=await storage.load();
- return (data.notes||[]).map(note=>{const hay=(note.title+' '+(note.content||'')).toLocaleLowerCase();return {note,score:terms.filter(t=>hay.includes(t)).length}})
-  .filter(x=>x.score>0).sort((a,b)=>b.score-a.score).slice(0,5).map(x=>x.note);
-}
+// Вспоминание — гибридное (recall.js): слова (BM25), смысл (векторы заметок), связи по графу, свежесть.
 const factLine=f=>'• '+f.subject+' — '+f.predicate+' → '+f.object;
+// Короткая сводка памяти (для команды «обзор памяти» и для начала разговора с моделью).
+function overviewText(o,ws={},short=false){
+ const lines=['Память: '+o.facts+' '+plural(o.facts,'факт','факта','фактов')+' о '+o.entities+' '+plural(o.entities,'сущности','сущностях','сущностях')+', заметок '+(ws.notes||[]).length+', дел '+(ws.tasks||[]).filter(t=>!t.done).length+' открыто.'];
+ if(!o.facts)return lines[0];
+ if(o.topics.length)lines.push('Темы: '+o.topics.slice(0,short?4:6).map(t=>t.label+' ('+t.size+')').join(', ')+'.');
+ if(o.hubs.length)lines.push('Больше всего связей: '+o.hubs.slice(0,short?3:5).map(h=>h.name+' · '+h.degree).join(', ')+'.');
+ if(!short&&o.relations.length)lines.push('Чаще всего: '+o.relations.slice(0,5).map(r=>r.relation+' ('+r.count+')').join(', ')+'.');
+ const w=o.week||{},wk=(w.created||0)+(w.restored||0);
+ lines.push('За неделю: новых фактов '+wk+(w.retired?', убрано при разборе '+w.retired:'')+(w.merged?', слито дублей '+w.merged:'')+'.');
+ if(!short&&o.recent.length)lines.push('Последнее: '+o.recent.slice(0,3).map(f=>f.subject+' — '+f.predicate+' → '+f.object).join('; ')+'.');
+ if(o.conflicts||o.duplicates)lines.push('Ждут разбора: '+[o.conflicts?'противоречий '+o.conflicts:'',o.duplicates?'похожих фактов '+o.duplicates:''].filter(Boolean).join(', ')+' (раздел «Мозг»).');
+ return lines.join('\n');
+}
 const noteLine=n=>'• '+n.title+(n.content?': '+n.content.slice(0,140):'');
 function pageFrom(text){
  const t=String(text||'').toLocaleLowerCase();
@@ -151,7 +150,7 @@ function makeTools(ctx){
   },
   async search_memory({query}){
    const q=String(query||'').trim();if(!q)return {ok:false,text:'Что поискать?'};
-   const facts=findFacts(q),notes=await findNotes(q);
+   const {facts,notes}=await recall(q);
    if(!facts.length&&!notes.length)return {ok:true,text:'По запросу «'+q+'» ничего не нашла.'};
    return {ok:true,recalled:{facts:facts.map(f=>f.id),notes:notes.map(n=>n.id)},text:[facts.length?'Факты:\n'+facts.map(factLine).join('\n'):'',notes.length?'Заметки:\n'+notes.map(noteLine).join('\n'):''].filter(Boolean).join('\n\n')};
   },
@@ -174,7 +173,19 @@ function makeTools(ctx){
    if(!st.total)return {ok:true,text:'Опыта пока нет: я записываю, как поняла каждый вопрос и что сделала, начиная с этого разговора.'};
    return {ok:true,text:'Мой опыт: '+st.total+' '+plural(st.total,'ответ','ответа','ответов')+', подтверждено '+(st.confirmed||0)+', поправлено '+(st.corrected||0)+'.'+(fixes.length?'\nЧему вы меня научили:\n'+fixes.map(e=>'• на «'+e.question.slice(0,60)+'» — '+(e.correction?'«'+e.correction.slice(0,120)+'»':'ответ был не тот')).join('\n'):'')};
   },
-  async fact_relations({subject}){const rows=memory.relations(String(subject||''),20);if(!rows.length)return {ok:true,text:'О «'+subject+'» связей не знаю.'};return {ok:true,text:'Связи «'+subject+'»:\n'+rows.map(factLine).join('\n')}},
+  // Связи на два шага: прямые и через одно звено («Анна → Пермь → Пётр»).
+  async fact_relations({subject}){
+   const r=memory.neighborhood(String(subject||'').trim()||'?',2,40);if(!r.facts.length)return {ok:true,text:'О «'+subject+'» связей не знаю.'};
+   const near=r.facts.filter(f=>f.hop===1),far=r.facts.filter(f=>f.hop===2);
+   return {ok:true,recalled:{facts:r.facts.map(f=>f.id),notes:[]},text:'Связи «'+r.entity+'»:\n'+near.slice(0,15).map(factLine).join('\n')+(far.length?'\nЧерез одно звено:\n'+far.slice(0,12).map(f=>'• '+f.via+' → '+f.subject+' — '+f.predicate+' → '+f.object).join('\n'):'')};
+  },
+  async fact_path({from,to}){
+   const r=memory.findPath(String(from||'').trim()||'?',String(to||'').trim()||'?',4);
+   if(!r.from||!r.to)return {ok:true,text:'Не знаю «'+(!r.from?from:to)+'» в памяти.'};
+   if(!r.facts.length)return {ok:true,text:'Не нашла связи между «'+r.from+'» и «'+r.to+'» (искала до 4 шагов).'};
+   return {ok:true,recalled:{facts:r.facts.map(f=>f.id),notes:[]},text:'«'+r.from+'» и «'+r.to+'» связаны через '+r.facts.length+' '+plural(r.facts.length,'шаг','шага','шагов')+':\n'+r.facts.map(factLine).join('\n')};
+  },
+  async memory_overview(){return {ok:true,text:overviewText(memory.overview(),await storage.load())}},
   async set_reminder({minutes,text}){
    const m=Number(minutes);if(!Number.isFinite(m)||m<=0||m>7*24*60)throw new TypeError('Укажите время от 1 минуты до недели');
    const t=String(text||'Время пришло!').trim().slice(0,200)||'Время пришло!',at=Date.now()+Math.round(m*60000);
@@ -216,7 +227,7 @@ function makeTools(ctx){
  };
 }
 // Какому переключателю принадлежит функция.
-const OWNER={agenda:'calendar',move_task:'calendar',days_until:'calendar',convert_units:'convert',generate_password:'password',pick_random:'fun',list_notes:'notes',day_summary:'insights',fact_conflicts:'insights',fact_relations:'insights',experience_log:'insights',set_reminder:'reminders',calculate:'calc',roll_dice:'fun',flip_coin:'fun',change_look:'avatar',reindex_memory:'sync',add_note:'notes',add_task:'tasks',complete_task:'tasks',list_tasks:'tasks',remember_fact:'facts',search_memory:'search',open_page:'navigate',create_backup:'backup',system_status:'status',current_time:'clock'};
+const OWNER={agenda:'calendar',move_task:'calendar',days_until:'calendar',convert_units:'convert',generate_password:'password',pick_random:'fun',list_notes:'notes',day_summary:'insights',fact_conflicts:'insights',fact_relations:'insights',fact_path:'insights',memory_overview:'insights',experience_log:'insights',set_reminder:'reminders',calculate:'calc',roll_dice:'fun',flip_coin:'fun',change_look:'avatar',reindex_memory:'sync',add_note:'notes',add_task:'tasks',complete_task:'tasks',list_tasks:'tasks',remember_fact:'facts',search_memory:'search',open_page:'navigate',create_backup:'backup',system_status:'status',current_time:'clock'};
 const SCHEMAS={
  add_note:{description:'Создать заметку. category: personal (личная) или work (рабочая)',parameters:{type:'object',properties:{title:{type:'string'},content:{type:'string'},category:{type:'string',enum:['personal','work']}},required:['title']}},
  add_task:{description:'Добавить дело. category: personal (личное) или work (рабочее). Срок: due (ГГГГ-ММ-ДД) и time (ЧЧ:ММ) или when словами («завтра в 15:00», «в пятницу»). priority: low, normal, high',parameters:{type:'object',properties:{title:{type:'string'},category:{type:'string',enum:['personal','work']},due:{type:'string'},time:{type:'string'},when:{type:'string'},priority:{type:'string',enum:['low','normal','high']}},required:['title']}},
@@ -237,8 +248,10 @@ const SCHEMAS={
  list_notes:{description:'Показать последние заметки',parameters:{type:'object',properties:{}}},
  day_summary:{description:'Итоги дня: новые заметки и дела',parameters:{type:'object',properties:{}}},
  fact_conflicts:{description:'Показать противоречия в фактах памяти',parameters:{type:'object',properties:{}}},
+ fact_relations:{description:'Связи сущности в памяти: прямые факты и через одно звено',parameters:{type:'object',properties:{subject:{type:'string'}},required:['subject']}},
+ fact_path:{description:'Как связаны две сущности: цепочка фактов между ними (до 4 шагов)',parameters:{type:'object',properties:{from:{type:'string'},to:{type:'string'}},required:['from','to']}},
+ memory_overview:{description:'Обзор памяти: главные темы и люди, самые связанные узлы, что менялось за неделю, противоречия и дубли',parameters:{type:'object',properties:{}}},
  experience_log:{description:'Рассказать о своём опыте: сколько ответов подтверждено и какие поправки дал пользователь',parameters:{type:'object',properties:{}}},
- fact_relations:{description:'Показать все факты о субъекте',parameters:{type:'object',properties:{subject:{type:'string'}},required:['subject']}},
  set_reminder:{description:'Поставить напоминание или таймер через указанное число минут',parameters:{type:'object',properties:{minutes:{type:'number'},text:{type:'string'}},required:['minutes']}},
  calculate:{description:'Посчитать арифметическое выражение (+ - * / ^ % и скобки)',parameters:{type:'object',properties:{expression:{type:'string'}},required:['expression']}},
  roll_dice:{description:'Бросить кубик',parameters:{type:'object',properties:{sides:{type:'integer'}}}},
@@ -317,6 +330,9 @@ function parseCommand(text){
  if(/^(итоги( дня)?|сводка|отчёт|отчет|как прош(ёл|ел) день)\??$/.test(low))return {fn:'day_summary',args:{}};
  if(/^(противоречия|покажи противоречия|конфликты)\??$/.test(low))return {fn:'fact_conflicts',args:{}};
  if(/^(?:твой опыт|мой опыт|что ты (?:поняла|усвоила)|чему ты (?:научилась|научилась у меня)|твои ошибки)\??$/.test(low))return {fn:'experience_log',args:{}};
+ if((m=t.match(/^(?:как\s+)?(?:связан[аоы]?|связь)\s+(.+?)\s+(?:и|с|со|между)\s+(.+?)\??$/i))||(m=t.match(/^(?:связь\s+между|путь(?:\s+от)?)\s+(.+?)\s+(?:и|до|к)\s+(.+?)\??$/i))||(t.length<=60&&(m=t.match(/^([^→>:|]{1,30}?)\s*(?:→|->)\s*([^→>:|]{1,30}?)\??$/))))return {fn:'fact_path',args:{from:m[1].replace(/^между\s+/i,''),to:m[2]}};
+ if((m=t.match(/^как\s+(.+?)\s+связан[аоы]?\s+(?:с|со)\s+(.+?)\??$/i)))return {fn:'fact_path',args:{from:m[1],to:m[2]}};
+ if(/^(обзор памяти|обзор мозга|что (ты )?(обо мне )?(знаешь|помнишь)( обо мне)?|сводка памяти|что в памяти)\??$/.test(low))return {fn:'memory_overview',args:{}};
  if((m=t.match(/^(?:связи|всё о|все о|что связано с)\s+(.+?)\??$/i)))return {fn:'fact_relations',args:{subject:m[1]}};
  if((m=t.match(/^(?:напомни|таймер|поставь таймер|разбуди)\s+(?:мне\s+)?(?:через\s+)?(\d+(?:[.,]\d+)?)\s*(сек\S*|мин\S*|час\S*|с|м|ч)?(?=[\s:,—–-]|$)\s*[:,—–-]?\s*(.*)$/i))){
   const n=Number(m[1].replace(',','.')),u=(m[2]||'мин').toLocaleLowerCase();
@@ -373,12 +389,15 @@ function localReply(name,facts,notes,enabled,past=[],earlier=[]){
 }
 
 async function modelReply(name,message,history,facts,notes,enabled,impl,result,past=[],earlier=[]){
+ const ws=history.length?{}:await storage.load().catch(()=>({}));
  const context=[...facts.map(f=>'ФАКТ: '+f.subject+' | '+f.predicate+' | '+f.object),...notes.map(n=>'ЗАМЕТКА: '+n.title+' — '+(n.content||'').slice(0,500)),...earlier.map(m=>'ПОЛЬЗОВАТЕЛЬ ГОВОРИЛ '+new Date(m.at).toLocaleDateString('ru-RU')+': '+m.text.slice(0,400))].join('\n');
  const allowed=Object.keys(SCHEMAS).filter(fn=>enabled.has(OWNER[fn]));
  const tools=allowed.map(fn=>({type:'function',function:{name:fn,...SCHEMAS[fn]}}));
  const persona=(llm.config()?.systemPrompt||'').trim();
  const system=(persona||'Ты '+name+' — девятихвостая лиса-кицунэ, хранительница личной памяти Tenmayurika. Отвечай по-русски, тепло и кратко.')+' Твоё имя: '+name+'. Сегодня '+new Date().toLocaleDateString('ru-RU')+'.'+(allowed.length?' Используй инструменты, когда пользователь просит что-то сделать.':'')+(context?'\nИзвестно из памяти пользователя:\n'+context:'')
   // Свой опыт: как раньше понимала похожие вопросы и что пользователь подтвердил или поправил.
+  // В начале разговора модель получает обзор памяти, чтобы знать, о ком и о чём вообще помнит.
+  +(!history.length?(()=>{try{return '\nОбзор памяти пользователя:\n'+overviewText(memory.overview(),ws,true)}catch{return ''}})():'')
   +(past.length?'\nТвой опыт с похожими вопросами (учитывай поправки пользователя, не повторяй прежних ошибок):\n'+past.map(experience.describe).join('\n'):'');
  const messages=[{role:'system',content:system},...history,{role:'user',content:message}];
  for(let round=0;round<MAX_TOOL_ROUNDS;round++){
@@ -458,7 +477,7 @@ async function answer(input,message,ctx){
   track(result,command.fn,out);
   return {reply:out.text,source:'tool',understood:'команда '+command.fn,...pub(result)};
  }
- let facts=findFacts(message),notes=await findNotes(message);
+ let {facts,notes}=await recall(message);
  // Опыт: на похожий вопрос раньше нашлись другие записи — вспоминаем их снова (кроме ответов, которые пользователь поправил).
  let past=[];try{past=experience.similar(message,3)}catch(e){console.error('Experience lookup failed:',e.name)}
  const useful=past.filter(e=>e.feedback!=='fix');

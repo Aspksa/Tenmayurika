@@ -178,7 +178,7 @@ function words(text,min=3){const out=[];for(const w of String(text||'').toLocale
 const stemsOf=it=>it.stems||(it.stems=new Set(words(it.title).map(stem)));
 function ts(v){const t=Date.parse(v||'');return Number.isFinite(t)?t:0}
 function plural(n,a,b,c){const m=n%10,h=n%100;return m===1&&h!==11?a:m>=2&&m<=4&&(h<12||h>14)?b:c}
-function buildModel(ws,facts,conflicts,exp=[]){
+function buildModel(ws,facts,conflicts,exp=[],topics=[]){
  const app=()=>window.TenmaApp;
  const lobes=[],events=[];
  const add=(id,label,sub,color,items,open)=>{if(items.length)lobes.push({id,label,sub,color,items,open})};
@@ -191,13 +191,18 @@ function buildModel(ws,facts,conflicts,exp=[]){
  add('work','рабочие дела',taskSub(work),COLORS.work,work.map(taskItem),()=>app()?.go('tasks'));
  const pinned=notes.filter(n=>n.pinned).length;
  add('notes','заметки',notes.length+' '+plural(notes.length,'заметка','заметки','заметок')+(pinned?' · '+pinned+' закреп.':''),COLORS.notes,notes.map(n=>({id:'n:'+n.id,title:n.title,meta:(n.category==='work'?'рабочая':'личная')+' заметка'+(n.pinned?' · закреплена':''),ts:ts(n.createdAt),weight:n.pinned?1.4:1,open:()=>app()?.select?app().select('note',n.id):app()?.go('notes')})),()=>app()?.go('notes'));
- // Факты: крупные субъекты получают свою зону, остальные — общая зона «факты».
- const bySubject=new Map();for(const f of facts){const k=f.subject.toLocaleLowerCase();if(!bySubject.has(k))bySubject.set(k,{name:f.subject,list:[]});bySubject.get(k).list.push(f)}
- const subjects=[...bySubject.values()].sort((a,b)=>b.list.length-a.list.length);
- const big=subjects.filter(s=>s.list.length>=2).slice(0,6),rest=subjects.filter(s=>!big.includes(s)).flatMap(s=>s.list);
+ // Факты: темы памяти (сообщества связанных сущностей, алгоритм Лувена на сервере) получают свои зоны,
+ // остальные — общая зона «факты». Если тем нет (старый сервер), зоны строятся по субъекту.
+ let big,rest;
+ if(topics.length){const byId=new Map(facts.map(f=>[f.id,f])),used=new Set();
+  big=topics.filter(t=>t.size>=2).slice(0,6).map(t=>{const list=t.factIds.map(id=>byId.get(id)).filter(Boolean);list.forEach(f=>used.add(f.id));return {name:t.label,list,topic:t}}).filter(t=>t.list.length);
+  rest=facts.filter(f=>!used.has(f.id))}
+ else{const bySubject=new Map();for(const f of facts){const k=f.subject.toLocaleLowerCase();if(!bySubject.has(k))bySubject.set(k,{name:f.subject,list:[]});bySubject.get(k).list.push(f)}
+  const subjects=[...bySubject.values()].sort((a,b)=>b.list.length-a.list.length);
+  big=subjects.filter(s=>s.list.length>=2).slice(0,6);rest=subjects.filter(s=>!big.includes(s)).flatMap(s=>s.list)}
  const factItem=f=>({id:'f:'+f.id,title:f.subject+' — '+f.predicate+' → '+f.object,meta:'факт · '+(f.source_id||'')+' · уверенность '+f.confidence,ts:ts(f.observed_at),weight:.6+.6*(+f.confidence||0),fact:f,open:()=>app()?.go('facts')});
- const factSub=list=>[...new Set(list.map(f=>f.predicate))].slice(0,2).join(' · ');
- for(const s of big)add('fs:'+s.name.toLocaleLowerCase(),s.name.toLocaleLowerCase(),factSub(s.list),COLORS.facts,s.list.map(factItem),()=>app()?.go('facts'));
+ const factSub=s=>s.topic&&s.topic.entities.length>1?'тема · '+s.topic.entities.slice(1,3).join(', '):[...new Set(s.list.map(f=>f.predicate))].slice(0,2).join(' · ');
+ for(const s of big)add('fs:'+s.name.toLocaleLowerCase(),s.name.toLocaleLowerCase(),factSub(s),COLORS.facts,s.list.map(factItem),()=>app()?.go('facts'));
  add('facts','факты',rest.length+' '+plural(rest.length,'факт','факта','фактов'),COLORS.facts,rest.map(factItem),()=>app()?.go('facts'));
  add('conflicts','противоречия','сбой · '+conflicts.length,COLORS.conflicts,conflicts.map(c=>({id:'c:'+c.id,title:c.subject+' — '+c.predicate+': «'+c.earlier+'» или «'+c.newer+'»',meta:'противоречие',ts:ts(c.detected_at),weight:1.3,open:()=>app()?.go('facts')})),()=>app()?.go('facts'));
  // Журнал: что мозг узнал и когда.
@@ -293,7 +298,7 @@ function mount(host){
  const top=el('div','brain-top'),bar=el('div','brain-bar'),ctrl=el('div','brain-ctrl');
  const pauseBtn=el('button','brain-btn');pauseBtn.type='button';
  const resetBtn=el('button','brain-btn','Пробудить');resetBtn.type='button';resetBtn.title='Заново вырастить мозг из ядра';
- const find=el('input','brain-find');find.type='search';find.placeholder='Найти в мозге…';find.setAttribute('aria-label','Найти в мозге: зона, дело, заметка или факт');
+ const find=el('input','brain-find');find.type='search';find.placeholder='Найти… или «Анна → Казань»';find.setAttribute('aria-label','Найти в мозге: зона, дело, заметка или факт');
  const btn3d=el('button','brain-btn');btn3d.type='button';btn3d.title='Объёмный режим: тяните мышью или пальцем, колесо или щипок — приблизить';
  const labelBtn=el('button','brain-btn');labelBtn.type='button';labelBtn.title='Подписи зон: все, только при наведении или скрыть';
  const cleanBtn=el('button','brain-btn brain-keep');cleanBtn.type='button';cleanBtn.title='Чисто: только рой, без панелей и подписей';
@@ -303,7 +308,12 @@ function mount(host){
  ctrl.append(find,btn3d,labelBtn,palBtn,viewBtn,resetBtn,pauseBtn,cleanBtn,fsBtn);top.append(bar,ctrl);
  const empty=el('div','brain-empty');empty.hidden=true;
  const fixBox=el('div','brain-fix');fixBox.hidden=true;fixBox.setAttribute('role','dialog');fixBox.setAttribute('aria-label','Разбор противоречий');
- stage.append(glc,canvas,lab,grain,top,tip,empty,fixBox);
+ // Почти-дубли и обзор памяти — такие же окна поверх роя.
+ const dupBox=el('div','brain-fix brain-calm');dupBox.hidden=true;dupBox.setAttribute('role','dialog');dupBox.setAttribute('aria-label','Похожие факты');
+ const ovBox=el('div','brain-fix brain-calm');ovBox.hidden=true;ovBox.setAttribute('role','dialog');ovBox.setAttribute('aria-label','Обзор памяти');
+ const ovBtn=el('button','brain-btn','☰ Обзор');ovBtn.type='button';ovBtn.title='Обзор памяти: темы, самые связанные узлы, что менялось за неделю';
+ ctrl.prepend(ovBtn);ctrl.prepend(find);
+ stage.append(glc,canvas,lab,grain,top,tip,empty,fixBox,dupBox,ovBox);
  stage.setAttribute('role','img');
  const teach=el('form','brain-teach'),tIn=el('input'),tBtn=el('button','primary','Научить');
  tIn.placeholder='Научи меня: Анна | любит | зелёный чай';tIn.setAttribute('aria-label','Новый факт: субъект | связь | объект');tIn.maxLength=900;tBtn.type='submit';
@@ -323,7 +333,8 @@ function mount(host){
  const allBtn=el('button','brain-btn','✓ Запомнить всё');allBtn.type='button';
  const learnMsg=el('span','brain-hint'),learnList=el('ul','brain-learn-list');
  const fixBtn=el('button','brain-btn brain-alarm-btn');fixBtn.type='button';fixBtn.hidden=true;
- learnHead.append(learnTitle,autoToggle,chatToggle,scanBtn,allBtn,fixBtn);learnBox.append(learnHead,chatStat,learnList,learnMsg);
+ const dupBtn=el('button','brain-btn');dupBtn.type='button';dupBtn.hidden=true;dupBtn.title='Почти одинаковые факты: «Казань» и «г. Казань» — можно слить';
+ learnHead.append(learnTitle,autoToggle,chatToggle,scanBtn,allBtn,fixBtn,dupBtn);learnBox.append(learnHead,chatStat,learnList,learnMsg);
  const hud=el('div','brain-hud');
  const pLog=el('section','brain-panel'),pAct=el('section','brain-panel'),pTree=el('section','brain-panel');
  const logHead=el('div','brain-k'),logAlert=el('span','brain-alert','сбой узла');logAlert.hidden=true;logHead.append(el('span','','01 // журнал событий'),logAlert);
@@ -347,7 +358,7 @@ function mount(host){
  stage.classList.toggle('gl',!!glr);
  glc.addEventListener('webglcontextlost',e=>{e.preventDefault();glr=null;dropGL()});
 
- let W=0,H=0,dpr=1,ui=1,quality=1,baseQ=1,fpsT=0,fpsN=0,model={lobes:[],events:[],links:[],facts:0},facts=[],conflicts=[],exp=[];
+ let W=0,H=0,dpr=1,ui=1,quality=1,baseQ=1,fpsT=0,fpsN=0,model={lobes:[],events:[],links:[],facts:0},facts=[],conflicts=[],exp=[],topics=[],dups=[],impactIds=new Set(),impactOf=null,impactInfo=null;
  const core={parts:makeParticles(9000,7,MULT.core),pulse:0};
  let satParts=makeParticles(220,31,MULT.sat);
  // Пыль в объёме: редкие тусклые частицы во всём пространстве между зонами, медленно дрейфуют.
@@ -396,7 +407,23 @@ function mount(host){
  viewBtn.onclick=()=>{focusN=null;find.value='';setFocus('');Object.assign(camT,{yaw:cfg.mode3d?.5:0,pitch:cfg.mode3d?-.35:0,zoom:1,px:0,py:0});dirty=true};
  find.addEventListener('input',()=>setFocus(find.value));
  find.addEventListener('keydown',e=>{if(e.key==='Escape'){find.value='';setFocus('');e.stopPropagation()}if(e.key==='Enter'&&focusItems.size===1){const n=neurons.get([...focusItems][0]);if(n){pinned={type:'neuron',n};showTip(pinned,n.sx,n.sy,true)}}});
+ // Поиск: по названиям здесь же, затем гибридное вспоминание сервера (слова, смысл, связи) добавляет найденное.
+ // «Анна → Казань» — путь между сущностями: цепочка фактов подсвечивается и пробегает импульсом.
+ let findT=0,findSeq=0;
  function setFocus(q){
+  clearTimeout(findT);const seq=++findSeq,raw=q.trim(),pathM=raw.match(/^(.+?)\s*(?:→|->)\s*(.+)$/);
+  if(raw.length>=2)findT=setTimeout(async()=>{
+   try{
+    if(pathM){const r=await fetch('/api/facts/path?from='+encodeURIComponent(pathM[1].trim())+'&to='+encodeURIComponent(pathM[2].trim())+'&depth=4');if(!r.ok||seq!==findSeq)return;const d=await r.json();if(seq!==findSeq)return;
+     const ids=d.facts.map(f=>'f:'+f.id).filter(id=>neurons.has(id));focusItems=new Set(ids);focusLobes=new Set(ids.map(id=>neurons.get(id).lobe.id));
+     find.classList.toggle('miss',!ids.length);find.title=!d.from||!d.to?'Не знаю «'+(!d.from?pathM[1]:pathM[2]).trim()+'»':ids.length?'Путь: '+d.facts.map(f=>f.subject+' — '+f.predicate+' → '+f.object).join(' · '):'Связи не нашла (до 4 шагов)';
+     if(ids.length){coreKind='путь';coreText=d.from+' → '+d.to+' · '+ids.length+' '+plural(ids.length,'шаг','шага','шагов');coreTextT=4;buildChain(ids,d.from+' → '+d.to)}dirty=true;return}
+    const r=await fetch('/api/recall?q='+encodeURIComponent(raw));if(!r.ok||seq!==findSeq)return;const d=await r.json();if(seq!==findSeq)return;
+    for(const x of [...d.facts.map(f=>'f:'+f.id),...d.notes.map(n=>'n:'+n.id)]){const n=neurons.get(x);if(!n)continue;focusItems.add(x);focusLobes.add(n.lobe.id)}
+    find.classList.toggle('miss',!focusLobes.size);dirty=true;
+   }catch{}},pathM?150:280);
+  if(pathM){focusQ='';focusLobes=new Set();focusItems=new Set();dirty=true;return}
+  find.title='';
   focusQ=q.trim().toLocaleLowerCase();focusLobes=new Set();focusItems=new Set();
   if(focusQ){
    // Совпало название зоны — летим к ней; иначе к зонам, где нашлись записи (нейроны подсвечиваются везде).
@@ -443,7 +470,7 @@ function mount(host){
  let applied=false;
  function apply(){
   const ws=window.TenmaApp?.workspace||{notes:[],tasks:[]};
-  model=buildModel(ws,facts,conflicts,exp);
+  model=buildModel(ws,facts,conflicts,exp,topics);
   const alive=new Set();
   for(const l of model.lobes){
    alive.add(l.id);
@@ -666,7 +693,7 @@ function mount(host){
   // По каждой бежит искра; при наведении на нейрон его связи загораются, остальные гаснут.
   const hl=hover?.id||(pinned?.type==='neuron'?pinned.n.item.id:null);
   for(const [a,b,kind] of model.links){const A=neurons.get(a),B=neurons.get(b);if(!A||!B)continue;
-   const lit=focusItems.has(a)||focusItems.has(b)||hl===a||hl===b,base=(focusing||hl?(lit?.85:.05):.28)*G.b*(kind==='obj'?.8:1);
+   const lit=focusItems.has(a)||focusItems.has(b)||impactIds.has(a)&&impactIds.has(b)||hl===a||hl===b,base=(focusing||hl?(lit?.85:.05):.28)*G.b*(kind==='obj'?.8:1);
    const mx=(A.sx+B.sx)/2,my=(A.sy+B.sy)/2,qx=mx+(G.cx-mx)*.3,qy=my+(G.cy-my)*.3;
    ctx.lineWidth=dpr*(lit?1.5:.9);ctx.strokeStyle=rgba(PAL.link,base);if(kind==='obj')ctx.setLineDash([4*dpr,3*dpr]);
    ctx.beginPath();ctx.moveTo(A.sx*dpr,A.sy*dpr);ctx.quadraticCurveTo(qx*dpr,qy*dpr,B.sx*dpr,B.sy*dpr);ctx.stroke();ctx.setLineDash([]);
@@ -744,7 +771,7 @@ function mount(host){
    ctx.globalAlpha=1;return;
   }
   for(const it of l.items){const n=neurons.get(it.id);if(!n)continue;n.flash=Math.max(0,n.flash-dt*.45);
-   const [nx,ny,d]=place(n),str=Math.min(1.2,it.str??1),lit=focusItems.has(it.id);
+   const [nx,ny,d]=place(n),str=Math.min(1.2,it.str??1),lit=focusItems.has(it.id)||impactIds.has(it.id);
    n.sx=nx;n.sy=ny;n.d=d;n.vis=!n.pending&&onScreen(nx,ny)?G.b*(dim>.5||lit?1:0):0;if(!n.vis&&!lit||n.pending)continue;
    // Прорастание: свежий нейрон распускается из точки за ~0.9 с; угасание: забытый сжимается.
    const bloom=n.bornT?ease((now-n.bornT)/900):1,fade=str<.3?.55+1.5*str:1;
@@ -800,6 +827,7 @@ function mount(host){
   const fs=Math.round(11*ui*dpr),fm=Math.round(9.5*ui*dpr),pad=12*dpr,w=Math.min(340*dpr*ui,lab.width*.42);
   c.font='600 '+fs+'px '+MONO;const lines=wrap(c,it.title,w-pad*2,3);
   const rows=[it.meta,'сила памяти '+Math.round(Math.min(1,it.str??1)*100)+'%'+(r?' · вспоминала '+r.n+' '+plural(r.n,'раз','раза','раз'):''),'отростков '+n.den.length+(lk.length?' · связей '+(linkCount.get(it.id)||lk.length):'')];
+  if(impactOf===it.id&&impactInfo)rows.push(...wrap(c,impactText(impactInfo),w-pad*2,3));
   const h=pad*2+lines.length*fs*1.35+rows.length*fm*1.5+(lk.length?(lk.length+1)*fm*1.45:0)+fm;
   let x=n.sx*dpr+n.size*1.2+24*dpr,y=n.sy*dpr-h/2;if(x+w>lab.width-8*dpr)x=n.sx*dpr-n.size*1.2-24*dpr-w;y=clamp(y,8*dpr,lab.height-h-8*dpr);
   c.globalAlpha=a;c.fillStyle='rgba(6,4,2,.86)';c.fillRect(x,y,w,h);c.strokeStyle=rgba(n.lobe.bad?[255,74,56]:n.lobe.color,.6);c.lineWidth=dpr;c.strokeRect(x+.5,y+.5,w-1,h-1);
@@ -861,12 +889,30 @@ function mount(host){
   for(const l of model.lobes){const s=l.state;if((s.x-x)**2+(s.y-y)**2<(s.r*1.1)**2)return {type:'lobe',l}}
   return null;
  }
+ // Что затронет факт: соседи по графу, заметки и дела с теми же именами, противоречия, ответы аватара.
+ async function loadImpact(it){
+  const fid=it.fact?.id;if(!fid)return null;impactOf=it.id;
+  try{const r=await fetch('/api/facts/impact?id='+encodeURIComponent(fid));if(!r.ok||impactOf!==it.id)return null;const d=await r.json();if(impactOf!==it.id)return null;
+   impactInfo=d;impactIds=new Set([...d.facts.map(f=>'f:'+f.id),...d.notes.map(n=>'n:'+n.id),...d.tasks.map(t=>'t:'+t.id)]);dirty=true;return d}catch{return null}
+ }
+ function clearImpact(){if(!impactIds.size&&!impactOf)return;impactIds=new Set();impactOf=null;impactInfo=null;dirty=true}
+ function impactText(d){
+  if(!d)return '';const parts=[];
+  if(d.facts.length)parts.push(d.facts.length+' '+plural(d.facts.length,'факт','факта','фактов')+(d.hop1<d.facts.length?' ('+d.hop1+' напрямую)':''));
+  if(d.notes.length)parts.push(d.notes.length+' '+plural(d.notes.length,'заметку','заметки','заметок')+(d.notes.some(n=>n.source)?' (из одной взят факт)':''));
+  if(d.tasks.length)parts.push(d.tasks.length+' '+plural(d.tasks.length,'дело','дела','дел'));
+  if(d.conflicts.length)parts.push('противоречий '+d.conflicts.length);
+  if(d.episodes)parts.push('вспоминала в ответах '+d.episodes+' '+plural(d.episodes,'раз','раза','раз'));
+  return parts.length?'Затронет: '+parts.join(', ')+'.':'Ни с чем больше не связан.';
+ }
  function showTip(hit,x,y,withButton){
+  if(!(hit&&hit.type==='neuron'&&withButton)&&!(focusN&&hit?.n===focusN))clearImpact();
   if(!hit){tip.hidden=true;return}
   tip.replaceChildren();
   if(hit.type==='seed'){const f=hit.sd.f;tip.append(el('div','brain-tip-k','предлагаю запомнить'),el('div','brain-tip-t',f.subject+' — '+f.predicate+' → '+f.object),el('div','brain-tip-m',(String(f.source||'').startsWith('note:')?'из заметки':'из чата')+(f.via==='model'?' · нашла модель':' · по правилам')));
    if(withButton){const row=el('div','brain-row'),ok=el('button','brain-btn','✓ Запомнить'),no=el('button','brain-btn','✗');ok.type=no.type='button';ok.onclick=()=>acceptSeed(f.id);no.onclick=()=>{TenmaLearn.reject(f.id);tip.hidden=true;pinned=null};row.append(ok,no);tip.append(row)}}
   else if(hit.type==='neuron'){const it=hit.n.item,r=recall[it.id];tip.append(el('div','brain-tip-k',hit.n.lobe.label),el('div','brain-tip-t',trim(it.title,140)),el('div','brain-tip-m',it.meta+' · сила памяти '+Math.round(Math.min(1,it.str??1)*100)+'%'+(r?' · вспоминала '+r.n+' '+plural(r.n,'раз','раза','раз'):'')+(linkCount.get(it.id)?' · связей '+linkCount.get(it.id):'')));
+   if(withButton&&it.fact){const im=el('div','brain-tip-m brain-impact','Смотрю, что связано…');tip.append(im);loadImpact(it).then(d=>{if(d&&impactOf===it.id)im.textContent=impactText(d)+(impactIds.size?' Подсвечено.':'');else if(!d)im.remove()})}
    if(withButton){const b=el('button','brain-btn','Открыть');b.type='button';b.onclick=()=>{recordRecall([it.id]);recall=readRecall();grow(hit.n,true);it.open()};tip.append(b)}}
   else if(hit.type==='group'){const g=hit.g,ks={star:'дел',drop:'заметок',crystal:'фактов'};tip.append(el('div','brain-tip-k',hit.l.label+' · группа'),el('div','brain-tip-t',g.ids.length+' '+plural(g.ids.length,'запись','записи','записей')),el('div','brain-tip-m',Object.entries(g.kinds).map(([k,v])=>v+' '+ks[k]).join(' · ')+' · двойной щелчок — раскрыть'))}
   else{const l=hit.l;tip.append(el('div','brain-tip-k','зона'),el('div','brain-tip-t',l.label),el('div','brain-tip-m',l.items.length+' '+plural(l.items.length,'запись','записи','записей')));
@@ -895,12 +941,12 @@ function mount(host){
  // Двойной щелчок по зоне — подлететь к ней и рассмотреть записи; по пустому месту — вернуть вид.
  canvas.addEventListener('dblclick',e=>{const [x,y]=local(e),hit=pick(x,y),l=hit&&(hit.l||hit.n?.lobe);tip.hidden=true;pinned=null;
   // Три уровня: мозг → зона (двойной щелчок по зоне или группе) → нейрон (двойной щелчок по записи в приближенной зоне).
-  if(hit&&hit.type==='neuron'&&(l.state.det>.3||focusN)){focusN=hit.n;camT.zoom=Math.max(camT.zoom,9);recordRecall([hit.n.item.id]);recall=readRecall();grow(hit.n,true)}
+  if(hit&&hit.type==='neuron'&&(l.state.det>.3||focusN)){focusN=hit.n;camT.zoom=Math.max(camT.zoom,9);recordRecall([hit.n.item.id]);recall=readRecall();grow(hit.n,true);if(hit.n.item.fact)void loadImpact(hit.n.item);else clearImpact()}
   else if(l){focusN=null;zoomLobe(l)}else{focusN=null;Object.assign(camT,{zoom:1,px:0,py:0})}idleT=0;dirty=true});
  function zoomLobe(l){camT.zoom=clamp(Math.min(W,H)*.32/Math.max(8,l.state.r/cam.zoom),2,5);camT.px=-l.state.qx;camT.py=-l.state.qy}
  canvas.addEventListener('click',e=>{if(moved){moved=false;return}const [x,y]=local(e),hit=pick(x,y);pinned=hit;hover=hit&&hit.type==='neuron'?hit.n.item:null;showTip(hit,x,y,true);if(hit&&hit.type==='lobe'){hit.l.state.pulse=1;if(hit.l.bad){tip.hidden=true;pinned=null;fixBox.hidden=false;renderFix()}}dirty=true});
  document.addEventListener('keydown',onKey);
- function onKey(e){if(e.key!=='Escape')return;if(!fixBox.hidden){fixBox.hidden=true;return}if(focusN){const l=focusN.lobe;focusN=null;zoomLobe(l);dirty=true;return}if(isFs()){if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});stage.classList.remove('fs');setFs();return}if(pinned){pinned=null;tip.hidden=true;hover=null;dirty=true}}
+ function onKey(e){if(e.key!=='Escape')return;if(!fixBox.hidden){fixBox.hidden=true;return}if(!dupBox.hidden){dupBox.hidden=true;return}if(!ovBox.hidden){ovBox.hidden=true;return}if(focusN){const l=focusN.lobe;focusN=null;clearImpact();zoomLobe(l);dirty=true;return}if(isFs()){if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});stage.classList.remove('fs');setFs();return}if(pinned){pinned=null;tip.hidden=true;hover=null;clearImpact();dirty=true}}
 
  /* ---------- Обучение: новый факт прямо отсюда ---------- */
  teach.onsubmit=async e=>{
@@ -915,10 +961,10 @@ function mount(host){
  /* ---------- Данные и цикл ---------- */
  let factSig='';
  async function loadFacts(){
-  try{const [f,c,x]=await Promise.all([fetch('/api/facts?limit=2000').then(r=>r.ok?r.json():r.status===400?fetch('/api/facts?limit=500').then(r2=>r2.ok?r2.json():[]):[]),fetch('/api/facts/conflicts?limit=100').then(r=>r.ok?r.json():[]),fetch('/api/experience?limit=40').then(r=>r.ok?r.json():{items:[]})]);facts=Array.isArray(f)?f.filter(x=>!x.valid_to):[];conflicts=Array.isArray(c)?c:[];exp=Array.isArray(x?.items)?x.items:[]}catch{}
+  try{const [f,c,x,tp,dp]=await Promise.all([fetch('/api/facts?limit=2000').then(r=>r.ok?r.json():r.status===400?fetch('/api/facts?limit=500').then(r2=>r2.ok?r2.json():[]):[]),fetch('/api/facts/conflicts?limit=100').then(r=>r.ok?r.json():[]),fetch('/api/experience?limit=40').then(r=>r.ok?r.json():{items:[]}),fetch('/api/facts/communities').then(r=>r.ok?r.json():[]).catch(()=>[]),fetch('/api/facts/duplicates').then(r=>r.ok?r.json():[]).catch(()=>[])]);facts=Array.isArray(f)?f.filter(x=>!x.valid_to):[];conflicts=Array.isArray(c)?c:[];exp=Array.isArray(x?.items)?x.items:[];topics=Array.isArray(tp)?tp:[];dups=Array.isArray(dp)?dp:[];renderDup()}catch{}
   // Опрос раз в 20 с: если факты и противоречия не менялись, мозг не пересобирается (на 10 тыс. записей это заметно).
   void loadChatStat();
-  const sig=facts.length+':'+facts.map(f=>f.id).join(',')+'|'+conflicts.map(c=>c.id).join(',')+'|'+exp.map(e=>e.id+(e.feedback||'')).join(',');
+  const sig=facts.length+':'+facts.map(f=>f.id).join(',')+'|'+conflicts.map(c=>c.id).join(',')+'|'+exp.map(e=>e.id+(e.feedback||'')).join(',')+'|'+topics.map(t=>t.id+':'+t.size).join(',');
   if(sig===factSig&&applied)return;factSig=sig;
   if(host.isConnected)apply();
   firstVisit=false;
@@ -1034,6 +1080,8 @@ function mount(host){
    const t=x=>x?when(Date.parse(x)):'';
    card.append(el('div','brain-fix-row'));
    card.lastChild.append(opt('earlier','«'+c.earlier+'»','раньше · '+t(c.earlier_at)),opt('newer','«'+c.newer+'»','новее · '+t(c.newer_at)),opt('both','Оба верны','это не противоречие'));
+   // Под вариантом — что уйдёт вместе с отвергнутым фактом.
+   card.lastChild.children[0].append(impactLine(c.newer_id,'«'+trim(c.newer,18)+'» связан с: '));card.lastChild.children[1].append(impactLine(c.earlier_id,'«'+trim(c.earlier,18)+'» связан с: '));
    return card}));
  }
  async function resolveFix(c,keep,b){
@@ -1043,6 +1091,45 @@ function mount(host){
   catch(e){b.disabled=false;learnMsg.textContent=e.message;learnMsg.classList.add('err')}
  }
  fixBtn.onclick=()=>{fixBox.hidden=false;renderFix()};
+ /* ---------- Почти-дубли ---------- */
+ const fline=f=>f.subject+' — '+f.predicate+' → '+f.object;
+ function dialogHead(title,box){const head=el('div','brain-fix-head'),close=el('button','brain-btn','✕');close.type='button';close.setAttribute('aria-label','Закрыть');close.onclick=()=>{box.hidden=true};head.append(el('div','brain-k',title),close);return head}
+ // Строка «что затронет» под вариантом: подгружается, когда окно открыто.
+ function impactLine(fid,prefix){const m=el('small','brain-fix-impact','…');fetch('/api/facts/impact?id='+encodeURIComponent(fid)).then(r=>r.ok?r.json():null).then(d=>{m.textContent=d?prefix+impactText(d).replace(/^Затронет: /,'').replace(/^Ни с чем больше не связан\./,'ничем'):''}).catch(()=>{m.textContent=''});return m}
+ function renderDup(){
+  dupBtn.hidden=!dups.length;dupBtn.textContent='≈ Похожие ('+dups.length+')';
+  if(dupBox.hidden)return;
+  const head=dialogHead('похожие факты // слить дубли',dupBox);
+  if(!dups.length){dupBox.replaceChildren(head,el('p','brain-fix-ok','Дублей нет ✓'));return}
+  dupBox.replaceChildren(head,el('p','brain-fix-ok','Один и тот же факт сказан по-разному. Выберите, какой оставить: второй уйдёт в историю.'),...dups.slice(0,20).map(d=>{
+   const card=el('div','brain-fix-card');card.append(el('div','brain-fix-q','сходство '+Math.round(d.score*100)+'%'));
+   const row=el('div','brain-fix-row');
+   const opt=(keep,drop,adv)=>{const b=el('button','brain-fix-opt'+(adv?' advised':''));b.type='button';b.append(el('span','','Оставить «'+fline(keep)+'»'),el('small','',(keep.source_id||'')+(adv?' · совет':'')),impactLine(drop.id,'«'+trim(drop.object,18)+'» связан с: '));b.onclick=()=>mergeDup(keep,drop,b);return b};
+   const no=el('button','brain-fix-opt');no.type='button';no.append(el('span','','Это разные'),el('small','','больше не предлагать'));no.onclick=()=>dismissDup(d,no);
+   row.append(opt(d.keep,d.drop,true),opt(d.drop,d.keep,false),no);card.append(row);return card}));
+ }
+ async function mergeDup(keep,drop,b){b.disabled=true;
+  try{const r=await fetch('/api/facts/duplicates/merge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({keep:keep.id,drop:drop.id})});if(!r.ok&&r.status!==404)throw Error('Не удалось');
+   coreKind='память';coreText='слила: «'+trim(fline(keep),40)+'»';coreTextT=3.5;core.pulse=1;await loadFacts();renderDup()}
+  catch(e){b.disabled=false;learnMsg.textContent=e.message;learnMsg.classList.add('err')}}
+ async function dismissDup(d,b){b.disabled=true;try{await fetch('/api/facts/duplicates/dismiss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({a:d.keep.id,b:d.drop.id})});dups=dups.filter(x=>x!==d);renderDup()}catch{b.disabled=false}}
+ dupBtn.onclick=()=>{dupBox.hidden=false;renderDup()};
+ /* ---------- Обзор памяти ---------- */
+ async function renderOverview(){
+  const head=dialogHead('обзор памяти',ovBox);ovBox.replaceChildren(head,el('p','brain-fix-ok','Собираю…'));
+  let o;try{const r=await fetch('/api/facts/overview');if(!r.ok)throw 0;o=await r.json()}catch{ovBox.replaceChildren(head,el('p','brain-fix-ok','Не удалось получить обзор.'));return}
+  const sec=(title,...kids)=>{const c=el('div','brain-fix-card');c.append(el('div','brain-fix-q',title),...kids);return c};
+  const chips=(list,label,go)=>{const r=el('div','brain-ov-chips');for(const x of list){const b=el('button','brain-btn',label(x));b.type='button';if(go)b.onclick=()=>{ovBox.hidden=true;find.value=go(x);setFocus(find.value)};r.append(b)}return r};
+  const w=o.week||{};
+  ovBox.replaceChildren(head,
+   el('p','brain-fix-ok',o.facts+' '+plural(o.facts,'факт','факта','фактов')+' о '+o.entities+' '+plural(o.entities,'сущности','сущностях','сущностях')+' · заметок '+o.notes+' · открытых дел '+o.openTasks),
+   ...(o.topics.length?[sec('темы (связанные группы)',chips(o.topics,t=>t.label+' · '+t.size,t=>t.label))]:[]),
+   ...(o.hubs.length?[sec('больше всего связей',chips(o.hubs,h=>h.name+' · '+h.degree,h=>h.name))]:[]),
+   ...(o.relations.length?[sec('чаще всего',el('div','brain-fix-ok',o.relations.map(r=>r.relation+' ('+r.count+')').join(' · ')))]:[]),
+   sec('за неделю',el('div','brain-fix-ok','новых фактов '+((w.created||0)+(w.restored||0))+(w.retired?' · убрано при разборе '+w.retired:'')+(w.merged?' · слито дублей '+w.merged:'')),...o.recent.slice(0,4).map(f=>el('div','brain-fix-ok','+ '+fline(f)))),
+   ...(o.conflicts||o.duplicates?[sec('ждут разбора',...[o.conflicts?Object.assign(el('button','brain-btn brain-alarm-btn','⚠ противоречий: '+o.conflicts),{type:'button',onclick:()=>{ovBox.hidden=true;fixBox.hidden=false;renderFix()}}):null,o.duplicates?Object.assign(el('button','brain-btn','≈ похожих: '+o.duplicates),{type:'button',onclick:()=>{ovBox.hidden=true;dupBox.hidden=false;renderDup()}}):null].filter(Boolean))]:[]));
+ }
+ ovBtn.onclick=()=>{ovBox.hidden=false;void renderOverview()};
  const onWorkspace=()=>apply();
  const onMemory=()=>loadFacts();
  const onWide=()=>placeHud();
