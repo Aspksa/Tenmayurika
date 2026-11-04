@@ -98,17 +98,21 @@ button:hover{border-color:var(--gold);color:var(--gold-bright);box-shadow:0 0 16
  cursor:grab;opacity:var(--avatar-opacity,1);outline:none;will-change:transform}
 .avatar.walking{transition:transform var(--walk-dur,3s) cubic-bezier(.45,.05,.4,1)}
 .avatar.dragging{cursor:grabbing}
-.avatar-body{position:absolute;inset:0;transform-origin:50% 100%;transform:rotate(var(--tilt,0deg))}
-.avatar-figure{position:absolute;inset:0;transform-origin:50% 100%;filter:var(--tone,none)}
+.avatar-body{position:absolute;inset:0;transform-origin:50% 100%;transform:rotate(var(--tilt,0deg));will-change:transform}
+.avatar-figure{position:absolute;inset:0;transform-origin:50% 100%;filter:var(--tone,none);will-change:transform}
 .avatar.float .avatar-body{animation:avatar-float var(--float-dur,5.5s) ease-in-out infinite}
 .avatar.breathe .avatar-figure{animation:avatar-breathe 4.2s ease-in-out infinite}
 .avatar.walking .avatar-figure{animation:avatar-walk .5s ease-in-out infinite}
 .avatar.dragging .avatar-body{animation-play-state:paused;transform:scale(1.04) rotate(calc(var(--tilt,0deg) - 3deg))}
-.avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:50% 100%;pointer-events:none;-webkit-user-drag:none;transition:opacity .35s ease;image-rendering:auto}
+.avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:50% 100%;pointer-events:none;-webkit-user-drag:none;opacity:0;transition:opacity .45s ease;image-rendering:auto}
 .avatar.flip img{transform:scaleX(-1)}
-.avatar img.leaving{opacity:0}
-.avatar.glow img{filter:drop-shadow(0 0 calc(var(--glow,.6) * 10px) rgba(var(--glow-rgb),calc(var(--glow,.6) * .9))) drop-shadow(0 0 calc(var(--glow,.6) * 28px) rgba(var(--glow-rgb),calc(var(--glow,.6) * .55)))}
-.avatar.glow.pulse img{animation:avatar-pulse var(--pulse-dur,3.2s) ease-in-out infinite}
+.avatar img.on{opacity:1}
+/* Свечение: размытый силуэт позади фигуры. Размытие считается один раз, пульс меняет только прозрачность. */
+.avatar-halo{position:absolute;inset:-6%;pointer-events:none;opacity:0;filter:blur(calc(4px + var(--glow,.6) * 16px));transition:opacity .4s;will-change:opacity}
+.avatar-halo i{position:absolute;inset:6%;background:rgb(var(--glow-rgb));-webkit-mask:var(--mask) center bottom/contain no-repeat;mask:var(--mask) center bottom/contain no-repeat}
+.avatar.flip .avatar-halo{transform:scaleX(-1)}
+.avatar.glow .avatar-halo{opacity:calc(.25 + var(--glow,.6) * .6)}
+.avatar.glow.glow-pulse .avatar-halo{animation:avatar-pulse var(--pulse-dur,3.2s) ease-in-out infinite}
 .avatar canvas{position:absolute;left:-25%;top:-25%;width:150%;height:150%;pointer-events:none}
 .avatar-aura{position:absolute;left:12%;right:12%;bottom:-2%;height:11%;border-radius:50%;background:radial-gradient(closest-side,rgba(var(--glow-rgb),.5),rgba(0,0,0,.0));filter:blur(4px);opacity:0;transition:opacity .3s}
 .avatar.shadow .avatar-aura{opacity:calc(.35 + var(--glow,.6) * .5)}
@@ -125,11 +129,11 @@ button:hover{border-color:var(--gold);color:var(--gold-bright);box-shadow:0 0 16
 @keyframes avatar-breathe{0%,100%{transform:scale(1,1)}50%{transform:scale(1.008,1.018)}}
 @keyframes avatar-walk{0%,100%{transform:translateY(0) rotate(0)}25%{transform:translateY(-2%) rotate(-1.5deg)}75%{transform:translateY(-2%) rotate(1.5deg)}}
 @keyframes aura-breathe{0%,100%{transform:scaleX(1)}50%{transform:scaleX(.78);opacity:.35}}
-@keyframes avatar-pulse{0%,100%{filter:drop-shadow(0 0 calc(var(--glow,.6) * 8px) rgba(var(--glow-rgb),calc(var(--glow,.6) * .8))) drop-shadow(0 0 calc(var(--glow,.6) * 22px) rgba(var(--glow-rgb),calc(var(--glow,.6) * .45)))}50%{filter:drop-shadow(0 0 calc(var(--glow,.6) * 14px) rgba(var(--glow-rgb),calc(var(--glow,.6) * .95))) drop-shadow(0 0 calc(var(--glow,.6) * 42px) rgba(var(--glow-rgb),calc(var(--glow,.6) * .7)))}}
+@keyframes avatar-pulse{0%,100%{opacity:calc(.2 + var(--glow,.6) * .45)}50%{opacity:calc(.3 + var(--glow,.6) * .7)}}
 
 /* Плавающие окна: чат и настройки аватара */
-.floating{position:fixed;z-index:950;background:linear-gradient(180deg,rgba(18,15,9,.97),rgba(5,5,5,.98));border:1px solid var(--line-strong);border-radius:calc(var(--radius) * 1.3);
- box-shadow:0 0 0 1px rgba(0,0,0,.8),0 0 40px rgba(212,175,55,.12),0 30px 80px rgba(0,0,0,.8);backdrop-filter:blur(12px);display:flex;flex-direction:column;
+.floating{position:fixed;z-index:950;background:linear-gradient(180deg,#120f09,#050505);border:1px solid var(--line-strong);border-radius:calc(var(--radius) * 1.3);
+ box-shadow:0 0 0 1px rgba(0,0,0,.8),0 0 40px rgba(212,175,55,.12),0 30px 80px rgba(0,0,0,.8);display:flex;flex-direction:column;
  max-height:calc(100dvh - 24px);opacity:0;transform:scale(.96);transform-origin:var(--origin,50% 100%);transition:opacity .18s,transform .18s;pointer-events:none}
 .floating.open{opacity:1;transform:none;pointer-events:auto}
 .floating[hidden]{display:none}
@@ -147,7 +151,9 @@ button:hover{border-color:var(--gold);color:var(--gold-bright);box-shadow:0 0 16
 .msg{max-width:86%;padding:.65em .95em;border-radius:14px;white-space:pre-wrap;word-break:break-word;font-size:.95em;line-height:1.45}
 .msg.assistant{align-self:flex-start;background:var(--surface-3);border:1px solid var(--line);border-bottom-left-radius:4px}
 .msg.user{align-self:flex-end;background:linear-gradient(180deg,rgba(212,175,55,.26),rgba(212,175,55,.14));border:1px solid var(--line-strong);border-bottom-right-radius:4px}
-.msg-tag{display:block;margin-bottom:.3em;font-size:.72em;letter-spacing:.06em;text-transform:uppercase;color:var(--gold)}
+.msg-foot{display:flex;align-items:center;justify-content:space-between;gap:.6em;margin-top:.3em;white-space:normal}
+.msg-foot .msg-rate{margin:0 0 0 auto}
+.msg-tag{display:block;font-size:.72em;color:var(--muted);opacity:.8}
 .msg.typing{color:var(--muted)}
 .msg-rate{display:flex;gap:.3em;justify-content:flex-end;margin-top:.35em;font-size:.78em;color:var(--muted);white-space:normal}
 .msg-rate button{background:none;border:1px solid transparent;border-radius:8px;padding:.05em .35em;cursor:pointer;opacity:.55;font-size:1em;line-height:1.4}
@@ -548,10 +554,9 @@ input[type=date],input[type=time]{color-scheme:dark}
  .pl-side>.seg{flex:0 1 20rem}
  .smart-lists{flex-direction:row;flex:1 1 20rem;overflow-x:auto;gap:.4rem;padding-bottom:.2rem;scrollbar-width:none}
  .smart{flex:none;border-color:var(--line);border-radius:999px;padding:.4em .9em;gap:.4rem}
- .pulse,.pl-side .keys{display:none}
+ .pl-side .pulse,.pl-side .keys{display:none}
 }
 @media (max-width:899px){.pl-main{min-height:0}.pl-side>.seg{flex-basis:100%}}
-}
 
 /* ---------- Календарь справа ---------- */
 .pl-cal{position:relative;overflow:hidden;padding:clamp(14px,.7rem + .6vw,24px);
@@ -756,3 +761,41 @@ html.brain-fs-lock,html.brain-fs-lock body{overflow:hidden}
  animation:brain-grain .9s steps(6) infinite}
 @keyframes brain-grain{0%{transform:translate(0,0)}20%{transform:translate(-7%,4%)}40%{transform:translate(5%,-6%)}60%{transform:translate(-4%,-3%)}80%{transform:translate(6%,5%)}100%{transform:translate(0,0)}}
 @media (prefers-reduced-motion:reduce){.brain-grain::before{animation:none}}
+
+/* ---------- Дела: доводка дизайна на всех экранах ---------- */
+.quick-input{text-overflow:ellipsis}
+.cal-nav{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+/* Ноутбук: списки переносятся на вторую строку, а не обрезаются у края. */
+@media (min-width:900px) and (max-width:1399px){.smart-lists{flex-wrap:wrap;overflow:visible}.pl-side{align-items:flex-start}.pl-side>.seg{align-self:flex-start}}
+/* Узкий экран: списки листаются пальцем, край плавно гаснет. */
+@media (max-width:899px){.smart-lists{-webkit-mask-image:linear-gradient(90deg,#000 88%,transparent);mask-image:linear-gradient(90deg,#000 88%,transparent);padding-right:1.5rem}}
+.pl-side>.seg>button{min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* Телефон: меню внизу, как в обычном приложении, весь экран отдан делам. */
+@media (max-width:640px){
+ .layout{grid-template-columns:minmax(0,1fr)}
+ .rail{position:fixed;top:auto;bottom:0;left:0;right:0;height:auto;flex-direction:row;justify-content:space-around;align-items:center;gap:0;
+  padding:6px 6px max(6px,env(safe-area-inset-bottom));border-right:0;border-top:1px solid var(--line);background:#000;z-index:850}
+ .rail-logo{display:none}
+ .rail-group,.rail-bottom{display:contents}
+ .rail button{width:2.9rem;font-size:1.2rem}
+ .rail button.active::before{left:25%;right:25%;top:-7px;bottom:auto;width:auto;height:3px;border-radius:0 0 3px 3px}
+ main{padding-bottom:calc(5.5rem + env(safe-area-inset-bottom))}
+ .topbar{padding:10px 0}
+ .status{font-size:.75rem}
+ .toast{bottom:calc(4.5rem + env(safe-area-inset-bottom))}
+ .pl-top>.seg{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-radius:14px}
+ .pl-top>.seg>button{justify-content:center;padding:.5em .2em;font-size:.82rem}
+ .cal-title{font-size:1rem}
+}
+
+/* ---------- Чат: проще и спокойнее ---------- */
+/* Оценка 👍/👎 видна у последнего ответа и при наведении — не шумит под каждым сообщением. */
+.msg-rate:not(.done){opacity:0;transition:opacity .15s}
+.msg:hover .msg-rate,.msg:focus-within .msg-rate,.msg.assistant:last-child .msg-rate{opacity:1}
+.msg-rate.done{font-size:.7em}
+.msg:not(:last-child) .msg-rate.done{display:none}
+@media (hover:none){.msg-rate:not(.done){opacity:1}}
+.chat-quick{flex-wrap:wrap;overflow:visible;-webkit-mask-image:none;mask-image:none;padding:.6rem .8rem 0;border-top:0}
+.chat-quick[hidden]{display:none}
+.chat-form{border-top:1px solid var(--line);padding-top:.7rem}
+.chat-form textarea{min-height:0;height:2.8em;line-height:1.45;overflow-y:auto}
