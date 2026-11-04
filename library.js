@@ -42,3 +42,22 @@ async function search(query){
  return {results,scanned,truncated:truncated||stack.length>0};
 }
 module.exports={ROOT,segments,list,mkdir,upload,filePath,search};
+
+// Поиск по содержимому локальных текстовых документов; большие и двоичные файлы пропускаются.
+async function searchText(query){
+ if(typeof query!=='string'||!query.trim()||query.length>200)throw new TypeError('Введите текст для поиска');
+ const needle=query.trim().toLocaleLowerCase('ru'),pending=[''],results=[];let scanned=0;
+ while(pending.length&&scanned<5000&&results.length<100){
+  const dir=pending.pop();for(const entry of await list(dir)){
+   if(++scanned>5000)break;
+   if(entry.type==='folder'){pending.push(entry.path);continue}
+   if(!/\.(txt|md|csv|json)$/i.test(entry.name)||entry.size>2*1024*1024)continue;
+   let lines;try{lines=(await fsp.readFile(await filePath(entry.path),'utf8')).split(/\r?\n/)}catch{continue}
+   const index=lines.findIndex(line=>line.toLocaleLowerCase('ru').includes(needle));
+   if(index!==-1)results.push({path:entry.path,line:index+1,excerpt:lines[index].slice(0,300)});
+   if(results.length>=100)break;
+  }
+ }
+ return {results,scanned,truncated:pending.length>0||scanned>5000||results.length>=100};
+}
+module.exports.searchText=searchText;

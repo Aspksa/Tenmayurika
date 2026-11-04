@@ -17,6 +17,9 @@ test('library stores, lists and finds files in nested folders without overwritin
   await assert.rejects(()=>lib.upload('Книги/план.txt',Readable.from(['new'])),{code:'EEXIST'});
   assert.equal(await fs.readFile(await lib.filePath('Книги/план.txt'),'utf8'),'Содержание');
   assert.deepEqual((await lib.search('ПЛАН')).results.map(x=>x.path),['Книги/план.txt']);
+  const found=await lib.searchText('ДЕРЖАН');assert.equal(found.results.length,1);assert.equal(found.results[0].path,'Книги/план.txt');assert.equal(found.results[0].line,1);
+  assert.equal((await lib.searchText('отсутствующая фраза')).results.length,0);
+  await assert.rejects(()=>lib.searchText('  '));
   await assert.rejects(()=>lib.list('../'));await assert.rejects(()=>lib.upload('Книги/../x',Readable.from(['x'])));
   if(process.platform!=='win32'){await fs.symlink(os.tmpdir(),path.join(dir,'outside'));await assert.rejects(()=>lib.list('outside'));assert.equal((await lib.list('')).some(x=>x.name==='outside'),false)}
  }finally{await fs.rm(dir,{recursive:true,force:true})}
