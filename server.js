@@ -22,6 +22,8 @@ const usefulness=require('./usefulness');
 const working=require('./working');
 const growth=require('./growth');
 const aliases=require('./aliases');
+const memskills=require('./memskills');
+const selfstudy=require('./selfstudy');
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
 const HOST='127.0.0.1',PORT=Number(process.env.PORT)||5173;
@@ -40,6 +42,11 @@ function respond(res,status,body,type='application/json; charset=utf-8'){res.wri
 async function body(req){const chunks=[];let bytes=0;for await(const part of req){bytes+=part.length;if(bytes>100000)throw Error('Request too large');chunks.push(part)}return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}')}
 // Слои «Мозга» из опыта MemOS: дневник размышлений, выводы, навыки, предпочтения, сводки тем,
 // причинные связи, рабочая память темы и польза записей.
+// Навыки запоминания для «Мозга»: банк, история, промахи, самоэкзамен, просьба о подсказке.
+function mskillView(){
+ const evo=memskills.evoState();
+ return {skills:memskills.list({all:true}).map(({purpose,when,how,avoid,...s})=>({...s,purpose})),history:selfstudy.learnedLog(20),misses:memskills.queue({limit:8}),missStats:memskills.missStats(),score:selfstudy.score(),help:evo.help,failed:(evo.failed||[]).slice(-5),version:memskills.bankVersion()};
+}
 async function handleBrain(req,res,p,url){
  try{
   if(req.method==='GET'&&p==='/api/brain/mind'){
@@ -48,8 +55,13 @@ async function handleBrain(req,res,p,url){
    for(const f of memory.factsById(fids))title.set('fact:'+f.id,f.subject+' — '+f.predicate+' → '+f.object);
    const end=(k,r)=>({kind:k,id:r,title:title.get(k+':'+r)||null});
    return respond(res,200,{diary:reflect.diary(limitParam(url,20,200)),insights:reflect.insightList(20),skills:skills.list(),preferences:preferences.list(),summaries:reflect.summaries().slice(0,30).map(({factIds,...t})=>({...t,size:factIds.length})),
-    links:{count:links.count(),recent:recent.map(l=>({type:l.type,a:end(l.a_kind,l.a_ref),b:end(l.b_kind,l.b_ref),evidence:l.evidence,source:l.source}))},working:working.snapshot(),reflect:reflect.status(),growth:{...growth.stats(),cards:growth.cards(8)}});
+    links:{count:links.count(),recent:recent.map(l=>({type:l.type,a:end(l.a_kind,l.a_ref),b:end(l.b_kind,l.b_ref),evidence:l.evidence,source:l.source}))},working:working.snapshot(),reflect:reflect.status(),growth:{...growth.stats(),cards:growth.cards(8)},memskills:mskillView()});
   }
+  if(req.method==='GET'&&p==='/api/brain/memskills/organs')return respond(res,200,memskills.list({all:true}).map(s=>({name:s.name,title:s.title,status:s.status,uses:s.uses,value:s.value,version:s.version,action:s.action})));
+  if(req.method==='GET'&&p==='/api/brain/memskills')return respond(res,200,{...mskillView(),misses:memskills.queue({limit:50}),selftests:selfstudy.selftests(50),windows:selfstudy.watchInfo().windows});
+  // Ответ на просьбу о подсказке: подсказка становится навыком запоминания, самоучёба продолжается.
+  if(req.method==='POST'&&p==='/api/brain/memskills/hint'){const input=await body(req);if(typeof input?.text!=='string')return respond(res,400,{error:'Invalid text'});try{return respond(res,201,{skill:memskills.addHint(input.text)})}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
+  if(req.method==='POST'&&p==='/api/brain/memskills/help/dismiss'){memskills.clearHelp();return respond(res,200,{ok:true})}
   if(req.method==='GET'&&p==='/api/brain/strength')return respond(res,200,usefulness.strength());
   // Рост: крепнущие связи, карточки сущностей, псевдонимы и свои типы (growth.js).
   if(req.method==='GET'&&p==='/api/brain/bonds')return respond(res,200,growth.bonds({limit:limitParam(url,2000,5000)}));

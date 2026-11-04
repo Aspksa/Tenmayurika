@@ -8,6 +8,8 @@
 //  • рост (growth.js, zones.js): глубокая чистка (дубли, псевдонимы, «он/она»), свои типы, карточки
 //    сущностей, новые и поделившиеся зоны, отбор (подтверждённое крепнет, поправленное слабеет),
 //    угасшие связи уходят;
+//  • самоучёба (memskills.js, selfstudy.js): самоэкзамен по недавней переписке, промахи, правка навыков
+//    запоминания кругами с пробой, перезапоминание, откат и просьба о подсказке;
 //  • дневник — короткая запись о том, что сделано, видна в «Мозге» (окно «Дневник»).
 // Повторно — не чаще раза в час и только если в памяти что-то изменилось.
 const crypto=require('node:crypto');
@@ -18,6 +20,8 @@ const links=require('./links');
 const experience=require('./experience');
 const growth=require('./growth');
 const zones=require('./zones');
+const memskills=require('./memskills');
+const selfstudy=require('./selfstudy');
 const {use,tx,parse,state,setState}=require('./brain-db');
 const IDLE_MS=Number(process.env.TENMAYURIKA_IDLE_MS)||10*60*1000,GAP_MS=60*60*1000;
 const MAX_INSIGHTS=3,MIN_TOPIC=3,DIARY_KEEP=200;
@@ -93,6 +97,15 @@ function insightByRules(facts){
  const f=best[0],c=predicates.classify(f.predicate);
  return {text:'У «'+f.subject+'» сложилась картина: '+(c.polarity<0?'не ':'')+c.relation+' '+best.slice(0,5).map(x=>x.object).join(', ')+(best.length>5?' и ещё '+(best.length-5):'')+'. Это можно учитывать в советах и подарках.',ids:best.map(x=>x.id)};
 }
+async function critique(complete,facts,text){
+ try{
+  const msg=await complete({messages:[{role:'system',content:'Проверь вывод по фактам. Если он прямо следует из фактов, ответь ВЕРНО. Если его можно поправить, ответь «ИСПРАВЛЕНО: вывод». Если вывод не держится, ответь NONE.'},{role:'user',content:'Факты:\n'+facts.map(line).join('\n')+'\n\nВывод: '+text}]});
+  const s=String(msg.content||'').trim();
+  const m=s.match(/ИСПРАВЛЕНО:\s*(.{5,300})/);if(m)return m[1].trim();
+  if(/^ВЕРНО/i.test(s))return text;
+  return null;
+ }catch(e){console.error('Insight critique failed:',e.name);return text}
+}
 async function insights(since,complete){
  const changed=new Set(use(db=>db.prepare("SELECT DISTINCT fact_id FROM memory_events WHERE occurred_at>=? AND action IN ('created','restored')").all(since.slice(0,19).replace('T',' ')).map(r=>r.fact_id)));
  if(!changed.size)return [];
@@ -104,7 +117,9 @@ async function insights(since,complete){
   let ins=null,source='rules';
   if(complete){try{
    const msg=await complete({messages:[{role:'system',content:'По фактам о человеке сделай один полезный вывод, которого нет в фактах напрямую (привычка, закономерность, что учитывать). Одна строка по-русски, начиная с «ВЫВОД:». Если вывода нет, ответь NONE.'},{role:'user',content:facts.map(line).join('\n')}]});
-   const m=String(msg.content||'').match(/ВЫВОД:\s*(.{5,300})/);if(m){ins={text:m[1].trim(),ids:facts.map(f=>f.id)};source='model'}
+   const m=String(msg.content||'').match(/ВЫВОД:\s*(.{5,300})/);
+   // Второй круг: самопроверка — следует ли вывод из фактов.
+   if(m){const text=await critique(complete,facts,m[1].trim());if(text){ins={text,ids:facts.map(f=>f.id)};source='model'}}
   }catch(e){console.error('Insight model failed:',e.name)}}
   if(!ins)ins=insightByRules(facts);
   if(!ins)continue;
@@ -156,6 +171,14 @@ function diaryText(d){
  const sel=d.selection||{};
  if(sel.strengthened)parts.push('укрепила '+sel.strengthened+' '+plural(sel.strengthened,'подтверждённый факт','подтверждённых факта','подтверждённых фактов'));
  if(sel.weakened)parts.push('ослабила '+sel.weakened+' '+plural(sel.weakened,'поправленный факт','поправленных факта','поправленных фактов'));
+ const st=d.selfTest;
+ if(st?.tested)parts.push('проверила себя на '+st.tested+' '+plural(st.tested,'вопросе','вопросах','вопросах')+' и '+(st.passed===st.tested?'на все нашла ответ':'нашла ответ на '+st.passed));
+ const sd=d.study||{};
+ for(const a of sd.adopted||[])parts.push(a.kind==='add'?'научилась новому способу запоминать: «'+a.title+'»':'уточнила, как запоминать «'+a.title+'»');
+ if(sd.relearned)parts.push('перечитала '+sd.relearned+' '+plural(sd.relearned,'старое сообщение','старых сообщения','старых сообщений')+' по-новому');
+ if(sd.rejected)parts.push('попробовала '+sd.summary+', но лучше не стало, оставила как было');
+ if(d.rollback)parts.push('вернулась к прежним навыкам запоминания, потому что '+d.rollback.reason);
+ for(const r of d.mskills?.retired||[])parts.push('отправила на покой навык «'+r.title+'»');
  let text='Пока было тихо, '+(parts.length?parts.join(', '):'просто перебрала память, нового не нашлось')+'.';
  if(d.insights.length)text+=' '+(d.insights.length===1?'Вывод: ':'Выводы: ')+d.insights.map(i=>i.text).join(' ');
  return text;
@@ -191,11 +214,20 @@ async function run({ws,complete=null,reason='idle'}={}){
   try{d.skills=(await skills.induce({complete})).added}catch(e){console.error('Reflect skills failed:',e.name)}
   try{d.insights=await insights(since,complete)}catch(e){console.error('Reflect insights failed:',e.name)}
   try{d.selection=growth.select()}catch(e){console.error('Reflect selection failed:',e.name)}
+  // Самоучёба: экзамен → откат, если стало хуже → правка навыков по промахам → покой и выпуск навыков.
+  try{d.selfTest=await selfstudy.selfTest({ws,complete})}catch(e){console.error('Reflect self-test failed:',e.name)}
+  try{d.rollback=selfstudy.watch()}catch(e){console.error('Reflect rollback failed:',e.name)}
+  try{if(!d.rollback)d.study=await selfstudy.evolve({complete})}catch(e){console.error('Reflect study failed:',e.name)}
+  try{d.mskills={retired:memskills.retireUseless(),graduated:memskills.graduate()}}catch(e){console.error('Reflect skill stats failed:',e.name)}
+  // Просьба о подсказке появляется в дневнике один раз — когда она возникла.
+  try{const h=memskills.evoState().help;if(h&&h.at>=mark.at)d.help=h}catch{}
   let text=diaryText(d);
-  if(complete&&(d.newFacts||d.insights.length||d.cards?.grown||d.zones?.created?.length)){try{
+  if(complete&&(d.newFacts||d.insights.length||d.cards?.grown||d.zones?.created?.length||d.study?.adopted)){try{
    const msg=await complete({messages:[{role:'system',content:'Ты — ассистентка, которая ведёт дневник своей памяти. Перескажи это в 2–3 тёплых предложениях от первого лица по-русски, ничего не выдумывая.'},{role:'user',content:text}]});
    const s=String(msg.content||'').trim();if(s&&s.length<=800)text=s;
   }catch(e){console.error('Diary model failed:',e.name)}}
+  // Просьба о подсказке — дословно, чтобы пересказ её не потерял.
+  if(d.help)text+=' '+d.help.text;
   const at=new Date().toISOString(),id=crypto.randomUUID(),details={...d,insights:d.insights,ms:Date.now()-started};
   use(db=>{db.prepare('INSERT INTO brain_diary(id,at,text,details) VALUES(?,?,?,?)').run(id,at,text,JSON.stringify(details));db.prepare('DELETE FROM brain_diary WHERE id IN (SELECT id FROM brain_diary ORDER BY at DESC LIMIT -1 OFFSET ?)').run(DIARY_KEEP)});
   setState('reflect.last',mark);

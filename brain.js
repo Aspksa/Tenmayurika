@@ -237,7 +237,8 @@ const TenmaLearn={
  async learn(text,source){
   try{const r=await fetch('/api/learn',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,source})});if(!r.ok)return null;
    const data=await r.json(),q=TenmaLearn.queue(),key=f=>(f.subject+'|'+f.predicate+'|'+f.object).toLocaleLowerCase();let added=0,dropped=0;
-   for(const f of data.facts||[]){if(q.some(x=>key(x)===key(f)))continue;if(q.length>=LEARN_MAX){dropped++;continue}q.push({id:'q'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),subject:f.subject,predicate:f.predicate,object:f.object,source,via:data.source,at:Date.now()});added++}
+   // Новые версии известных фактов тоже предлагаются (старая уйдёт в историю как противоречие при разборе).
+   for(const f of [...(data.facts||[]),...(data.updates||[]).map(u=>u.fact)]){if(q.some(x=>key(x)===key(f)))continue;if(q.length>=LEARN_MAX){dropped++;continue}q.push({id:'q'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),subject:f.subject,predicate:f.predicate,object:f.object,source,via:data.source,at:Date.now()});added++}
    if(added)TenmaLearn.save(q);
    // Очередь полна: часть кандидатов не поместилась — заметку не помечаем, её разберут снова после чистки очереди.
    return dropped?{added,full:true}:added}catch{return null}
@@ -274,6 +275,8 @@ function readCo(){const c=read(CO_KEY,{});return c&&typeof c==='object'&&!Array.
 // Связи с сервера (growth.js): общие для всех браузеров, крепнут от совместных вспоминаний и угасают без дела.
 // Заряд сервера +1 сравним со счётчиком этого браузера; берётся большее.
 let srvBonds=[];
+// Навыки запоминания — «органы» вокруг ядра: чем чаще навык применяется, тем он крупнее; новые на пробе мерцают.
+let organs=[];const organFlash=new Map();
 function buildCo(){
  const m=new Map(Object.entries(readCo()));
  for(const b of srvBonds){const k=[b.a,b.b].sort().join('|'),c=b.charge+1;if(c>(m.get(k)||0))m.set(k,c)}
@@ -746,6 +749,24 @@ function mount(host){
   ctx.lineWidth=dpr*.8;for(const p of spikes){if(!still())p.u=(p.u+p.v*dt)%1;const r0=G.coreR*(.85+p.u*.6),r1=r0+G.coreR*p.len*.4;ctx.strokeStyle=rgba(PAL.spike,.22*dim*Math.sin(Math.PI*p.u));ctx.beginPath();ctx.moveTo((G.cx+Math.cos(p.a)*r0)*dpr,(G.cy+Math.sin(p.a)*r0)*dpr);ctx.lineTo((G.cx+Math.cos(p.a)*r1)*dpr,(G.cy+Math.sin(p.a)*r1)*dpr);ctx.stroke()}
   cloud(core.parts,G.cx,G.cy,G.coreR*(1+core.pulse*.05),simT*.1,EMBER,(1.3+core.pulse*.6)*dim,(1.6+core.pulse)*dim,Math.round(core.parts.length*quality),blurOf(0,G));
   const hot=G.coreR*dpr*(.5+core.pulse*.3);ctx.globalAlpha=(.3+.4*core.pulse)*dim;ctx.drawImage(sprite,G.cx*dpr-hot,G.cy*dpr-hot,hot*2,hot*2);ctx.globalAlpha=1;
+  drawOrgans(G,dt,dim);
+ }
+ // Органы: навыки запоминания на орбите ядра. Размер — сколько раз применялся, яркость — польза записанного,
+ // мерцание — навык на пробе, вспышка — навык только что появился или уточнился.
+ function drawOrgans(G,dt,dim){
+  const list=organs.filter(o=>o.status!=='retired');if(!list.length||!sprite)return;
+  const n=list.length,turn=still()?0:simT*.04,labels=!cfg.clean&&cfg.labels==='all'&&dim>.5;
+  if(labels){lctx.font='600 '+Math.round(8.5*ui*dpr)+'px '+MONO;lctx.textAlign='center';lctx.textBaseline='top'}
+  list.forEach((o,i)=>{
+   const a=turn+i/n*TAU,d=G.coreR*1.38,x=G.cx+Math.cos(a)*d,y=G.cy+Math.sin(a)*d*.72;
+   let fl=organFlash.get(o.name)||0;if(fl>0){fl=Math.max(0,fl-dt*.25);if(fl)organFlash.set(o.name,fl);else organFlash.delete(o.name)}
+   const size=G.coreR*(.09+.08*Math.min(1,Math.log1p(o.uses||0)/4))*(1+fl*.8),flick=o.status==='trial'?.65+.35*Math.sin(simT*5+i):1;
+   ctx.strokeStyle=rgba(PAL.link,.16*dim*flick);ctx.lineWidth=dpr*.8;ctx.beginPath();ctx.moveTo((G.cx+Math.cos(a)*G.coreR*.9)*dpr,(G.cy+Math.sin(a)*G.coreR*.9*.72)*dpr);ctx.lineTo(x*dpr,y*dpr);ctx.stroke();
+   ctx.globalAlpha=clamp((.3+.5*(o.value??.5)+fl*.5)*dim*flick,0,1);ctx.drawImage(sprite,(x-size)*dpr,(y-size)*dpr,size*2*dpr,size*2*dpr);ctx.globalAlpha=1;
+   if(labels){lctx.globalAlpha=.7*dim;lctx.fillStyle=PAL.hot;lctx.fillText(trim(o.title,18)+(o.status==='trial'?' ·проба':''),x*dpr,(y+size*.8)*dpr);lctx.globalAlpha=1}
+  });
+  if(labels)lctx.textBaseline='alphabetic';
+  if(organFlash.size)dirty=true;
  }
  // Зона: спутники, облако и нейроны. Яркость зоны и нейронов зависит от силы памяти.
  const blurOf=(depth,G)=>cam.depth*clamp(Math.abs(depth-focusZ)/G.m*9-.35,0,7);
@@ -981,6 +1002,7 @@ function mount(host){
   // Опрос раз в 20 с: если факты и противоречия не менялись, мозг не пересобирается (на 10 тыс. записей это заметно).
   void loadChatStat();
   try{const r=await fetch('/api/brain/strength');if(r.ok){const d=await r.json();if(d&&typeof d==='object')srv=d}}catch{}
+  try{const r=await fetch('/api/brain/memskills/organs');if(r.ok){const d=await r.json();if(Array.isArray(d)){const had=new Set(organs.map(o=>o.name+':'+o.version));if(organs.length)for(const o of d)if(!had.has(o.name+':'+o.version))organFlash.set(o.name,1);organs=d;dirty=true}}}catch{}
   try{const r=await fetch('/api/brain/bonds?limit=400');if(r.ok){const d=await r.json();if(Array.isArray(d)){srvBonds=d;coList=buildCo();dirty=true}}}catch{}
   const sig=facts.length+':'+facts.map(f=>f.id).join(',')+'|'+conflicts.map(c=>c.id).join(',')+'|'+exp.map(e=>e.id+(e.feedback||'')).join(',')+'|'+topics.map(t=>t.id+':'+t.size).join(',');
   if(sig===factSig&&applied)return;factSig=sig;
@@ -1173,8 +1195,32 @@ function mount(host){
    sec('как вы просили отвечать',...m.preferences.map(p=>row(p.text,()=>postJson('/api/brain/preferences/remove',{id:p.id}),'Убрать предпочтение')),prefForm),
    ...(m.summaries.length?[sec('сводки тем',...m.summaries.slice(0,8).map(t=>row(t.summary.startsWith(t.label)?t.summary:t.label+' · '+t.summary)))]:[]),
    ...(m.links.count?[sec('причинные связи ('+m.links.count+')',...m.links.recent.slice(0,10).map(l=>row(end(l.a)+' → '+l.type+' → '+end(l.b))))]:[]),
+   ...(m.memskills?[mskillSec(m.memskills,sec,row)]:[]),
    ...(m.growth?[growthSec(m.growth,sec,row)]:[]),
    ...(hot?[el('p','brain-fix-ok','В рабочей памяти разговора сейчас '+hot+' '+plural(hot,'запись','записи','записей')+'.')]:[]));
+ }
+ // Чему я научилась запоминать: навыки запоминания, самоэкзамен, промахи, история изменений и просьба о подсказке.
+ function mskillSec(ms,sec,row){
+  const kids=[];
+  const sc=ms.score||{},cur=sc.current;
+  const cause={not_stored:'не записано',not_found:'не нашлось',vague:'размыто'};
+  if(ms.help){
+   const box=el('div','brain-fix-card');box.append(el('div','brain-fix-q','нужна подсказка'),el('div','brain-fix-ok',ms.help.text));
+   const f=el('form','brain-dia-row'),inp=el('input','brain-find'),ok=el('button','brain-btn','Подсказать'),no=el('button','brain-btn','Не сейчас');
+   inp.placeholder='Например: запоминай клички животных';inp.maxLength=600;inp.setAttribute('aria-label','Подсказка');ok.type='submit';no.type='button';
+   f.onsubmit=async e=>{e.preventDefault();const t=inp.value.trim();if(t.length<5)return;ok.disabled=true;try{await postJson('/api/brain/memskills/hint',{text:t})}catch{}void renderDiary()};
+   no.onclick=async()=>{no.disabled=true;try{await postJson('/api/brain/memskills/help/dismiss',{})}catch{}void renderDiary()};
+   f.append(inp,ok,no);box.append(f);kids.push(box);
+  }
+  kids.push(el('div','brain-fix-ok','Самоэкзамен: '+(sc.n?'нашла ответ в '+Math.round((sc.rate||0)*100)+'% из '+sc.n+' '+plural(sc.n,'вопроса','вопросов','вопросов')+(cur?.n?' (с нынешними навыками '+Math.round((cur.rate||0)*100)+'% из '+cur.n+')':''):'ещё не сдавала, начну в простое')+'.'));
+  const mst=ms.missStats||{};const open=(mst.not_stored||0)+(mst.not_found||0)+(mst.vague||0);
+  if(open)kids.push(el('div','brain-fix-ok','Промахи: не записано '+(mst.not_stored||0)+', не нашлось '+(mst.not_found||0)+', размыто '+(mst.vague||0)+'.'));
+  for(const m of (ms.misses||[]).slice(0,3))kids.push(row('✗ «'+trim(m.question,60)+'»'+(m.expected?' → '+trim(m.expected,30):'')+' · '+(cause[m.cause]||m.cause)+(m.count>1?' ×'+m.count:'')));
+  const live=(ms.skills||[]).filter(s=>s.status!=='retired');
+  kids.push(el('div','brain-fix-ok','Навыки: '+live.map(s=>s.title+(s.status==='trial'?' (проба)':'')+(s.uses?' ·'+s.uses:'')).join(', ')+'.'));
+  const chg={add:'научилась',refine:'уточнила',rollback:'вернула прежнее',retire:'на покой'};
+  for(const h of (ms.history||[]).slice(0,6))kids.push(row(atText(h.at)+' · '+(chg[h.change]||h.change)+' «'+h.title+'» v'+h.version+(h.reason?' — '+trim(h.reason,120):'')));
+  return sec('чему я научилась запоминать',...kids);
  }
  // Рост: связи, свои типы, карточки сущностей и псевдонимы (снять псевдоним можно здесь же).
  function growthSec(g,sec,row){
