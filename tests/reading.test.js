@@ -42,6 +42,16 @@ test('changed document is not mixed with facts from its old version',async()=>{
  await fsp.unlink(f);await queue.scan();reading.readPending();
 });
 
+test('same mtime but different size is reread too',async()=>{
+ const f=path.join(LIB,'место.txt'),t=new Date('2026-01-02T03:04:05Z');
+ await fsp.writeFile(f,'Ольга живёт в деревне.');await fsp.utimes(f,t,t);await queue.scan();await queue.run(10);reading.readPending();
+ assert.equal(reading.find('Ольга живёт')[0].facts[0].object,'деревне');
+ await fsp.writeFile(f,'Ольга живёт в большом городе.');await fsp.utimes(f,t,t);await queue.scan();await queue.run(10);
+ assert.equal(reading.find('Ольга живёт').length,0);
+ reading.readPending();const h=reading.find('Ольга живёт');assert.match(h[0].excerpt,/большом городе/);
+ await fsp.unlink(f);await queue.scan();reading.readPending();
+});
+
 test('stale file on disk is not shown; chosen document is read first',async()=>{
  const f=path.join(LIB,'смена.txt');
  await fsp.writeFile(f,'Олег работает в порту.');await queue.scan();await queue.run(10);reading.readPending();

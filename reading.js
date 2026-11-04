@@ -79,10 +79,10 @@ function view(r){
 }
 // Что читать: новое, изменённое и недочитанное. Удалённый с Диска документ забывается вместе с его знаниями.
 function queue(){
- const docs=indexed(),have=new Map(use(d=>d.prepare('SELECT path,modified,status,attempts FROM brain_reading').all()).map(r=>[r.path,r]));
+ const docs=indexed(),have=new Map(use(d=>d.prepare('SELECT path,modified,size,status,attempts FROM brain_reading').all()).map(r=>[r.path,r]));
  const alive=new Set(docs.map(x=>x.path)),gone=[...have.keys()].filter(p=>!alive.has(p));
  if(gone.length)use(d=>tx(d,()=>{for(const p of gone)forgetIn(d,p)}));
- return docs.filter(x=>{const r=have.get(x.path);return !r||r.modified!==x.modified||(r.status==='reading'&&r.attempts<MAX_ATTEMPTS)});
+ return docs.filter(x=>{const r=have.get(x.path);return !r||r.modified!==x.modified||r.size!==x.size||(r.status==='reading'&&r.attempts<MAX_ATTEMPTS)});
 }
 function forgetIn(d,p){d.prepare('DELETE FROM brain_reading WHERE path=?').run(p);d.prepare('DELETE FROM brain_reading_facts WHERE path=?').run(p)}
 function saveFacts(d,file,page,text,facts){
@@ -105,7 +105,7 @@ function readPending({limit=PASS_CHUNKS,force=false,path:first=null}={}){
    if(!text.trim()){use(d=>tx(d,()=>forgetIn(d,doc.path)));continue}
    const parts=chunks(text);
    let r=row(doc.path);
-   if(!r||r.modified!==doc.modified){
+   if(!r||r.modified!==doc.modified||r.size!==doc.size){
     use(d=>tx(d,()=>{d.prepare('DELETE FROM brain_reading_facts WHERE path=?').run(doc.path);
      d.prepare("INSERT INTO brain_reading(path,modified,size,status,chunks_done,chunks_total,facts,summary,keywords,attempts,error,started_at,read_at) VALUES(?,?,?,'reading',0,?,0,?,?,0,NULL,?,NULL) ON CONFLICT(path) DO UPDATE SET modified=excluded.modified,size=excluded.size,status='reading',chunks_done=0,chunks_total=excluded.chunks_total,facts=0,summary=excluded.summary,keywords=excluded.keywords,attempts=0,error=NULL,started_at=excluded.started_at,read_at=NULL").run(doc.path,doc.modified,doc.size,parts.length,extractSummary(text),JSON.stringify(keywords(text)),new Date().toISOString())}));
     r=row(doc.path);
@@ -157,7 +157,7 @@ function find(query,{limit=3}={}){
  const stems=STEMS(query);if(!stems.length)return [];
  const need=stems.length>2?2:1;
  let rows=[];
- try{rows=use(d=>hasTable(d,'library_index_fts')?d.prepare("SELECT f.path,i.modified,i.size FROM library_index_fts f JOIN brain_reading r ON r.path=f.path JOIN library_index i ON i.path=f.path WHERE r.chunks_done>0 AND r.modified=i.modified AND library_index_fts MATCH ? ORDER BY bm25(library_index_fts) LIMIT ?").all(stems.flatMap(yoVariants).map(s=>'"'+s.replace(/"/g,'')+'"*').join(' OR '),CANDIDATES):[])}catch(e){console.error('Reading search failed:',e.name);return []}
+ try{rows=use(d=>hasTable(d,'library_index_fts')?d.prepare("SELECT f.path,i.modified,i.size FROM library_index_fts f JOIN brain_reading r ON r.path=f.path JOIN library_index i ON i.path=f.path WHERE r.chunks_done>0 AND r.modified=i.modified AND r.size=i.size AND library_index_fts MATCH ? ORDER BY bm25(library_index_fts) LIMIT ?").all(stems.flatMap(yoVariants).map(s=>'"'+s.replace(/"/g,'')+'"*').join(' OR '),CANDIDATES):[])}catch(e){console.error('Reading search failed:',e.name);return []}
  const out=[];
  for(const r of rows){
   if(!onDisk(r))continue;
