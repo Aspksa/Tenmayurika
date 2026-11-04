@@ -78,13 +78,20 @@ function feedback(id,kind,correction){
   return {id,feedback:kind,previous:prev.feedback||null,episode:row(prev)};
  }finally{db.close()}
 }
+// Оценка без слушателей: дело агента оценивают в его карточке — душа, навыки и самонастройка ответов это не трогает.
+function mark(id,kind,correction=null){
+ if(typeof id!=='string'||!id||!['ok','fix'].includes(kind))throw new TypeError('Invalid feedback');
+ const db=open();
+ try{return db.prepare('UPDATE memory_experience SET feedback=?,correction=? WHERE id=?').run(kind,kind==='fix'&&correction?String(correction).slice(0,1000):null,id).changes>0}finally{db.close()}
+}
 // Поправка или подтверждение словами в следующем сообщении относится к последнему ответу (не старше 30 минут).
 const FIX=/^(?:нет|не так|не то|не совсем|неправильно|неверно|ошиблась|ошибка|я (?:имела?|хотела?) в виду|имелось в виду|я про|я о другом)(?=[\s,.!:;—–-]|$)/i;
 const OK=/^(?:да|верно|правильно|точно|именно|спасибо|благодарю|отлично|супер|то что нужно)(?=[\s,.!)]|$)/i;
 function detect(message){const t=String(message||'').trim();if(FIX.test(t))return 'fix';if(OK.test(t)&&t.length<=60)return 'ok';return null}
+// Дела агентов — тоже опыт, но «верно»/«нет» в чате относится к ответу Юрики, а не к ним.
 function last(){
  const db=open();
- try{const r=db.prepare('SELECT * FROM memory_experience ORDER BY at DESC LIMIT 1').get();if(!r||Date.now()-Date.parse(r.at)>FEEDBACK_WINDOW_MS)return null;return row(r)}finally{db.close()}
+ try{const r=db.prepare("SELECT * FROM memory_experience WHERE source NOT LIKE 'agent:%' ORDER BY at DESC LIMIT 1").get();if(!r||Date.now()-Date.parse(r.at)>FEEDBACK_WINDOW_MS)return null;return row(r)}finally{db.close()}
 }
 function list(limit=50){
  if(!Number.isInteger(limit)||limit<1||limit>500)throw new TypeError('Invalid limit');
@@ -101,4 +108,4 @@ function describe(e){
  return '• «'+e.question.slice(0,120)+'»'+(e.understood?' → поняла как: '+e.understood:'')+(found?'; нашла: '+found:'; ничего не нашла')+(e.tools.length?'; сделала: '+e.tools.join(', '):'')+(e.ok?'':'; ответить не вышло')
   +(e.feedback==='fix'?'; пользователь ПОПРАВИЛ'+(e.correction?': «'+e.correction.slice(0,200)+'»':''):e.feedback==='ok'?'; пользователь подтвердил':'');
 }
-module.exports={record,similar,feedback,onFeedback,detect,last,list,stats,describe,stems};
+module.exports={record,similar,feedback,mark,onFeedback,detect,last,list,stats,describe,stems};

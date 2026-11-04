@@ -98,4 +98,4 @@ function promptText(){
  const a=active();
  return a.length?'\nТвои собственные правила поведения (ты написала их себе сама):\n'+a.map(r=>'- '+r.text).join('\n'):'';
 }
-module.exports={rules,active,addRule,removeRule,rate,induce,ARMS,choose,remember,reward,tuneView,promptText};
+module.exports={saveRules,rules,active,addRule,removeRule,rate,induce,ARMS,choose,remember,reward,tuneView,promptText};

@@ -25,10 +25,11 @@ const experience=require('./experience');
 const growth=require('./growth');
 const zones=require('./zones');
 const memskills=require('./memskills');
-const selfstudy=require('./selfstudy');
 const core=require('./core');
 const psyche=require('./psyche');
 const heart=require('./heart');
+const teacher=require('./teacher');
+const agents=require('./agents');
 const selfrules=require('./selfrules');
 const selfcode=require('./selfcode');
 const onboarding=require('./onboarding');
@@ -196,6 +197,8 @@ function diaryText(d){
  if(sd.relearned)parts.push('перечитала '+sd.relearned+' '+plural(sd.relearned,'старое сообщение','старых сообщения','старых сообщений')+' по-новому');
  if(sd.rejected)parts.push('попробовала '+sd.summary+', но лучше не стало, оставила как было');
  if(d.rollback)parts.push('вернулась к прежним навыкам запоминания, потому что '+d.rollback.reason);
+ try{parts.push(...teacher.diaryParts(d))}catch{}
+ if(d.proposal)parts.push('придумала помощника «'+d.proposal.name+'» для мечты «'+d.proposal.goal+'» — спрошу хозяина');
  for(const r of d.mskills?.retired||[])parts.push('отправила на покой навык «'+r.title+'»');
  for(const c of d.core||[])parts.push('пересмотрела в себе «'+c.title+'»');
  if(d.onboarding)parts.push('узнала о тебе всё, что хотела при знакомстве');
@@ -265,10 +268,8 @@ async function run({ws,complete=null,reason='idle'}={}){
   try{if(thoughts.on('guesses')){const c=guesses.check();const made=await guesses.generate({complete});d.guesses={made:made.map(g=>({subject:g.subject,predicate:g.predicate,object:g.object})),confirmed:c.confirmed.length,rejected:c.rejected.length}}}catch(e){console.error('Reflect guesses failed:',e.name)}
   try{if(thoughts.on('curiosity'))d.questions=(await curiosity.generate({complete})).length}catch(e){console.error('Reflect curiosity failed:',e.name)}
   // Самоучёба: экзамен → откат, если стало хуже → правка навыков по промахам → покой и выпуск навыков.
-  try{d.selfTest=await selfstudy.selfTest({ws,complete})}catch(e){console.error('Reflect self-test failed:',e.name)}
-  try{d.rollback=selfstudy.watch()}catch(e){console.error('Reflect rollback failed:',e.name)}
-  try{if(!d.rollback)d.study=await selfstudy.evolve({complete})}catch(e){console.error('Reflect study failed:',e.name)}
-  try{d.mskills={retired:memskills.retireUseless(),graduated:memskills.graduate()}}catch(e){console.error('Reflect skill stats failed:',e.name)}
+  // Занятие ведёт Учитель (teacher.js): экзамен, откат, правка навыков, повторение промахов, экзамен поведения, уроки агентов.
+  try{Object.assign(d,await teacher.session({ws,complete}))}catch(e){console.error('Reflect teacher failed:',e.name)}
   // Самонастройка поиска: отклики 👍/👎 и проба весов на вопросах самоэкзамена.
   try{if(thoughts.on('tune'))d.tune=await tune.run({ws})}catch(e){console.error('Reflect tune failed:',e.name)}
   // Сердцевина: «Кто я», «Кто ты», «Как мы общаемся» пересматриваются по свидетельствам (core.js).
@@ -277,6 +278,8 @@ async function run({ws,complete=null,reason='idle'}={}){
   try{d.psyche=await psyche.reflect({complete})}catch(e){console.error('Reflect psyche failed:',e.name)}
   // Сердце: её день без хозяина, рассказ о себе, переломные моменты.
   try{const h=await heart.live({complete});d.heart={day:!!h?.day,story:!!h?.story}}catch(e){console.error('Reflect heart failed:',e.name)}
+  // Мечта без помощника: душа придумывает агента — он появится только после «да» хозяина.
+  try{const p=await agents.proposeForGoals({complete});if(p)d.proposal={name:p.name,goal:p.goal}}catch(e){console.error('Reflect agent proposal failed:',e.name)}
   try{d.selfRules=(await selfrules.induce({complete})).length}catch(e){console.error('Reflect self rules failed:',e.name)}
   try{d.selfCode=!!(await selfcode.reflect({complete}))}catch(e){console.error('Reflect self code failed:',e.name)}
   try{const before=state('onboarding',null)?.finished;const ob=onboarding.refresh();if(!before&&ob.finished)d.onboarding=true}catch(e){console.error('Reflect onboarding failed:',e.name)}

@@ -6,6 +6,7 @@ const os=require('node:os');
 const path=require('node:path');
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'tenmayurika-agents-'));
 process.env.TENMAYURIKA_AGENTS_FILE=path.join(dir,'agents.json');
+process.env.TENMAYURIKA_MEMORY_DB=path.join(dir,'facts.sqlite');
 const agents=require('../agents');
 
 test('agent jobs go to the journal and grow the agent',()=>{
@@ -21,7 +22,7 @@ test('agent jobs go to the journal and grow the agent',()=>{
  assert.equal(agents.start('nobody','x'),0,'unknown agents are ignored');
 });
 
-test('levels and titles follow the number of finished jobs',()=>{
+test('levels and titles follow the experience points',()=>{
  assert.deepEqual([agents.level(0).level,agents.level(4).level,agents.level(5).level,agents.level(500).level],[1,1,2,7]);
  assert.equal(agents.level(5).title,'Огонёк');
  assert.equal(agents.level(500).next,null);
@@ -51,6 +52,7 @@ test('custom agents are validated, run with limited tools and can be deleted',as
  assert.equal(out.reply,'Итоги готовы');
  assert.equal(seen.agentRun,true);
  assert.ok(!seen.tools.includes('tasks'),'read-only agent cannot change tasks');
+ assert.equal(seen.agentId,c.id,'the run knows which agent it is (its lessons go to the prompt)');
  assert.equal(agents.snapshot().recent[0].agent,c.id);
  agents.deleteCustom(c.id);
  assert.equal(agents.snapshot().custom.some(x=>x.id===c.id),false);
