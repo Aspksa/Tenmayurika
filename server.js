@@ -34,6 +34,7 @@ const meta=require('./meta');
 const guesses=require('./guesses');
 const curiosity=require('./curiosity');
 const initiative=require('./initiative');
+const library=require('./library');
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
 const HOST='127.0.0.1',PORT=Number(process.env.PORT)||5173;
@@ -224,6 +225,20 @@ if(req.method==='OPTIONS')return respond(res,204,'');
 if(!['GET','HEAD','OPTIONS'].includes(req.method)){const origin=req.headers.origin;if(origin){let parsed;try{parsed=new URL(origin)}catch{return respond(res,403,{error:'Forbidden origin'})}if(parsed.protocol!=='http:'||!['127.0.0.1','localhost'].includes(parsed.hostname)||Number(parsed.port||80)!==Number(server.address()?.port||PORT))return respond(res,403,{error:'Forbidden origin'})}}
 if(req.method==='GET'&&p==='/api/health'){try{ensureDisk()}catch{}return respond(res,diskHealthy?200:503,{ok:diskHealthy,version:'0.3.0',database:'connected',disk:diskHealthy?'ok':'unavailable'});}
 if(!['GET','HEAD','OPTIONS'].includes(req.method)){ensureDisk();if(p!=='/api/brain/reflect')reflect.touch()}
+if(p.startsWith('/api/library/')){
+ try{
+  if(req.method==='GET'&&p==='/api/library/list')return respond(res,200,{items:await library.list(url.searchParams.get('path')||'')});
+  if(req.method==='GET'&&p==='/api/library/search')return respond(res,200,await library.search(url.searchParams.get('q')||''));
+  if(req.method==='POST'&&p==='/api/library/folder'){const input=await body(req);await library.mkdir(input?.path);return respond(res,201,{ok:true})}
+  if(req.method==='PUT'&&p==='/api/library/upload')return respond(res,201,await library.upload(url.searchParams.get('path')||'',req));
+  if(req.method==='GET'&&p==='/api/library/download'){
+   const rel=url.searchParams.get('path')||'',file=await library.filePath(rel);
+   res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':"attachment; filename=\"download\"; filename*=UTF-8''"+encodeURIComponent(rel.split('/').pop()),'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});
+   return fs.createReadStream(file).on('error',()=>res.destroy()).pipe(res);
+  }
+  return respond(res,404,{error:'Not found'});
+ }catch(e){if(res.headersSent){res.destroy();return}const message=e.code==='EEXIST'?'Файл или папка с таким именем уже существует':e.code==='ENOENT'?'Файл или папка не найдены':e.message;return respond(res,e.code==='EEXIST'?409:e.code==='ENOENT'?404:e instanceof TypeError?400:500,{error:message})}
+}
 if(p.startsWith('/api/brain/'))return await handleBrain(req,res,p,url);
 if(req.method==='GET'&&p==='/api/services')return respond(res,200,await services.status());
 if(req.method==='POST'&&p==='/api/backup')return respond(res,200,await storage.backup());
@@ -262,3 +277,4 @@ return respond(res,404,{error:'Not found'})
 server.on('error',e=>{console.error('Server error:',e.code||e.name);process.exitCode=1});
 if(require.main===module)Promise.resolve().then(()=>ensureDisk()).then(()=>storage.connect()).then(()=>server.listen(PORT,HOST,()=>{console.log('Tenmayurika: http://'+HOST+':'+PORT);syncWorker.run().catch(console.error);const timer=setInterval(()=>{syncWorker.run().catch(console.error);chatlog.learnPending().catch(console.error);idleReflect()},60000);timer.unref();chatlog.learnPending().catch(console.error);startBackupSchedule();const maintenanceTimer=setInterval(()=>{try{ensureDisk();maintenance.maintenance()}catch(e){console.error('Disk maintenance failed:',e.code||e.name)}},3600000);maintenanceTimer.unref()})).catch(e=>{console.error('Database connection failed:',e.message);process.exitCode=1});
 module.exports={server};
+

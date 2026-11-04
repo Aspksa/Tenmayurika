@@ -56,12 +56,12 @@ async function refresh(options={}){
 }
 // Значок на «Делах»: сколько открытых дел на сегодня и просрочено.
 function updateBadge(){const b=document.querySelector('[data-badge="planner"]');if(!b)return;const t=today(),n=workspace.tasks.filter(x=>!x.done&&x.due&&x.due<=t).length;b.hidden=!n;b.textContent=n>99?'99+':String(n)}
-const TITLES={home:'Добро пожаловать',planner:'Планер',brain:'Мозг',settings:'Настройки проекта',facts:'Факты памяти'};
+const TITLES={home:'Добро пожаловать',planner:'Планер',brain:'Мозг',settings:'Настройки проекта',facts:'Факты памяти',library:'Личная библиотека'};
 function render(){
  const brainAlive=page==='brain'&&!!brainHost&&brainHost.isConnected;
  root.replaceChildren(element('h2',TITLES[page]));
  if(page==='brain')return renderBrain(brainAlive);
- ({home:renderHome,planner:renderPlanner,facts:renderFacts,settings:renderSettings}[page]||renderHome)();
+ ({home:renderHome,planner:renderPlanner,facts:renderFacts,settings:renderSettings,library:renderLibrary}[page]||renderHome)();
 }
 
 /* ---------- Общие элементы ---------- */
@@ -531,3 +531,35 @@ const ALIASES={tasks:{view:'list'},notes:{view:'notes'},calendar:{view:'month'}}
 function go(next){if(ALIASES[next]){Object.assign(pv,ALIASES[next],{sel:null});savePv();next='planner'}if(!TITLES[next])next='home';page=next;document.querySelectorAll('.rail button[data-page]').forEach(b=>{const on=b.dataset.page===page;b.classList.toggle('active',on);if(on)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});render();window.scrollTo({top:0})}
 document.querySelectorAll('[data-page]').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();go(el.dataset.page)}));
 window.TenmaApp={refresh,go,select:selectItem,get workspace(){return workspace}};refresh();
+
+
+/* Личная библиотека: файлы находятся на том же диске, что и проект. */
+let libraryPath='';
+function renderLibrary(){
+ const state=h('p',{class:'muted',text:'Загрузка библиотеки…'}),listing=h('div'),searchResults=h('div');
+ const location=h('p',{class:'muted'});
+ const name=h('input',{type:'text',placeholder:'Название новой папки','aria-label':'Название новой папки',maxlength:180});
+ const folderForm=h('form',{},name,h('button',{type:'submit',text:'Создать папку'}));
+ const uploadInput=h('input',{type:'file','aria-label':'Выберите файл'});
+ const uploadButton=h('button',{type:'button',text:'Загрузить файл'});
+ const searchInput=h('input',{type:'search',placeholder:'Название файла или папки','aria-label':'Поиск в библиотеке'});
+ const searchForm=h('form',{},searchInput,h('button',{type:'submit',text:'Найти во всей библиотеке'}));
+ function showEntries(target,entries,search=false){
+  target.replaceChildren(...(entries.length?entries.map(item=>{
+   const row=h('div',{class:'item'}),title=h('strong',{text:(item.type==='folder'?'Папка: ':'Файл: ')+item.name});
+   const detail=h('p',{class:'muted',text:(search?'Путь: '+item.path+' · ':'')+(item.type==='file'?Math.ceil(item.size/1024)+' КБ · ':'')+'Изменён: '+new Date(item.modified).toLocaleString('ru-RU')});
+   const action=item.type==='folder'?h('button',{type:'button',text:'Открыть',onclick:()=>{libraryPath=item.path;void load()}}):h('a',{href:'/api/library/download?path='+encodeURIComponent(item.path),text:'Скачать'});
+   row.append(h('div',{},title,detail),action);return row;
+  }):[h('p',{class:'muted',text:search?'Ничего не найдено.':'В этой папке пока нет файлов.'})]));
+ }
+ async function load(){
+  location.textContent='Папка: /'+libraryPath;state.textContent='Загрузка…';
+  try{const result=await request('/api/library/list?path='+encodeURIComponent(libraryPath));showEntries(listing,result.items);state.textContent='Файлов и папок: '+result.items.length}catch(e){state.textContent=e.message}
+ }
+ folderForm.onsubmit=async e=>{e.preventDefault();const value=name.value.trim();if(!value)return;try{await request('/api/library/folder',{method:'POST',headers:json,body:JSON.stringify({path:libraryPath?libraryPath+'/'+value:value})});name.value='';await load()}catch(err){state.textContent=err.message}};
+ uploadButton.onclick=async()=>{const file=uploadInput.files[0];if(!file){state.textContent='Сначала выберите файл.';return}const filePath=libraryPath?libraryPath+'/'+file.name:file.name;state.textContent='Загрузка файла…';uploadButton.disabled=true;try{const r=await fetch('/api/library/upload?path='+encodeURIComponent(filePath),{method:'PUT',headers:{'Content-Type':'application/octet-stream'},body:file});const data=await r.json();if(!r.ok)throw Error(data.error||'Не удалось загрузить файл');uploadInput.value='';await load()}catch(err){state.textContent=err.message}finally{uploadButton.disabled=false}};
+ searchForm.onsubmit=async e=>{e.preventDefault();searchResults.textContent='Хранитель ищет…';try{const data=await request('/api/library/search?q='+encodeURIComponent(searchInput.value));showEntries(searchResults,data.results,true);searchResults.append(h('p',{class:'muted',text:'Просмотрено записей: '+data.scanned+(data.truncated?' · показаны не все результаты':'')}))}catch(err){searchResults.textContent=err.message}};
+ const back=h('button',{type:'button',text:'На уровень выше',onclick:()=>{libraryPath=libraryPath.split('/').slice(0,-1).join('/');void load()}});
+ root.append(h('div',{class:'panel'},h('h3',{text:'Мои файлы'}),h('p',{class:'muted',text:'Файлы хранятся в папке data/library на диске проекта. Для поиска подключение к интернету не требуется.'}),location,back,folderForm,h('div',{},uploadInput,uploadButton),state,listing),h('div',{class:'panel'},h('h3',{text:'Хранитель библиотеки'}),h('p',{class:'muted',text:'Помогу найти файл или папку по названию во всей библиотеке. Содержимое файлов не читаю и не изменяю.'}),searchForm,searchResults));
+ void load();
+}
