@@ -61,3 +61,14 @@ async function tables(files){
  return {books,totalRows,limitPerSheet:20};
 }
 module.exports.tables=tables;
+
+// A read-only proposal. The user separately chooses which files to move.
+async function organizationPlan(){
+ const pending=[''],items=[];let visited=0,truncated=false,unreadable=0;
+ while(pending.length&&visited<200){const dir=pending.pop();for(const entry of await library.list(dir)){
+  if(entry.type==='folder'){pending.push(entry.path);continue}if(++visited>200){truncated=true;break}
+  try{const proposal=await suggestFileFolder(entry.path),target=proposal.folder+'/'+entry.name;if(target!==entry.path)items.push({path:entry.path,folder:proposal.folder,target,reason:proposal.reason})}catch{unreadable++}
+ }}
+ return {items,visited:Math.min(visited,200),truncated:truncated||pending.length>0,unreadable};
+}
+module.exports.organizationPlan=organizationPlan;

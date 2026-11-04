@@ -10,4 +10,5 @@ test('summaries quote source and similarity does not change files',async()=>{try
  const selected=await analysis.answer('перевозка щебня','версия.txt');assert.deepEqual(selected.items.map(x=>x.path),['версия.txt']);assert.equal(selected.scanned,1);await assert.rejects(()=>analysis.answer('перевозка','../secret.txt'));
  const suggestion=await analysis.suggestName('договор.txt');assert.match(suggestion.name,/\.txt$/);assert.ok(suggestion.name.includes('Договор перевозки'));assert.equal(await fs.readFile(path.join(process.env.TENMAYURIKA_LIBRARY_DIR,'договор.txt'),'utf8'),a);
  assert.equal((await analysis.suggestFileFolder('договор.txt')).folder,'Договоры');await assert.rejects(()=>analysis.suggestFileFolder('../secret'));
+ const plan=await analysis.organizationPlan();assert.ok(plan.items.some(x=>x.path==='договор.txt'&&x.folder==='Договоры'));assert.equal(await fs.readFile(path.join(process.env.TENMAYURIKA_LIBRARY_DIR,'договор.txt'),'utf8'),a);
  }finally{await fs.rm(dir,{recursive:true,force:true})}});

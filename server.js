@@ -250,6 +250,7 @@ if(p.startsWith('/api/library/')){
   if(req.method==='POST'&&p==='/api/library/tables'){const input=await body(req);return respond(res,200,await libraryAnalysis.tables(input?.files))}
   if(req.method==='GET'&&p==='/api/library/suggest-folder')return respond(res,200,{folder:libraryAnalysis.suggestFolder(url.searchParams.get('name')||'')});
   if(req.method==='GET'&&p==='/api/library/suggest-file-folder')return respond(res,200,await libraryAnalysis.suggestFileFolder(url.searchParams.get('path')||''));
+  if(req.method==='GET'&&p==='/api/library/organization-plan')return respond(res,200,await libraryAnalysis.organizationPlan());
   if(req.method==='POST'&&p==='/api/library/ocr'){const input=await body(req),result=await libraryOcr.recognize(input?.path);await journal('ocr_completed',{path:input.path});return respond(res,200,result)}
   if(req.method==='POST'&&p==='/api/library/compare'){const input=await body(req);return respond(res,200,await libraryDocuments.compare(input?.left,input?.right))}
   if(req.method==='GET'&&p==='/api/library/queue')return respond(res,200,await libraryQueue.status());
