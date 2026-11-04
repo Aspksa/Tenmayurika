@@ -14,6 +14,12 @@ const learn=require('./learn');
 const experience=require('./experience');
 const chatlog=require('./chatlog');
 const llm=require('./llm');
+const reflect=require('./reflect');
+const preferences=require('./preferences');
+const skills=require('./skills');
+const links=require('./links');
+const usefulness=require('./usefulness');
+const working=require('./working');
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
 const HOST='127.0.0.1',PORT=Number(process.env.PORT)||5173;
@@ -30,6 +36,26 @@ const AVATAR_PATH=/^\/assets\/avatars\/[a-z0-9-]{1,40}\.webp$/;
 const TYPES={'.css':'text/css; charset=utf-8','.js':'application/javascript; charset=utf-8','.html':'text/html; charset=utf-8','.svg':'image/svg+xml','.webp':'image/webp'};
 function respond(res,status,body,type='application/json; charset=utf-8'){res.writeHead(status,{'Content-Type':type,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});res.end(typeof body==='string'||Buffer.isBuffer(body)?body:JSON.stringify(body))}
 async function body(req){const chunks=[];let bytes=0;for await(const part of req){bytes+=part.length;if(bytes>100000)throw Error('Request too large');chunks.push(part)}return JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}')}
+// Слои «Мозга» из опыта MemOS: дневник размышлений, выводы, навыки, предпочтения, сводки тем,
+// причинные связи, рабочая память темы и польза записей.
+async function handleBrain(req,res,p,url){
+ try{
+  if(req.method==='GET'&&p==='/api/brain/mind'){
+   const ws=await storage.load(),title=new Map([...(ws.notes||[]).map(n=>['note:'+n.id,n.title]),...(ws.tasks||[]).map(t=>['task:'+t.id,t.title])]);
+   const recent=links.list(30),fids=recent.flatMap(l=>[l.a_kind==='fact'?l.a_ref:null,l.b_kind==='fact'?l.b_ref:null]).filter(Boolean);
+   for(const f of memory.factsById(fids))title.set('fact:'+f.id,f.subject+' — '+f.predicate+' → '+f.object);
+   const end=(k,r)=>({kind:k,id:r,title:title.get(k+':'+r)||null});
+   return respond(res,200,{diary:reflect.diary(limitParam(url,20,200)),insights:reflect.insightList(20),skills:skills.list(),preferences:preferences.list(),summaries:reflect.summaries().slice(0,30).map(({factIds,...t})=>({...t,size:factIds.length})),
+    links:{count:links.count(),recent:recent.map(l=>({type:l.type,a:end(l.a_kind,l.a_ref),b:end(l.b_kind,l.b_ref),evidence:l.evidence,source:l.source}))},working:working.snapshot(),reflect:reflect.status()});
+  }
+  if(req.method==='GET'&&p==='/api/brain/strength')return respond(res,200,usefulness.strength());
+  if(req.method==='POST'&&p==='/api/brain/reflect'){const r=await reflect.run({ws:await storage.load(),complete:llm.config()?llm.complete:null,reason:'manual'});return respond(res,200,r)}
+  if(req.method==='POST'&&p==='/api/brain/preferences'){const input=await body(req);return respond(res,201,preferences.addText(input?.text))}
+  if(req.method==='POST'&&p==='/api/brain/preferences/remove'){const input=await body(req);return preferences.remove(input?.id)?respond(res,200,{ok:true}):respond(res,404,{error:'Not found'})}
+  if(req.method==='POST'&&p==='/api/brain/skills/remove'){const input=await body(req);return skills.remove(input?.id)?respond(res,200,{ok:true}):respond(res,404,{error:'Not found'})}
+  return respond(res,404,{error:'Not found'});
+ }catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}
+}
 // Факты памяти (memory-core.js). Ошибки валидации memory-core — TypeError, отдаются как 400.
 function limitParam(url,fallback,max){const raw=url.searchParams.get('limit');if(raw===null)return fallback;const n=Number(raw);if(!Number.isInteger(n)||n<1||n>max)throw new TypeError('Invalid limit');return n}
 async function handleFacts(req,res,p,url){
@@ -130,6 +156,8 @@ async function handleLlm(req,res,p){
   throw e;
  }
 }
+// Размышления в простое: раз в минуту проверяется, давно ли было тихо и есть ли о чём подумать.
+function idleReflect(){storage.load().then(ws=>reflect.maybeRun({ws,complete:llm.config()?llm.complete:null})).then(r=>{if(r)console.log('Мозг поразмышлял:',r.text.slice(0,120))}).catch(e=>console.error('Idle reflection failed:',e.name))}
 const chatContext={addItem,setTaskDone:(id,done)=>updateItem('tasks',id,{done}),updateTask:(id,patch)=>updateItem('tasks',id,patch)};
 const server=http.createServer(async(req,res)=>{try{
 const host=req.headers.host||'';if(host!=='127.0.0.1:'+String(server.address()?.port||PORT)&&host!=='localhost:'+String(server.address()?.port||PORT))return respond(res,403,{error:'Forbidden host'});
@@ -137,7 +165,8 @@ const url=new URL(req.url,'http://localhost');const p=url.pathname;
 if(req.method==='OPTIONS')return respond(res,204,'');
 if(!['GET','HEAD','OPTIONS'].includes(req.method)){const origin=req.headers.origin;if(origin){let parsed;try{parsed=new URL(origin)}catch{return respond(res,403,{error:'Forbidden origin'})}if(parsed.protocol!=='http:'||!['127.0.0.1','localhost'].includes(parsed.hostname)||Number(parsed.port||80)!==Number(server.address()?.port||PORT))return respond(res,403,{error:'Forbidden origin'})}}
 if(req.method==='GET'&&p==='/api/health'){try{ensureDisk()}catch{}return respond(res,diskHealthy?200:503,{ok:diskHealthy,version:'0.3.0',database:'connected',disk:diskHealthy?'ok':'unavailable'});}
-if(!['GET','HEAD','OPTIONS'].includes(req.method))ensureDisk();
+if(!['GET','HEAD','OPTIONS'].includes(req.method)){ensureDisk();if(p!=='/api/brain/reflect')reflect.touch()}
+if(p.startsWith('/api/brain/'))return await handleBrain(req,res,p,url);
 if(req.method==='GET'&&p==='/api/services')return respond(res,200,await services.status());
 if(req.method==='POST'&&p==='/api/backup')return respond(res,200,await storage.backup());
 if(req.method==='POST'&&p==='/api/sync')return respond(res,200,await syncWorker.run());
@@ -145,12 +174,12 @@ if(req.method==='GET'&&p==='/api/graph')return respond(res,200,storage.graph());
 if(req.method==='GET'&&p==='/api/search'){const query=url.searchParams.get('q')||'';if(!query.trim())return respond(res,400,{error:'Missing query'});return respond(res,200,await vectorStore.search(query));}
 if(p==='/api/facts'||p.startsWith('/api/facts/'))return await handleFacts(req,res,p,url);
 // Гибридное вспоминание (слова + смысл + связи) — им «Мозг» подсвечивает найденное.
-if(req.method==='GET'&&p==='/api/recall'){const query=url.searchParams.get('q')||'';if(!query.trim())return respond(res,400,{error:'Missing query'});const r=await require('./recall').recall(query.slice(0,300),{factLimit:30,noteLimit:20});return respond(res,200,{facts:r.facts.map(f=>({id:f.id,score:f.score,why:f.why})),notes:r.notes.map(n=>({id:n.id,score:n.score,why:n.why}))})}
+if(req.method==='GET'&&p==='/api/recall'){const query=url.searchParams.get('q')||'';if(!query.trim())return respond(res,400,{error:'Missing query'});const r=await require('./recall').recall(query.slice(0,300),{factLimit:30,noteLimit:20,diversify:false,topic:false});return respond(res,200,{facts:r.facts.map(f=>({id:f.id,score:f.score,why:f.why})),notes:r.notes.map(n=>({id:n.id,score:n.score,why:n.why}))})}
 if(p==='/api/llm'||p.startsWith('/api/llm/'))return await handleLlm(req,res,p);
 if(req.method==='POST'&&p==='/api/chat'){try{return respond(res,200,await chat.reply(await body(req),chatContext))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
 // Опыт аватара: как она понимала вопросы, что нашла и сделала; подтверждение или поправка ответа.
 if(req.method==='GET'&&p==='/api/experience'){try{return respond(res,200,{items:experience.list(limitParam(url,50,500)),stats:experience.stats()})}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
-if(req.method==='POST'&&p==='/api/experience/feedback'){try{const input=await body(req);const r=experience.feedback(input?.id,input?.kind,input?.correction);return r?respond(res,200,r):respond(res,404,{error:'Not found'})}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
+if(req.method==='POST'&&p==='/api/experience/feedback'){try{const input=await body(req);const r=experience.feedback(input?.id,input?.kind,input?.correction);return r?respond(res,200,{id:r.id,feedback:r.feedback}):respond(res,404,{error:'Not found'})}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
 // Весь чат на сервере и фоновое обучение из него: счётчики и переключатель «учиться фоном».
 if(req.method==='GET'&&p==='/api/chatlog')return respond(res,200,{...chatlog.stats(),recent:chatlog.recent(limitParam(url,20,200))});
 if(req.method==='POST'&&p==='/api/chatlog/auto'){const input=await body(req);if(typeof input?.on!=='boolean')return respond(res,400,{error:'Invalid value'});chatlog.setAutoLearn(input.on);if(input.on)setImmediate(()=>chatlog.learnPending().catch(console.error));return respond(res,200,chatlog.stats())}
@@ -173,5 +202,5 @@ if(req.method==='GET'&&AVATAR_PATH.test(p)){const file=path.join(ROOT,p.slice(1)
 return respond(res,404,{error:'Not found'})
 }catch(e){console.error('Request failed:',e.name,e.code||'',e instanceof SyntaxError?'invalid JSON':'request processing error');respond(res,e.message==='Request too large'?413:e instanceof SyntaxError?400:500,{error:e.message==='Request too large'?'Request too large':e instanceof SyntaxError?'Invalid JSON':'Internal server error'})}});
 server.on('error',e=>{console.error('Server error:',e.code||e.name);process.exitCode=1});
-if(require.main===module)Promise.resolve().then(()=>ensureDisk()).then(()=>storage.connect()).then(()=>server.listen(PORT,HOST,()=>{console.log('Tenmayurika: http://'+HOST+':'+PORT);syncWorker.run().catch(console.error);const timer=setInterval(()=>{syncWorker.run().catch(console.error);chatlog.learnPending().catch(console.error)},60000);timer.unref();chatlog.learnPending().catch(console.error);startBackupSchedule();const maintenanceTimer=setInterval(()=>{try{ensureDisk();maintenance.maintenance()}catch(e){console.error('Disk maintenance failed:',e.code||e.name)}},3600000);maintenanceTimer.unref()})).catch(e=>{console.error('Database connection failed:',e.message);process.exitCode=1});
+if(require.main===module)Promise.resolve().then(()=>ensureDisk()).then(()=>storage.connect()).then(()=>server.listen(PORT,HOST,()=>{console.log('Tenmayurika: http://'+HOST+':'+PORT);syncWorker.run().catch(console.error);const timer=setInterval(()=>{syncWorker.run().catch(console.error);chatlog.learnPending().catch(console.error);idleReflect()},60000);timer.unref();chatlog.learnPending().catch(console.error);startBackupSchedule();const maintenanceTimer=setInterval(()=>{try{ensureDisk();maintenance.maintenance()}catch(e){console.error('Disk maintenance failed:',e.code||e.name)}},3600000);maintenanceTimer.unref()})).catch(e=>{console.error('Database connection failed:',e.message);process.exitCode=1});
 module.exports={server};

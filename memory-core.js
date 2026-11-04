@@ -231,6 +231,32 @@ function resolveConflict(id,keep){
   }catch(e){db.exec('ROLLBACK');throw e}
  }finally{db.close()}
 }
+// Поправка пользователя главнее: новый факт вытесняет всё, с чем спорит (старое уходит в историю).
+function supersede(newId){
+ const nid=normalize(newId,'id',100),db=open();
+ try{
+  db.exec('BEGIN IMMEDIATE');
+  try{
+   const rows=db.prepare('SELECT id,earlier_id,newer_id FROM memory_conflicts WHERE earlier_id=? OR newer_id=?').all(nid,nid),now=new Date().toISOString(),retired=[];
+   for(const c of rows){const other=c.earlier_id===nid?c.newer_id:c.earlier_id;
+    if(db.prepare('UPDATE memory_facts SET valid_to=? WHERE id=? AND valid_to IS NULL').run(now,other).changes){db.prepare('INSERT INTO memory_events(fact_id,action) VALUES(?,?)').run(other,'corrected');retired.push(other)}
+    db.prepare('DELETE FROM memory_conflicts WHERE earlier_id=? OR newer_id=?').run(other,other)}
+   db.exec('COMMIT');return retired;
+  }catch(e){db.exec('ROLLBACK');throw e}
+ }finally{db.close()}
+}
+// Отставить факт по просьбе пользователя («забудь», «это неправда»): остаётся в истории.
+function retireFact(id,action='corrected'){
+ const fid=normalize(id,'id',100),db=open();
+ try{
+  db.exec('BEGIN IMMEDIATE');
+  try{
+   const ok=db.prepare('UPDATE memory_facts SET valid_to=? WHERE id=? AND valid_to IS NULL').run(new Date().toISOString(),fid).changes>0;
+   if(ok){db.prepare('INSERT INTO memory_events(fact_id,action) VALUES(?,?)').run(fid,String(action).slice(0,20));db.prepare('DELETE FROM memory_conflicts WHERE earlier_id=? OR newer_id=?').run(fid,fid)}
+   db.exec('COMMIT');return ok;
+  }catch(e){db.exec('ROLLBACK');throw e}
+ }finally{db.close()}
+}
 /* ---------- Граф: сущности и связи ---------- */
 // Узлы — сущности (субъекты и объекты фактов), рёбра — действующие факты.
 function activeFacts(db){return db.prepare('SELECT id,subject,predicate,object,relation,polarity,source_id,confidence,observed_at FROM memory_facts WHERE valid_to IS NULL').all()}
@@ -393,7 +419,7 @@ function diagnostics(){
    pendingVectors:db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='vector_queue'").get()?db.prepare('SELECT COUNT(*) AS n FROM vector_queue').get().n:0};
  }finally{db.close()}
 }
-module.exports={addFact,extractFacts,queryFacts,searchFacts,searchIndex,syncRecords,ftsQuery,terms,factsById,relations,neighborhood,findPath,communities,duplicates,mergeDuplicate,dismissDuplicate,overview,impact,conflicts,resolveConflict,diagnostics};
+module.exports={addFact,extractFacts,queryFacts,searchFacts,searchIndex,syncRecords,ftsQuery,terms,factsById,relations,neighborhood,findPath,communities,duplicates,mergeDuplicate,dismissDuplicate,overview,impact,conflicts,resolveConflict,supersede,retireFact,diagnostics};
 if(require.main===module){
  try{
   const command=process.argv[2];

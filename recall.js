@@ -3,12 +3,21 @@
 //  • слова — полнотекстовый поиск FTS5 с ранжированием BM25 (факты и заметки);
 //  • смысл — векторный поиск заметок в LanceDB, если настроены эмбеддинги;
 //  • связи — факты-соседи по графу у сущностей из лучших находок и из самого вопроса;
-//  • свежесть и уверенность факта — небольшая добавка.
+//  • свежесть и уверенность факта — небольшая добавка;
+//  • польза — записи из подтверждённых ответов выше, из поправленных ниже (usefulness.js);
+//  • тема — горячие записи рабочей памяти текущего разговора (working.js);
+//  • причина — записи, связанные причинной связью с лучшими находками (links.js).
+// Затем отсев: слабые находки (меньше пятой части лучшей) отбрасываются, а из похожих друг на друга
+// берётся разнообразный набор (MMR), чтобы модель не получала пять почти одинаковых фактов.
 // Каждая находка помнит, почему она нашлась (why), — это видно в «Мозге» и в ответе.
 const memory=require('./memory-core');
 const storage=require('./storage');
+const usefulness=require('./usefulness');
+const working=require('./working');
+const links=require('./links');
 
-const W={text:1,vector:.8,graph:.45,fresh:.12};
+const W={text:1,vector:.8,graph:.45,fresh:.12,topic:.35,cause:.4};
+const CUTOFF=.2,MMR_LAMBDA=.35;
 const rrf=i=>1/(8+i);
 const VECTOR_TIMEOUT_MS=2500;
 async function vectorNotes(text){
@@ -23,7 +32,20 @@ function add(map,id,signal,value,extra){
  const e=map.get(id)||{id,score:0,why:new Set(),...extra};
  e.score+=value;e.why.add(signal);map.set(id,e);return e;
 }
-async function recall(text,{factLimit=8,noteLimit=5,ws}={}){
+function grams(text){const t=' '+String(text||'').toLocaleLowerCase().replace(/ё/g,'е')+' ',out=new Set();for(let i=0;i+3<=t.length;i++)out.add(t.slice(i,i+3));return out}
+function jaccard(a,b){let n=0;for(const x of a)if(b.has(x))n++;return n/(a.size+b.size-n||1)}
+// Отсев и разнообразие: слабее CUTOFF от лучшей — прочь; дальше жадно, со штрафом за сходство с уже взятыми.
+function diverse(list,limit,textOf){
+ if(!list.length)return list;
+ const best=list[0].score||1,pool=list.filter(x=>x.score>=best*CUTOFF).map(x=>({x,g:grams(textOf(x))})),out=[];
+ while(out.length<limit&&pool.length){
+  let bi=0,bv=-Infinity;
+  for(let i=0;i<pool.length;i++){const sim=out.length?Math.max(...out.map(o=>jaccard(o.g,pool[i].g))):0;const v=pool[i].x.score/best-MMR_LAMBDA*sim;if(v>bv){bv=v;bi=i}}
+  out.push(pool.splice(bi,1)[0]);
+ }
+ return out.map(o=>o.x);
+}
+async function recall(text,{factLimit=8,noteLimit=5,ws,diversify=true,topic=true}={}){
  const query=String(text||'').trim().slice(0,300);if(!query)return {facts:[],notes:[]};
  const data=ws||await storage.load();
  try{memory.syncRecords('note',data.notes||[])}catch(e){console.error('Note index failed:',e.name)}
@@ -43,14 +65,27 @@ async function recall(text,{factLimit=8,noteLimit=5,ws}={}){
  const top=memory.factsById([...facts.values()].sort((a,b)=>b.score-a.score).slice(0,3).map(x=>x.id));
  const ents=new Set();for(const f of top){ents.add(f.subject);ents.add(f.object)}
  for(const e of ents){let rel=[];try{rel=memory.relations(e,20)}catch{}rel.forEach((f,i)=>{if(!facts.has(f.id)||[...facts.get(f.id).why].every(w=>w==='связь'))add(facts,f.id,'связь',W.graph*rrf(i)*6)})}
+ // Тема разговора: горячие записи рабочей памяти.
+ if(topic)for(const h of working.hot('fact'))add(facts,h.id,'тема',W.topic*h.heat);
+ if(topic)for(const h of working.hot('note'))add(notes,h.id,'тема',W.topic*h.heat);
+ // Причинные связи лучших находок (причина, условие, «сначала — потом»).
+ try{
+  const seeds=[...[...facts.values()].sort((a,b)=>b.score-a.score).slice(0,3).map(x=>({kind:'fact',ref:x.id,score:x.score})),...[...notes.values()].sort((a,b)=>b.score-a.score).slice(0,2).map(x=>({kind:'note',ref:x.id,score:x.score}))];
+  for(const sd of seeds)for(const l of links.of(sd.kind,sd.ref,8)){const map=l.kind==='fact'?facts:l.kind==='note'?notes:null;if(map&&!(l.kind===sd.kind&&l.ref===sd.ref))add(map,l.ref,l.type,W.cause*Math.min(1,sd.score))}
+ }catch(e){console.error('Link recall failed:',e.name)}
  const rows=memory.factsById([...facts.keys()]),now=Date.now();
- const outFacts=rows.map(f=>{const e=facts.get(f.id),age=(now-Date.parse(f.observed_at||0))/864e5;
-   const score=(e.score+W.fresh*Math.exp(-Math.max(0,age)/30))*(.6+.4*(Number(f.confidence)||0));
+ const useF=usefulness.get('fact',rows.map(f=>f.id));
+ const allFacts=rows.map(f=>{const e=facts.get(f.id),age=(now-Date.parse(f.observed_at||0))/864e5,u=useF.get(f.id);
+   const score=(e.score+W.fresh*Math.exp(-Math.max(0,age)/30))*(.6+.4*(Number(f.confidence)||0))*usefulness.factor(u);
+   if(u&&u.ok>u.fix)e.why.add('польза');
    return {...f,score,why:[...e.why]}})
-  .sort((a,b)=>b.score-a.score||String(b.observed_at).localeCompare(String(a.observed_at))).slice(0,factLimit);
+  .sort((a,b)=>b.score-a.score||String(b.observed_at).localeCompare(String(a.observed_at)));
  const byId=new Map((data.notes||[]).map(n=>[n.id,n]));
- const outNotes=[...notes.values()].filter(e=>byId.has(e.id)).map(e=>{const n=byId.get(e.id);return {...n,score:e.score+(n.pinned?.05:0),why:[...e.why]}})
-  .sort((a,b)=>b.score-a.score).slice(0,noteLimit);
+ const live=[...notes.values()].filter(e=>byId.has(e.id)),useN=usefulness.get('note',live.map(e=>e.id));
+ const allNotes=live.map(e=>{const n=byId.get(e.id),u=useN.get(e.id);if(u&&u.ok>u.fix)e.why.add('польза');return {...n,score:(e.score+(n.pinned?.05:0))*usefulness.factor(u),why:[...e.why]}})
+  .sort((a,b)=>b.score-a.score);
+ const outFacts=diversify?diverse(allFacts,factLimit,f=>f.subject+' '+f.predicate+' '+f.object):allFacts.slice(0,factLimit);
+ const outNotes=diversify?diverse(allNotes,noteLimit,n=>n.title+' '+String(n.content||'').slice(0,200)):allNotes.slice(0,noteLimit);
  return {facts:outFacts,notes:outNotes};
 }
-module.exports={recall};
+module.exports={recall,diverse};

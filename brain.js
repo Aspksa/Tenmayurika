@@ -311,9 +311,11 @@ function mount(host){
  // Почти-дубли и обзор памяти — такие же окна поверх роя.
  const dupBox=el('div','brain-fix brain-calm');dupBox.hidden=true;dupBox.setAttribute('role','dialog');dupBox.setAttribute('aria-label','Похожие факты');
  const ovBox=el('div','brain-fix brain-calm');ovBox.hidden=true;ovBox.setAttribute('role','dialog');ovBox.setAttribute('aria-label','Обзор памяти');
+ const diaBox=el('div','brain-fix brain-calm');diaBox.hidden=true;diaBox.setAttribute('role','dialog');diaBox.setAttribute('aria-label','Дневник мозга');
+ const diaBtn=el('button','brain-btn','✦ Дневник');diaBtn.type='button';diaBtn.title='О чём мозг думал в простое: выводы, навыки из опыта, ваши предпочтения, сводки тем, причинные связи';
  const ovBtn=el('button','brain-btn','☰ Обзор');ovBtn.type='button';ovBtn.title='Обзор памяти: темы, самые связанные узлы, что менялось за неделю';
- ctrl.prepend(ovBtn);ctrl.prepend(find);
- stage.append(glc,canvas,lab,grain,top,tip,empty,fixBox,dupBox,ovBox);
+ ctrl.prepend(diaBtn);ctrl.prepend(ovBtn);ctrl.prepend(find);
+ stage.append(glc,canvas,lab,grain,top,tip,empty,fixBox,dupBox,ovBox,diaBox);
  stage.setAttribute('role','img');
  const teach=el('form','brain-teach'),tIn=el('input'),tBtn=el('button','primary','Научить');
  tIn.placeholder='Научи меня: Анна | любит | зелёный чай';tIn.setAttribute('aria-label','Новый факт: субъект | связь | объект');tIn.maxLength=900;tBtn.type='submit';
@@ -372,7 +374,7 @@ function mount(host){
  const cam={yaw:0,pitch:0,zoom:1,px:0,py:0,depth:0},camT={yaw:0,pitch:0,zoom:1,px:0,py:0};
  let view0={cx:0,cy:0},focusZ=0,focusN=null,idleT=0,focusQ='',focusLobes=new Set(),focusItems=new Set(),thinking=false,thinkT=0,seeds=[],thought=null;
  // Сила памяти: сколько раз и когда запись вспоминали (хранится в этом браузере).
- let recall=readRecall();
+ let recall=readRecall(),srv={};
  const still=()=>cfg.paused||reduceQuery.matches;
 
  function setPause(){pauseBtn.textContent=cfg.paused?'▶ Движение':'❚❚ Пауза';pauseBtn.setAttribute('aria-pressed',String(cfg.paused))}
@@ -447,9 +449,10 @@ function mount(host){
   return n.near=[a,b].filter(Boolean)}
  function sprout(n){n.pending=false;n.bornT=performance.now();n.den.forEach((b,i)=>{b.born=n.bornT+200+i*110})}
  function strength(it){
-  const r=recall[it.id],t=Math.max(it.ts||0,r?r.t:0),age=t?(Date.now()-t)/DAY:30;
+  // Сила складывается из вспоминаний в этом браузере и на сервере; польза (👍/👎) добавляет или убавляет.
+  const r=recall[it.id],sv=srv[it.id],t=Math.max(it.ts||0,r?r.t:0,sv?sv.t:0),n=Math.max(r?r.n:0,sv?sv.n:0),age=t?(Date.now()-t)/DAY:30;
   if(it.id.startsWith('t:')&&!it.dim)return clamp(.75+(it.hot?.35:0),.75,1.25); // открытое дело всегда «тёплое»
-  return clamp(.12+.88*Math.exp(-age/21)+.12*Math.log2(1+(r?r.n:0)),.12,1.3);
+  return clamp(.12+.88*Math.exp(-age/21)+.12*Math.log2(1+n)+(sv?clamp(.08*(sv.ok-sv.fix),-.2,.2):0),.12,1.3);
  }
 
  function resize(){
@@ -964,6 +967,7 @@ function mount(host){
   try{const [f,c,x,tp,dp]=await Promise.all([fetch('/api/facts?limit=2000').then(r=>r.ok?r.json():r.status===400?fetch('/api/facts?limit=500').then(r2=>r2.ok?r2.json():[]):[]),fetch('/api/facts/conflicts?limit=100').then(r=>r.ok?r.json():[]),fetch('/api/experience?limit=40').then(r=>r.ok?r.json():{items:[]}),fetch('/api/facts/communities').then(r=>r.ok?r.json():[]).catch(()=>[]),fetch('/api/facts/duplicates').then(r=>r.ok?r.json():[]).catch(()=>[])]);facts=Array.isArray(f)?f.filter(x=>!x.valid_to):[];conflicts=Array.isArray(c)?c:[];exp=Array.isArray(x?.items)?x.items:[];topics=Array.isArray(tp)?tp:[];dups=Array.isArray(dp)?dp:[];renderDup()}catch{}
   // Опрос раз в 20 с: если факты и противоречия не менялись, мозг не пересобирается (на 10 тыс. записей это заметно).
   void loadChatStat();
+  try{const r=await fetch('/api/brain/strength');if(r.ok){const d=await r.json();if(d&&typeof d==='object')srv=d}}catch{}
   const sig=facts.length+':'+facts.map(f=>f.id).join(',')+'|'+conflicts.map(c=>c.id).join(',')+'|'+exp.map(e=>e.id+(e.feedback||'')).join(',')+'|'+topics.map(t=>t.id+':'+t.size).join(',');
   if(sig===factSig&&applied)return;factSig=sig;
   if(host.isConnected)apply();
@@ -1130,6 +1134,34 @@ function mount(host){
    ...(o.conflicts||o.duplicates?[sec('ждут разбора',...[o.conflicts?Object.assign(el('button','brain-btn brain-alarm-btn','⚠ противоречий: '+o.conflicts),{type:'button',onclick:()=>{ovBox.hidden=true;fixBox.hidden=false;renderFix()}}):null,o.duplicates?Object.assign(el('button','brain-btn','≈ похожих: '+o.duplicates),{type:'button',onclick:()=>{ovBox.hidden=true;dupBox.hidden=false;renderDup()}}):null].filter(Boolean))]:[]));
  }
  ovBtn.onclick=()=>{ovBox.hidden=false;void renderOverview()};
+ /* ---------- Дневник: размышления в простое, выводы, навыки, предпочтения, сводки, причины ---------- */
+ const postJson=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+ const atText=iso=>{try{return new Date(iso).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}catch{return ''}};
+ async function renderDiary(){
+  const head=dialogHead('дневник мозга',diaBox);diaBox.replaceChildren(head,el('p','brain-fix-ok','Собираю…'));
+  let m;try{const r=await fetch('/api/brain/mind');if(!r.ok)throw 0;m=await r.json()}catch{diaBox.replaceChildren(head,el('p','brain-fix-ok','Не удалось открыть дневник.'));return}
+  const sec=(title,...kids)=>{const c=el('div','brain-fix-card');c.append(el('div','brain-fix-q',title),...kids);return c};
+  const row=(text,onRemove,label)=>{const r=el('div','brain-dia-row');r.append(el('span','brain-fix-ok',text));if(onRemove){const b=el('button','brain-btn','✕');b.type='button';b.title=label;b.setAttribute('aria-label',label);b.onclick=async()=>{b.disabled=true;try{await onRemove()}finally{void renderDiary()}};r.append(b)}return r};
+  const st=m.reflect||{},idleMin=Math.floor((st.idleMs||0)/60000),needMin=Math.round((st.idleNeedMs||600000)/60000);
+  const think=el('button','brain-btn',st.running?'Размышляю…':'Поразмышлять сейчас');think.type='button';think.disabled=!!st.running;
+  think.onclick=async()=>{think.disabled=true;think.textContent='Размышляю…';try{await postJson('/api/brain/reflect',{})}catch{}void renderDiary();window.dispatchEvent(new CustomEvent('tenma:memory'))};
+  const status=el('div','brain-dia-row');status.append(el('span','brain-fix-ok',(st.last?'Последний раз: '+atText(st.last)+'. ':'Ещё не размышляла. ')+'Думаю сама, когда со мной '+needMin+' мин ничего не делают'+(idleMin?' (тихо уже '+idleMin+' мин)':'')+'.'),think);
+  const prefIn=el('input','brain-find');prefIn.placeholder='Например: отвечай короче';prefIn.maxLength=200;prefIn.setAttribute('aria-label','Новое предпочтение');
+  const prefForm=el('form','brain-dia-row');const prefAdd=el('button','brain-btn','+');prefAdd.type='submit';prefAdd.title='Добавить предпочтение';prefForm.append(prefIn,prefAdd);
+  prefForm.onsubmit=async e=>{e.preventDefault();const t=prefIn.value.trim();if(!t)return;prefAdd.disabled=true;try{await postJson('/api/brain/preferences',{text:t})}catch{}void renderDiary()};
+  const kindName={fact:'факт',note:'заметка',task:'дело'};
+  const end=x=>(kindName[x.kind]||x.kind)+' «'+(x.title||'…')+'»';
+  const hot=(m.working?.facts?.length||0)+(m.working?.notes?.length||0);
+  diaBox.replaceChildren(head,status,
+   sec('дневник',...(m.diary.length?m.diary.slice(0,6).map(d=>row(atText(d.at)+' · '+d.text)):[el('div','brain-fix-ok','Пока пусто.')])),
+   ...(m.insights.length?[sec('выводы',...m.insights.slice(0,6).map(i=>row(i.text)))]:[]),
+   sec('навыки из опыта',...(m.skills.length?m.skills.slice(0,10).map(k=>row((k.status==='retired'?'(на покое) ':'')+k.rule+' · ✓'+k.ok+' ✎'+k.fix,()=>postJson('/api/brain/skills/remove',{id:k.id}),'Убрать навык')):[el('div','brain-fix-ok','Появятся, когда вы подтвердите 👍 несколько похожих ответов.')])),
+   sec('как вы просили отвечать',...m.preferences.map(p=>row(p.text,()=>postJson('/api/brain/preferences/remove',{id:p.id}),'Убрать предпочтение')),prefForm),
+   ...(m.summaries.length?[sec('сводки тем',...m.summaries.slice(0,8).map(t=>row(t.summary.startsWith(t.label)?t.summary:t.label+' · '+t.summary)))]:[]),
+   ...(m.links.count?[sec('причинные связи ('+m.links.count+')',...m.links.recent.slice(0,10).map(l=>row(end(l.a)+' → '+l.type+' → '+end(l.b))))]:[]),
+   ...(hot?[el('p','brain-fix-ok','В рабочей памяти разговора сейчас '+hot+' '+plural(hot,'запись','записи','записей')+'.')]:[]));
+ }
+ diaBtn.onclick=()=>{diaBox.hidden=false;void renderDiary()};
  const onWorkspace=()=>apply();
  const onMemory=()=>loadFacts();
  const onWide=()=>placeHud();
