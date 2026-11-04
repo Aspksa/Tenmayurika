@@ -480,6 +480,69 @@
 
  /* Раздел «Модель ИИ»: Cloud.ru и другие OpenAI-совместимые сервисы. Ключ хранится на сервере. */
  async function api(url,body){const r=await fetch(url,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||('HTTP '+r.status));return d}
+
+ // Раздел «Агенты»: кто летает огоньками у хвостов, что делает и как настроен (сами огоньки — wisps.js).
+ const AGENT_INFO={
+  guardian:{emoji:'📚',where:'Библиотека',live:true,
+   about:'Следит за личной библиотекой документов. Читает новые файлы, распознаёт сканы и подсказывает, куда их положить.',
+   does:['Проверяет новые и изменённые файлы','Читает документы и распознаёт сканы (OCR)','Предлагает папку, имя и факты из документа','Находит связи и расхождения между документами','Учится на твоих «подходит» и «исправить»'],
+   rights:'Только предлагает. Файлы перемещает и переименовывает лишь после твоего подтверждения.',memory:'Правила «слово → папка», история решений, факты библиотеки'},
+  reviewer:{emoji:'🪞',where:'Мозг',
+   about:'Разбирает разговор на ходу, пока вы болтаете, и делает выводы для Юрики.',
+   does:['Замечает ошибки и поправки и превращает их в уроки','Запоминает, как тебе нравится, чтобы отвечали','Ловит противоречия с памятью','Дополняет «Кто ты»'],
+   rights:'Пишет только в память и дневник Мозга.',memory:'«Как мы общаемся», «Кто ты», дневник'},
+  secretary:{emoji:'🗓',where:'Планер',
+   about:'Помогает с делами и временем: сводки, сроки, напоминания.',
+   does:['Собирает утреннюю сводку','Следит за сроками и просрочкой','Напоминает о делах со временем','Предлагает перенести дела'],
+   rights:'Меняет дела только после подтверждения.',memory:'Дела, заметки, календарь'},
+  researcher:{emoji:'🔭',where:'Факты',
+   about:'Ищет ответы в памяти и документах и сводит их вместе.',
+   does:['Ищет по фактам и заметкам','Отвечает со ссылками на источник','Составляет короткие конспекты'],
+   rights:'Только чтение.',memory:'Факты и библиотека'}
+ };
+ const wispsApi=()=>window.TenmaWisps;
+ function wispSettingsCard(){
+  const W=wispsApi();if(!W)return card('Летающие агенты',h('p',{class:'hint',text:'Огоньки ещё загружаются, откройте меню заново.'}));
+  const c=W.get(),obj={fly:c.fly,labels:c.labels};
+  const swW=(label,key,desc)=>{const el=sw(label,key,obj,desc);el.querySelector('input').addEventListener('change',()=>W.set({[key]:obj[key]}));return el};
+  const rangeW=(label,key,min,max,step)=>{const out=h('output',{text:Math.round(c[key]*100)+'%'}),r=h('input',{type:'range',min,max,step,value:c[key],'aria-label':label});
+   const fill=()=>r.style.setProperty('--fill',((r.value-min)/(max-min)*100)+'%');fill();
+   r.addEventListener('input',()=>{const v=+r.value;out.textContent=Math.round(v*100)+'%';fill();W.set({[key]:v})});return h('label',{class:'field'},h('span',{text:label}),out,r)};
+  return card('Летающие агенты',swW('Огоньки у хвостов','fly','Агенты кружат у хвостов и улетают к разделу своей задачи'),swW('Подписи','labels','Имя агента и его дело рядом с огоньком'),
+   rangeW('Размер огоньков','size',.5,2,.1),rangeW('Скорость полёта','speed',.4,2,.1),
+   h('div',{class:'menu-actions'},h('button',{type:'button',text:'Показать полёт',onclick:()=>{closeSettings();setTimeout(()=>W.demo(),300)}})));
+ }
+ let agentOpen='guardian';
+ function agentsSection(){
+  const W=wispsApi();if(!W)return [wispSettingsCard()];
+  const states={idle:'у хвостов',go:'летит к делу',work:'работает',back:'возвращается',off:'выключен'};
+  const list=h('div',{class:'agents'});
+  const draw=()=>list.replaceChildren(...W.agents.map(a=>{
+   const info=AGENT_INFO[a.id]||{},cfgNow=W.get(),on=!cfgNow.off[a.id],color=cfgNow.colors[a.id]||a.hex,open=agentOpen===a.id,st=W.state(a.id);
+   const toggle=h('input',{type:'checkbox',role:'switch','aria-label':'Включить агента '+a.name});toggle.checked=on;
+   toggle.addEventListener('change',()=>{W.set({off:{[a.id]:!toggle.checked}});draw()});
+   const pick=h('input',{type:'color',value:color,'aria-label':'Цвет огонька'});pick.addEventListener('input',()=>{W.set({colors:{[a.id]:pick.value}});el.style.setProperty('--agent',pick.value)});
+   const el=h('article',{class:'agent'+(on?'':' off')+(open?' open':'')},
+    h('header',{class:'agent-top',onclick:e=>{if(e.target.closest('label,input'))return;agentOpen=open?'':a.id;draw()}},
+     h('span',{class:'agent-orb','aria-hidden':'true'},h('span',{text:info.emoji||'✦'})),
+     h('span',{class:'agent-title'},h('strong',{text:a.name}),h('small',{text:a.role+' · летает в «'+(info.where||a.page)+'»'})),
+     h('span',{class:'agent-state'+(st&&st.state!=='idle'&&st.state!=='off'?' busy':'')},h('i'),document.createTextNode(info.live||!on?states[st?.state]||'':'для показа')),
+     h('label',{class:'agent-toggle'},toggle,h('span',{class:'switch','aria-hidden':'true'}))),
+    open?h('div',{class:'agent-body'},
+     h('p',{class:'agent-about',text:info.about}),
+     h('div',{class:'agent-cols'},
+      h('div',{},h('h5',{text:'Что делает'}),h('ul',{},...(info.does||[]).map(t=>h('li',{text:t})))),
+      h('div',{},h('h5',{text:'Права'}),h('p',{text:info.rights}),h('h5',{text:'Память'}),h('p',{text:info.memory}))),
+     h('div',{class:'agent-set'},
+      h('label',{class:'agent-color'},h('span',{text:'Цвет огонька'}),pick),
+      h('button',{type:'button',class:'ghost',text:'Сбросить цвет',onclick:()=>{W.set({colors:{[a.id]:''}});draw()}}),
+      h('button',{type:'button',text:'Отправить в полёт',disabled:!on||!W.get().fly,onclick:()=>{closeSettings();setTimeout(()=>W.send(a.id,'показывает, куда летает',4500),300)}}),
+      a.id==='guardian'?h('button',{type:'button',class:'ghost',text:'Память Хранителя',onclick:()=>{closeSettings();window.TenmaApp?.openGuardian?.()}}):null),
+     info.live?null:h('small',{class:'hint',text:'Пока этот агент только показывает, как будет летать. Настоящие дела подключим следующим шагом.'})):null);
+   el.style.setProperty('--agent',color);return el}));
+  draw();
+  return [list,wispSettingsCard()];
+ }
  function modelSection(){
   const wrap=h('div',{class:'menu-stack'},h('p',{class:'muted',text:'Загрузка настроек модели…'}));
   api('/api/llm').then(v=>{
@@ -566,7 +629,7 @@
    const types=h('div',{class:'ptypes',role:'radiogroup','aria-label':'Вид частиц'});
    for(const [k,[label,emoji]] of Object.entries(PARTICLES)){const b=h('button',{type:'button',class:'ptype',role:'radio','aria-checked':String(k===cfg.particleType)},h('span',{class:'ptype-emoji',text:emoji}),h('span',{text:label}));b.addEventListener('click',()=>{cfg.particleType=k;if(!cfg.particles)cfg.particles=true;types.querySelectorAll('.ptype').forEach(x=>x.setAttribute('aria-checked',String(x===b)));refreshAll()});types.append(b)}
    return [card('Вид',types),grid(card('Настройка',sw('Показывать частицы','particles'),range('Количество','particleCount',4,160,2,String),range('Скорость','particleSpeed',.2,3,.1,mult),range('Размер','particleSize',.4,3,.1,mult)),
-    card('Эффекты движения',sw('Искры при клике','clickBurst'),sw('След из искр','trail',cfg,'Когда её тащат или она гуляет')))];
+    card('Эффекты движения',sw('Искры при клике','clickBurst'),sw('След из искр','trail',cfg,'Когда её тащат или она гуляет')),wispSettingsCard())];
   }},
   motion:{label:'Движение и характер',icon:'i-motion',sub:'Парение, прогулки, реплики',build:()=>[
    grid(card('Движение',sw('Парение','float'),range('Высота парения','floatHeight',1,20,1,pct),range('Период парения','floatSpeed',2,14,.5,sec),sw('Дыхание','breathe'),sw('Реакция на наведение','hoverReact')),
@@ -585,6 +648,7 @@
    return [h('div',{class:'menu-actions'},h('button',{type:'button',text:'Включить все',onclick:()=>all(true)}),h('button',{type:'button',class:'ghost',text:'Выключить все',onclick:()=>all(false)})),list,
     h('small',{class:'hint',text:'Команды работают и без модели. С подключённой моделью она вызывает включённые инструменты сама. Выключенный инструмент сервер не выполнит.'})];
   }},
+  agents:{label:'Агенты',icon:'i-agents',sub:'Помощники Юрики: кто они, что делают, их огоньки',build:agentsSection},
   model:{label:'Модель ИИ',icon:'i-cloud',sub:'Cloud.ru и другие — ключ и выбор модели',build:modelSection},
   chat:{label:'Чат и уведомления',icon:'i-chat',sub:'Окно чата, звуки, напоминания',build:()=>[
    grid(card('Окно чата',range('Размер окна','chatScale',70,160,5,pct),range('Размер текста','chatFont',80,150,5,pct),sw('Alt+Y — открыть чат','chatHotkey')),
