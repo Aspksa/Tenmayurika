@@ -12,7 +12,7 @@ function entries(buffer){
   const flags=buffer.readUInt16LE(pos+8),method=buffer.readUInt16LE(pos+10),compressed=buffer.readUInt32LE(pos+20),size=buffer.readUInt32LE(pos+24),n=buffer.readUInt16LE(pos+28),extra=buffer.readUInt16LE(pos+30),comment=buffer.readUInt16LE(pos+32),local=buffer.readUInt32LE(pos+42);
   if(pos+46+n+extra+comment>buffer.length)throw Error('Повреждённый архив');
   const name=buffer.subarray(pos+46,pos+46+n).toString('utf8');pos+=46+n+extra+comment;
-  if(!/^(word\/document\.xml|xl\/sharedStrings\.xml|xl\/worksheets\/sheet\d+\.xml)$/.test(name))continue;
+  if(!/^(word\/document\.xml|xl\/sharedStrings\.xml|xl\/workbook\.xml|xl\/_rels\/workbook\.xml\.rels|xl\/worksheets\/sheet\d+\.xml)$/.test(name))continue;
   if(flags&1||![0,8].includes(method)||size>MAX_PART||(total+=size)>MAX_TOTAL||local+30>buffer.length||buffer.readUInt32LE(local)!==0x04034b50)throw Error('Неподдерживаемый или слишком большой документ');
   const start=local+30+buffer.readUInt16LE(local+26)+buffer.readUInt16LE(local+28);if(start+compressed>buffer.length)throw Error('Повреждённый архив');
   const bytes=buffer.subarray(start,start+compressed),data=method===8?zlib.inflateRawSync(bytes,{maxOutputLength:MAX_PART}):bytes;
@@ -22,6 +22,7 @@ function entries(buffer){
 }
 function decode(text){return text.replace(/&(#x[\da-f]+|#\d+|amp|lt|gt|quot|apos);/gi,(_,v)=>{const map={amp:'&',lt:'<',gt:'>',quot:'"',apos:"'"};if(map[v])return map[v];const n=v[1]?.toLowerCase()==='x'?parseInt(v.slice(2),16):parseInt(v.slice(1),10);return Number.isInteger(n)&&n<=0x10ffff&&n>=0?String.fromCodePoint(n):'�'})}
 function xmlText(xml){return decode(xml.replace(/<[^>]*>/g,''))}
+function attr(tag,name){const m=tag.match(new RegExp('(?:^|\\s)'+name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*=\\s*(["\'])(.*?)\\1'));return m?decode(m[2]):''}
 function parse(buffer,extension){
  const files=entries(buffer);
  if(extension==='docx'){
@@ -30,6 +31,8 @@ function parse(buffer,extension){
  }
  const strings=[...(files.get('xl/sharedStrings.xml')||'').matchAll(/<si(?:\s[^>]*)?>([\s\S]*?)<\/si>/g)].map(m=>[...m[1].matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map(x=>xmlText(x[1])).join(''));
  const sheets=[...files.entries()].filter(([name])=>/^xl\/worksheets\/sheet\d+\.xml$/.test(name)).sort(([a],[b])=>a.localeCompare(b,undefined,{numeric:true}));if(!sheets.length)throw Error('В книге не найдены листы');
- return sheets.map(([name,xml])=>{const rows=[...xml.matchAll(/<row(?:\s[^>]*)?>[\s\S]*?<\/row>/g)].map(row=>[...row[0].matchAll(/<c(?:\s[^>]*)?>[\s\S]*?<\/c>/g)].map(cell=>{const x=cell[0],v=x.match(/<v>([\s\S]*?)<\/v>/),inline=x.match(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/);if(/\bt="s"/.test(x)&&v)return strings[Number(v[1])]||'';return xmlText(v?.[1]||inline?.[1]||'')}).join('\t'));return '['+name+']\n'+rows.join('\n')}).join('\n\n');
+ const targets=new Map();for(const m of (files.get('xl/_rels/workbook.xml.rels')||'').matchAll(/<Relationship\b[^>]*\/?\s*>/g)){const id=attr(m[0],'Id'),target=attr(m[0],'Target').replace(/^\/?xl\//,'');if(id&&/^worksheets\/sheet\d+\.xml$/.test(target))targets.set(id,'xl/'+target)}
+ const titles=new Map();for(const m of (files.get('xl/workbook.xml')||'').matchAll(/<sheet\s[^>]*\/?\s*>/g)){const target=targets.get(attr(m[0],'r:id')),title=attr(m[0],'name');if(target&&title)titles.set(target,title)}
+ return sheets.map(([name,xml])=>{const rows=[...xml.matchAll(/<row(?:\s[^>]*)?>[\s\S]*?<\/row>/g)].map(row=>[...row[0].matchAll(/<c(?:\s[^>]*)?>[\s\S]*?<\/c>/g)].map(cell=>{const x=cell[0],v=x.match(/<v>([\s\S]*?)<\/v>/),inline=x.match(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/),address=attr(x.slice(0,x.indexOf('>')+1),'r'),kind=attr(x.slice(0,x.indexOf('>')+1),'t');let value=kind==='s'&&v?strings[Number(v[1])]||'':xmlText(v?.[1]||inline?.[1]||'');if(kind==='b')value=value==='1'?'ИСТИНА':'ЛОЖЬ';return (address?address+': ':'')+value}).join('\t'));return '[Лист: '+(titles.get(name)||name)+']\n'+rows.join('\n')}).join('\n\n');
 }
 module.exports={parse};

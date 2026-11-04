@@ -28,7 +28,7 @@ async function answer(question){
  while(pending.length&&scanned<200){const dir=pending.pop();for(const item of await library.list(dir)){
   if(item.type==='folder'){pending.push(item.path);continue}if(!/\.(txt|md|csv|json|docx|xlsx|pdf)$/i.test(item.name))continue;if(++scanned>200){truncated=true;break}
   try{const d=await docs.read(item.path),lines=d.text.split(/\r?\n/);let page=null,sheet=null,best=null;
-   for(let i=0;i<lines.length;i++){const line=lines[i],pageMatch=line.match(/^\[Страница (\d+)\]$/),sheetMatch=line.match(/^\[(xl\/worksheets\/sheet\d+\.xml)\]$/);if(pageMatch){page=Number(pageMatch[1]);continue}if(sheetMatch){sheet=sheetMatch[1];continue}const found=new Set(terms(line));const score=wanted.filter(w=>found.has(w)).length;if(score&&(!best||score>best.score))best={path:item.path,line:i+1,...(page?{page}:{}),...(sheet?{sheet}:{}),excerpt:line.slice(0,400),score}}
+   for(let i=0;i<lines.length;i++){const line=lines[i],pageMatch=line.match(/^\[Страница (\d+)\]$/),sheetMatch=line.match(/^\[Лист: (.+)\]$/);if(pageMatch){page=Number(pageMatch[1]);continue}if(sheetMatch){sheet=sheetMatch[1];continue}const found=new Set(terms(line));const score=wanted.filter(w=>found.has(w)).length;if(score&&(!best||score>best.score))best={path:item.path,line:i+1,...(page?{page}:{}),...(sheet?{sheet}:{}),excerpt:line.slice(0,400),score}}
    if(best)matches.push(best);
   }catch{unreadable++}
  }}
