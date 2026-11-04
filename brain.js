@@ -1474,9 +1474,9 @@ function mount(host){
  // Только фактические события процесса: OCR, чтение, индексирование и поиск.
  const guardianHead=el('div','brain-fix-head'),guardianClose=el('button','brain-btn','✕');guardianClose.type='button';guardianClose.setAttribute('aria-label','Закрыть Хранителя');
  guardianHead.append(el('div','brain-k','✦ Хранитель библиотеки'),guardianClose);
- const guardianStatus=el('p','brain-guardian-status','Проверяю состояние…'),guardianCurrent=el('div','brain-guardian-current'),guardianCounts=el('p','brain-fix-ok'),guardianHistory=el('div','brain-guardian-history'),guardianJournal=el('div','brain-guardian-history');
- const guardianOpen=el('button','brain-btn','Открыть библиотеку');guardianOpen.type='button';guardianOpen.onclick=()=>window.TenmaApp?.go('library');
- guardianBox.append(guardianHead,guardianStatus,guardianCurrent,guardianCounts,guardianHistory,guardianJournal,guardianOpen);
+ const guardianStatus=el('p','brain-guardian-status','Проверяю состояние…'),guardianCurrent=el('div','brain-guardian-current'),guardianCounts=el('p','brain-fix-ok'),guardianHistory=el('div','brain-guardian-history'),guardianJournal=el('div','brain-guardian-history'),guardianMemoryInfo=el('div','brain-guardian-history');
+ const guardianOpen=el('button','brain-btn','Открыть память Хранителя');guardianOpen.type='button';guardianOpen.onclick=()=>window.TenmaApp?.openGuardian();
+ guardianBox.append(guardianHead,guardianStatus,guardianCurrent,guardianCounts,guardianMemoryInfo,guardianHistory,guardianJournal,guardianOpen);
  guardianClose.onclick=()=>{guardianBox.hidden=true;guardianStar.setAttribute('aria-expanded','false');guardianStar.focus()};
  guardianStar.onclick=()=>{guardianBox.hidden=!guardianBox.hidden;guardianStar.setAttribute('aria-expanded',String(!guardianBox.hidden));if(!guardianBox.hidden){guardianClose.focus();void pollGuardian()}};
  let guardianPending=false,guardianDisposed=false;
@@ -1494,8 +1494,8 @@ function mount(host){
    guardianCounts.textContent='Очередь: '+(counts.queued||0)+' · обработано: '+(counts.ready||0)+' · ошибки: '+(counts.error||0);
    const errors=Array.isArray(queue.errors)?queue.errors:[];for(const error of errors)guardianCurrent.append(el('p','brain-guardian-error',(error.path||'Файл')+': '+(error.error||'ошибка')));
    guardianHistory.replaceChildren(el('div','brain-k','Последние действия с момента запуска'),...(recent.length?recent.slice(0,6).map(event=>el('p','brain-fix-ok',new Date(event.finishedAt).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+' · '+(guardianKinds[event.kind]||'Операция')+(event.file?' · '+event.file:'')+' — '+(event.result==='error'?'ошибка'+(event.message?': '+event.message:''):event.result==='deferred'?'повторю после изменения':'готово'))):[el('p','brain-fix-ok','Пока действий не было.')]));
-   const journal=Array.isArray(data.journal)?data.journal:[];guardianJournal.replaceChildren(el('div','brain-k','Журнал библиотеки'),...(journal.length?journal.slice(0,6).map(event=>el('p','brain-fix-ok',new Date(event.at).toLocaleString('ru-RU')+' · '+(guardianJournalLabels[event.action]||'Действие')+(event.path?' · '+event.path:''))):[el('p','brain-fix-ok','Записей пока нет.')]));
-  }catch{if(!guardianDisposed){guardianStar.dataset.state='unknown';guardianStar.title='Хранитель библиотеки · нет связи';guardianStatus.textContent='Нет связи с локальным сервером';guardianCurrent.replaceChildren();guardianCounts.textContent='';guardianHistory.replaceChildren();guardianJournal.replaceChildren()}}finally{guardianPending=false}
+   const memory=data.memory;guardianMemoryInfo.replaceChildren(...(memory?[el('div','brain-k','Память Хранителя'),el('p','brain-fix-ok','Правил: '+memory.rules+' · фактов: '+memory.facts+' · предложений: '+memory.proposals),el('p','brain-fix-ok','Источников требуют проверки: '+memory.needsReview)]:[]));const journal=Array.isArray(data.journal)?data.journal:[];guardianJournal.replaceChildren(el('div','brain-k','Журнал библиотеки'),...(journal.length?journal.slice(0,6).map(event=>el('p','brain-fix-ok',new Date(event.at).toLocaleString('ru-RU')+' · '+(guardianJournalLabels[event.action]||'Действие')+(event.path?' · '+event.path:''))):[el('p','brain-fix-ok','Записей пока нет.')]));
+  }catch{if(!guardianDisposed){guardianStar.dataset.state='unknown';guardianStar.title='Хранитель библиотеки · нет связи';guardianStatus.textContent='Нет связи с локальным сервером';guardianCurrent.replaceChildren();guardianCounts.textContent='';guardianHistory.replaceChildren();guardianJournal.replaceChildren();guardianMemoryInfo.replaceChildren()}}finally{guardianPending=false}
  }
  const guardianPoll=setInterval(()=>{if(!document.hidden)void pollGuardian()},2000);void pollGuardian();
  const onWorkspace=()=>apply();

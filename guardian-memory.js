@@ -1,0 +1,19 @@
+'use strict';
+// Local guardian preferences and proposals; no model or network access.
+const fs=require('node:fs/promises'),path=require('node:path'),crypto=require('node:crypto');
+const FILE=process.env.TENMAYURIKA_GUARDIAN_MEMORY||path.join(__dirname,'data','guardian-memory.json');
+let chain=Promise.resolve();
+async function read(){try{const s=JSON.parse(await fs.readFile(FILE,'utf8'));if(!Array.isArray(s.rules)||!Array.isArray(s.history)||!Array.isArray(s.proposals))throw Error('Повреждена память Хранителя');return s}catch(e){if(e.code==='ENOENT')return {rules:[],history:[],proposals:[],documents:[]};throw e}}
+async function view(){await chain.catch(()=>{});return read()}
+function change(fn){const work=chain.catch(()=>{}).then(async()=>{const s=await read(),r=await fn(s);await fs.mkdir(path.dirname(FILE),{recursive:true});await fs.writeFile(FILE+'.tmp',JSON.stringify(s,null,2),{mode:0o600});await fs.rename(FILE+'.tmp',FILE);return r});chain=work;return work}
+function clean(value,max,label){if(typeof value!=='string'||!value.trim()||value.trim().length>max)throw new TypeError(label);return value.trim()}
+function note(s,action,detail={}){s.history.unshift({at:new Date().toISOString(),action,...detail});s.history=s.history.slice(0,200)}
+function saveRule(input){return change(s=>{const keyword=clean(input?.keyword,80,'Укажите слово до 80 символов'),folder=clean(input?.folder,180,'Укажите папку до 180 символов');if(/[\\/]|^\.{1,2}$/.test(folder))throw new TypeError('Укажите название одной папки');let rule;if(input.id){rule=s.rules.find(x=>x.id===input.id);if(!rule)throw new TypeError('Правило не найдено');Object.assign(rule,{keyword,folder})}else{rule={id:crypto.randomUUID(),keyword,folder};s.rules.unshift(rule)}note(s,'rule_saved',{keyword,folder});return rule})}
+function deleteRule(id){return change(s=>{const item=s.rules.find(x=>x.id===id);if(!item)throw new TypeError('Правило не найдено');s.rules=s.rules.filter(x=>x.id!==id);note(s,'rule_deleted',{keyword:item.keyword,folder:item.folder});return {ok:true}})}
+function remember(action,detail={}){return change(s=>{note(s,action,detail);return {ok:true}})}
+async function choose(file,text=''){const s=await view(),explicit=s.rules.find(x=>(file+'\n'+text.slice(0,8000)).toLocaleLowerCase('ru').includes(x.keyword.toLocaleLowerCase('ru')));if(explicit)return explicit;const name=file.split('/').pop(),move=s.history.find(x=>x.action==='moved'&&x.source?.split('/').pop()===name&&x.target?.split('/').pop()===name&&x.target.includes('/'));return move?{keyword:name,folder:move.target.split('/').slice(0,-1).join('/'),learned:true}:null}
+async function learnedName(file){const s=await view(),name=file.split('/').pop(),event=s.history.find(x=>x.action==='renamed'&&x.source?.split('/').pop()===name&&typeof x.target==='string');return event?event.target.split('/').pop():null}
+function setProposals(file,modified,size,items,metadata){return change(s=>{s.documents??=[];s.documents=s.documents.filter(x=>x.source!==file);if(metadata)s.documents.unshift({source:file,modified,size,...metadata});s.documents=s.documents.slice(0,200);s.proposals=s.proposals.filter(x=>x.source!==file);for(const item of items.slice(0,8))s.proposals.unshift({id:crypto.randomUUID(),source:file,modified,size,...item});s.proposals=s.proposals.slice(0,200);return {ok:true}})}
+function clearHistory(){return change(s=>{s.history=[];return {ok:true}})}
+function dismiss(id){return change(s=>{const item=s.proposals.find(x=>x.id===id);if(!item)throw new TypeError('Предложение не найдено');s.proposals=s.proposals.filter(x=>x.id!==id);note(s,'proposal_dismissed',{source:item.source});return {ok:true}})}
+module.exports={view,saveRule,deleteRule,remember,choose,learnedName,setProposals,dismiss,clearHistory};
