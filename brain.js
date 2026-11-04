@@ -200,7 +200,10 @@ function buildModel(ws,facts,conflicts,exp=[],topics=[]){
  else{const bySubject=new Map();for(const f of facts){const k=f.subject.toLocaleLowerCase();if(!bySubject.has(k))bySubject.set(k,{name:f.subject,list:[]});bySubject.get(k).list.push(f)}
   const subjects=[...bySubject.values()].sort((a,b)=>b.list.length-a.list.length);
   big=subjects.filter(s=>s.list.length>=2).slice(0,6);rest=subjects.filter(s=>!big.includes(s)).flatMap(s=>s.list)}
- const factItem=f=>({id:'f:'+f.id,title:f.subject+' — '+f.predicate+' → '+f.object,meta:'факт · '+(f.source_id||'')+' · уверенность '+f.confidence,ts:ts(f.observed_at),weight:.6+.6*(+f.confidence||0),fact:f,open:()=>app()?.go('facts')});
+ // Подпись факта: откуда известно, уверенность, время и вид, сила памяти.
+ const STAGE={dormant:'спит',fading:'угасает'};
+ const factMeta=f=>{const m=f.meta||{};return ['факт',m.origin||f.source_id||'','уверенность '+Math.round((+f.confidence||0)*100)+'%',m.past?'в прошлом':'',m.since?'с '+m.since:'',m.until?'до '+m.until:'',m.opinion?'мнение':'',m.span&&m.span!=='может меняться'?m.span:'',STAGE[f.stage]||''].filter(Boolean).join(' · ')};
+ const factItem=f=>({id:'f:'+f.id,title:f.subject+' — '+f.predicate+' → '+f.object,meta:factMeta(f),ts:ts(f.observed_at),weight:.6+.6*(+f.confidence||0),fact:f,open:()=>app()?.go('facts')});
  const factSub=s=>s.topic&&s.topic.parent?'выросла из «'+s.topic.parent+'»':s.topic&&s.topic.entities.length>1?'тема · '+s.topic.entities.slice(1,3).join(', '):[...new Set(s.list.map(f=>f.predicate))].slice(0,2).join(' · ');
  for(const s of big)add('fs:'+s.name.toLocaleLowerCase(),s.name.toLocaleLowerCase(),factSub(s),COLORS.facts,s.list.map(factItem),()=>app()?.go('facts'));
  add('facts','факты',rest.length+' '+plural(rest.length,'факт','факта','фактов'),COLORS.facts,rest.map(factItem),()=>app()?.go('facts'));
@@ -299,7 +302,7 @@ window.addEventListener('tenma:recall',e=>{const ids=recallIds(e.detail);recordR
 
 /* ---------- Монтирование ---------- */
 function mount(host){
- const cfg=Object.assign({paused:false,mode3d:false,labels:'all',clean:false,palette:'copper'},read(CFG_KEY,{}));
+ const cfg=Object.assign({paused:false,mode3d:false,labels:'all',clean:false,palette:'copper',thoughts:null,diaTab:'mind'},read(CFG_KEY,{}));
  usePalette(cfg.palette);
  const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};
  const stage=el('div','brain-stage'),canvas=el('canvas','brain-fx'),tip=el('div','brain-tip');tip.hidden=true;
@@ -316,7 +319,17 @@ function mount(host){
  const fsBtn=el('button','brain-btn brain-keep','⛶');fsBtn.type='button';fsBtn.title='На весь экран (выход — Esc)';fsBtn.setAttribute('aria-label','На весь экран');
  const viewBtn=el('button','brain-btn','⟲ Вид');viewBtn.type='button';viewBtn.title='Вернуть вид по центру (двойной щелчок по зоне — приблизить её)';
  const palBtn=el('button','brain-btn');palBtn.type='button';palBtn.title='Палитра роя: медь, лёд, неон';
- ctrl.append(find,btn3d,labelBtn,palBtn,viewBtn,resetBtn,pauseBtn,cleanBtn,fsBtn);top.append(bar,ctrl);
+ // Вид (3D, подписи, палитра, центр, пробуждение, пауза) — в одном меню, чтобы сверху не было ряда кнопок.
+ const menuWrap=el('div','brain-menu-wrap'),menuBtn=el('button','brain-btn','⋯ Вид'),menu=el('div','brain-menu');
+ menuBtn.type='button';menuBtn.title='Вид: 3D, подписи, палитра, центр, движение';menuBtn.setAttribute('aria-haspopup','true');menuBtn.setAttribute('aria-expanded','false');menu.hidden=true;
+ menu.append(btn3d,labelBtn,palBtn,viewBtn,resetBtn,pauseBtn);menuWrap.append(menuBtn,menu);
+ const setMenu=open=>{menu.hidden=!open;menuBtn.setAttribute('aria-expanded',String(open))};
+ menuBtn.onclick=e=>{e.stopPropagation();setMenu(menu.hidden)};
+ const onDocClick=e=>{if(!menu.hidden&&!menuWrap.contains(e.target))setMenu(false)};document.addEventListener('click',onDocClick);
+ // Мысли (живая лента) и время (как мозг рос по дням).
+ const thinkBtn=el('button','brain-btn','✧ Мысли');thinkBtn.type='button';thinkBtn.title='Живая лента: о чём я думаю прямо сейчас';
+ const timeBtn=el('button','brain-btn','◷ Время');timeBtn.type='button';timeBtn.title='Как мозг рос день за днём';
+ ctrl.append(find,thinkBtn,timeBtn,menuWrap,cleanBtn,fsBtn);top.append(bar,ctrl);
  const empty=el('div','brain-empty');empty.hidden=true;
  const fixBox=el('div','brain-fix');fixBox.hidden=true;fixBox.setAttribute('role','dialog');fixBox.setAttribute('aria-label','Разбор противоречий');
  // Почти-дубли и обзор памяти — такие же окна поверх роя.
@@ -326,7 +339,12 @@ function mount(host){
  const diaBtn=el('button','brain-btn','✦ Дневник');diaBtn.type='button';diaBtn.title='О чём мозг думал в простое: выводы, навыки из опыта, ваши предпочтения, сводки тем, причинные связи';
  const ovBtn=el('button','brain-btn','☰ Обзор');ovBtn.type='button';ovBtn.title='Обзор памяти: темы, самые связанные узлы, что менялось за неделю';
  ctrl.prepend(diaBtn);ctrl.prepend(ovBtn);ctrl.prepend(find);
- stage.append(glc,canvas,lab,grain,top,tip,empty,fixBox,dupBox,ovBox,diaBox);
+ // Панель «Мысли»: что делаю в голове — план ответа, подвопросы, сверка, догадки, вопросы, забывание.
+ const thBox=el('aside','brain-thoughts'),thHead=el('div','brain-k'),thList=el('ul','brain-th-list');thHead.append(el('span','','05 // мысли'),el('span','brain-th-live','● live'));thBox.append(thHead,thList);thBox.setAttribute('aria-label','Мысли');thBox.setAttribute('aria-live','polite');
+ // Ползунок времени.
+ const tmBox=el('div','brain-time'),tmPlay=el('button','brain-btn','▶'),tmRange=el('input'),tmLabel=el('span','brain-time-l'),tmClose=el('button','brain-btn','✕');
+ tmPlay.type=tmClose.type='button';tmPlay.setAttribute('aria-label','Проиграть рост');tmClose.setAttribute('aria-label','Вернуться в сегодня');tmRange.type='range';tmRange.min='0';tmRange.step='1';tmRange.setAttribute('aria-label','День');tmBox.hidden=true;tmBox.append(tmPlay,tmRange,tmLabel,tmClose);
+ stage.append(glc,canvas,lab,grain,top,thBox,tmBox,tip,empty,fixBox,dupBox,ovBox,diaBox);
  stage.setAttribute('role','img');
  const teach=el('form','brain-teach'),tIn=el('input'),tBtn=el('button','primary','Научить');
  tIn.placeholder='Научи меня: Анна | любит | зелёный чай';tIn.setAttribute('aria-label','Новый факт: субъект | связь | объект');tIn.maxLength=900;tBtn.type='submit';
@@ -463,6 +481,9 @@ function mount(host){
   // Сила складывается из вспоминаний в этом браузере и на сервере; польза (👍/👎) добавляет или убавляет.
   const r=recall[it.id],sv=srv[it.id],t=Math.max(it.ts||0,r?r.t:0,sv?sv.t:0),n=Math.max(r?r.n:0,sv?sv.n:0),age=t?(Date.now()-t)/DAY:30;
   if(it.id.startsWith('t:')&&!it.dim)return clamp(.75+(it.hot?.35:0),.75,1.25); // открытое дело всегда «тёплое»
+  // Спящие и угасающие факты (сила памяти на сервере) — тусклее.
+  const stageK=it.fact?.stage==='dormant'?.7:it.fact?.stage==='fading'?.45:1;
+  if(stageK<1)return clamp(stageK*(.12+.88*Math.exp(-age/21)+.12*Math.log2(1+n)),.08,1);
   return clamp(.12+.88*Math.exp(-age/21)+.12*Math.log2(1+n)+(sv?clamp(.08*(sv.ok-sv.fix),-.2,.2):0),.12,1.3);
  }
 
@@ -482,16 +503,24 @@ function mount(host){
 
  /* Обновление модели с сохранением уже живущих зон и нейронов. */
  let applied=false;
+ let timeCut=null,prevCut=null,timeSpan=null;
  function apply(){
   const ws=window.TenmaApp?.workspace||{notes:[],tasks:[]};
   model=buildModel(ws,facts,conflicts,exp,topics);
-  const alive=new Set();
+  // Ползунок времени: видны только записи, появившиеся до выбранного дня.
+  {let lo=Infinity;for(const l of model.lobes)for(const it of l.items)if(it.ts&&it.ts<lo)lo=it.ts;timeSpan=Number.isFinite(lo)?{from:lo,to:Date.now()}:null}
+  if(timeCut){for(const l of model.lobes)l.items=l.items.filter(it=>!it.ts||it.ts<=timeCut);model.lobes=model.lobes.filter(l=>l.items.length);model.events=model.events.filter(e=>!e.t||e.t<=timeCut)}
+  const nowT=timeCut||Date.now(),alive=new Set();
   for(const l of model.lobes){
    alive.add(l.id);
    let s=lobeState.get(l.id);
-   const n=l.items.length,want=Math.round(clamp(500+560*Math.log10(1+n),600,2400)); // 10 → ~1100, 100 → ~1600, 1000 → ~2200
+   // Зрелость зоны: молодая (мало записей, появилась недавно) — тусклее и реже, зрелая — плотная.
+   {let first=Infinity;for(const it of l.items)if(it.ts&&it.ts<first)first=it.ts;const age=Number.isFinite(first)?(nowT-first)/DAY:30;l.mature=clamp(.3+.22*Math.log10(1+l.items.length)+.45*Math.min(1,Math.max(0,age)/30),.3,1);
+    if(l.id!=='conflicts')l.sub=l.sub+(l.mature<.5?' · молодая':l.mature>=.85?' · зрелая':'')}
+   const n=l.items.length,want=Math.round(clamp(500+560*Math.log10(1+n),600,2400)*(.55+.45*l.mature)); // 10 → ~1100, 100 → ~1600, 1000 → ~2200
    if(!s){s={parts:makeParticles(want,hash(l.id),MULT.lobe),want,pulse:0,x:0,y:0,r:0,fil:[],streaks:[],sats:[],seed:hash(l.id)};lobeState.set(l.id,s);
-    if(applied&&!firstVisit&&!reduceQuery.matches&&l.items.some(it=>!seen.has(it.id))){s.birth=performance.now();s.from=l.id.startsWith('fs:')&&lobeState.has('facts')?'facts':null;coreKind='деление';coreText='новая зона «'+l.label+'»';coreTextT=4}}
+    if(timeCut&&applied&&!reduceQuery.matches){s.birth=performance.now();s.from=null}
+    else if(applied&&!firstVisit&&!reduceQuery.matches&&l.items.some(it=>!seen.has(it.id))){s.birth=performance.now();s.from=l.id.startsWith('fs:')&&lobeState.has('facts')?'facts':null;coreKind='деление';coreText='новая зона «'+l.label+'»';coreTextT=4}}
    else if(Math.abs(s.want-want)>120){glr?.free(s.parts);s.parts=makeParticles(want,hash(l.id),MULT.lobe);s.want=want}
    const r=rng(s.seed^0x9e37);
    const nf=Math.round(clamp(30+n*4,30,90));
@@ -507,6 +536,8 @@ function mount(host){
       // Отростки: 3–6 ветвей-дендритов, у части — по 1–2 веточки, на концах синапсы.
       den:Array.from({length:3+Math.floor(q()*4)},()=>({a:TAU*q(),l:.7+.9*q(),c:(q()-.5)*.9,kids:Array.from({length:Math.floor(q()*3)},()=>({at:.45+.35*q(),a:(q()-.5)*1.6,l:.3+.4*q()}))}))};nn.base=nn.den.length;neurons.set(it.id,nn)}
     nn.item=it;nn.lobe=l;alive.add(it.id);it.str=strength(it);grow(nn,false);
+    // Шаг времени вперёд: записи этого дня прилетают импульсами из ядра.
+    if(timeCut&&prevCut&&it.ts>prevCut&&it.ts<=timeCut&&impulses.length<30)impulses.push({lobe:l,item:it,u:0,f:Math.floor(Math.random()*l.state.fil.length||0),recall:true});
     // Новая запись: импульс несёт её из ядра, а на месте нейрон распускается (до прилёта он скрыт).
     if(!seen.has(it.id)){seen.add(it.id);if(!firstVisit){if(impulses.length<24){nn.pending=true;impulses.push({lobe:l,item:it,u:0,f:Math.floor(Math.random()*l.state.fil.length),big:true})}else sprout(nn);coreText=it.title;coreKind=l.label;coreTextT=4.5}}
    }
@@ -536,7 +567,8 @@ function mount(host){
    l.ranked=[...l.items].sort((a,b)=>(b.str??1)*b.weight-(a.str??1)*a.weight);
   }
   linkCount=new Map();for(const [a,b] of model.links){linkCount.set(a,(linkCount.get(a)||0)+1);linkCount.set(b,(linkCount.get(b)||0)+1)}
-  if(seen.size>4000)seen=new Set([...neurons.keys()]);
+  prevCut=timeCut;
+  if(seen.size>4000&&!timeCut)seen=new Set([...neurons.keys()]);
   write(SEEN_KEY,[...seen]);
   coList=buildCo();
   applied=true;renderHud();dirty=true;
@@ -778,7 +810,7 @@ function mount(host){
   // Деление: перемычка из волокон между родительской зоной и новой, тает по мере отхода.
   if(s.split>0){ctx.strokeStyle=rgba(l.color,.5*s.split*G.b);ctx.lineWidth=dpr*(1+s.r*.15*s.split);ctx.beginPath();ctx.moveTo(s.fx*dpr,s.fy*dpr);ctx.lineTo(s.x*dpr,s.y*dpr);ctx.stroke();
    const z=s.r*2.2*dpr*s.split;ctx.globalAlpha=.6*s.split;ctx.drawImage(sprite,(s.fx+s.x)/2*dpr-z/2,(s.fy+s.y)/2*dpr-z/2,z,z);ctx.globalAlpha=1}
-  const rot=s.ang,wob=still()?0:simT,warm=.55+.45*Math.min(1,l.str??1),blur=blurOf(s.depth,G),bz=1+blur*.12,ba=1/(1+blur*.35);
+  const rot=s.ang,wob=still()?0:simT,warm=(.55+.45*Math.min(1,l.str??1))*(.6+.4*(l.mature??1)),blur=blurOf(s.depth,G),bz=1+blur*.12,ba=1/(1+blur*.35);
   for(const sat of s.sats){const a=sat.a+wob*sat.sp,sx=s.x+Math.cos(a)*s.r*sat.d,sy=s.y+Math.sin(a)*s.r*sat.d;
    ctx.strokeStyle=rgba(l.bad?[200,200,210]:l.color,.18*G.b*dim*ba);ctx.lineWidth=dpr*.7;ctx.beginPath();ctx.moveTo(s.x*dpr,s.y*dpr);ctx.lineTo(sx*dpr,sy*dpr);ctx.stroke();
    cloud(satParts,sx,sy,s.r*sat.k,rot*1.3+sat.a,P,.95*G.b*dim*warm,.9*G.b*dim*warm,Math.round(satParts.length*quality),blur,lightTo(sx,sy,G))}
@@ -983,7 +1015,7 @@ function mount(host){
  function zoomLobe(l){camT.zoom=clamp(Math.min(W,H)*.32/Math.max(8,l.state.r/cam.zoom),2,5);camT.px=-l.state.qx;camT.py=-l.state.qy}
  canvas.addEventListener('click',e=>{if(moved){moved=false;return}const [x,y]=local(e),hit=pick(x,y);pinned=hit;hover=hit&&hit.type==='neuron'?hit.n.item:null;showTip(hit,x,y,true);if(hit&&hit.type==='lobe'){hit.l.state.pulse=1;if(hit.l.bad){tip.hidden=true;pinned=null;fixBox.hidden=false;renderFix()}}dirty=true});
  document.addEventListener('keydown',onKey);
- function onKey(e){if(e.key!=='Escape')return;if(!fixBox.hidden){fixBox.hidden=true;return}if(!dupBox.hidden){dupBox.hidden=true;return}if(!ovBox.hidden){ovBox.hidden=true;return}if(focusN){const l=focusN.lobe;focusN=null;clearImpact();zoomLobe(l);dirty=true;return}if(isFs()){if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});stage.classList.remove('fs');setFs();return}if(pinned){pinned=null;tip.hidden=true;hover=null;clearImpact();dirty=true}}
+ function onKey(e){if(e.key!=='Escape')return;if(!menu.hidden){setMenu(false);menuBtn.focus();return}if(!fixBox.hidden){fixBox.hidden=true;return}if(!diaBox.hidden){diaBox.hidden=true;return}if(!dupBox.hidden){dupBox.hidden=true;return}if(!ovBox.hidden){ovBox.hidden=true;return}if(focusN){const l=focusN.lobe;focusN=null;clearImpact();zoomLobe(l);dirty=true;return}if(isFs()){if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});stage.classList.remove('fs');setFs();return}if(pinned){pinned=null;tip.hidden=true;hover=null;clearImpact();dirty=true}}
 
  /* ---------- Обучение: новый факт прямо отсюда ---------- */
  teach.onsubmit=async e=>{
@@ -1188,20 +1220,112 @@ function mount(host){
   const kindName={fact:'факт',note:'заметка',task:'дело'};
   const end=x=>(kindName[x.kind]||x.kind)+' «'+(x.title||'…')+'»';
   const hot=(m.working?.facts?.length||0)+(m.working?.notes?.length||0);
-  diaBox.replaceChildren(head,status,
-   ...(m.core?[coreSec(m.core,sec)]:[]),
-   ...(m.onboarding?.active?[onboardSec(m.onboarding,sec,row)]:[]),
-   ...(m.review?[reviewRow(m.review)]:[]),
-   sec('дневник',...(m.diary.length?m.diary.slice(0,6).map(d=>row(atText(d.at)+' · '+d.text)):[el('div','brain-fix-ok','Пока пусто.')])),
+  // Дневник по вкладкам: мышление, сердцевина, память, навыки, рост.
+  const TABS={mind:'мышление',self:'сердцевина',memory:'память',skills:'навыки',growth:'рост'},tab=TABS[cfg.diaTab]?cfg.diaTab:'mind';
+  const tabBar=el('div','brain-tabs');tabBar.setAttribute('role','tablist');
+  for(const [k,v] of Object.entries(TABS)){const b=el('button','brain-tab'+(k===tab?' on':''),v);b.type='button';b.setAttribute('role','tab');b.setAttribute('aria-selected',String(k===tab));b.onclick=()=>{cfg.diaTab=k;write(CFG_KEY,cfg);void renderDiary()};tabBar.append(b)}
+  let body=[];
+  if(tab==='mind')body=[status,...await mindSecs(sec,row)];
+  else if(tab==='self')body=[...(m.core?[coreSec(m.core,sec)]:[]),...(m.onboarding?.active?[onboardSec(m.onboarding,sec,row)]:[]),...(m.review?[reviewRow(m.review)]:[]),
+   sec('как вы просили отвечать',...m.preferences.map(p=>row(p.text,()=>postJson('/api/brain/preferences/remove',{id:p.id}),'Убрать предпочтение')),prefForm)];
+  else if(tab==='memory')body=[sec('дневник',...(m.diary.length?m.diary.slice(0,8).map(d=>row(atText(d.at)+' · '+d.text)):[el('div','brain-fix-ok','Пока пусто.')])),
    ...(m.insights.length?[sec('выводы',...m.insights.slice(0,6).map(i=>row(i.text)))]:[]),
-   sec('навыки из опыта',...(m.skills.length?m.skills.slice(0,10).map(k=>row((k.status==='retired'?'(на покое) ':'')+k.rule+' · ✓'+k.ok+' ✎'+k.fix,()=>postJson('/api/brain/skills/remove',{id:k.id}),'Убрать навык')):[el('div','brain-fix-ok','Появятся, когда вы подтвердите 👍 несколько похожих ответов.')])),
-   sec('как вы просили отвечать',...m.preferences.map(p=>row(p.text,()=>postJson('/api/brain/preferences/remove',{id:p.id}),'Убрать предпочтение')),prefForm),
    ...(m.summaries.length?[sec('сводки тем',...m.summaries.slice(0,8).map(t=>row(t.summary.startsWith(t.label)?t.summary:t.label+' · '+t.summary)))]:[]),
    ...(m.links.count?[sec('причинные связи ('+m.links.count+')',...m.links.recent.slice(0,10).map(l=>row(end(l.a)+' → '+l.type+' → '+end(l.b))))]:[]),
-   ...(m.memskills?[mskillSec(m.memskills,sec,row)]:[]),
-   ...(m.growth?[growthSec(m.growth,sec,row)]:[]),
-   ...(hot?[el('p','brain-fix-ok','В рабочей памяти разговора сейчас '+hot+' '+plural(hot,'запись','записи','записей')+'.')]:[]));
+   ...(hot?[el('p','brain-fix-ok','В рабочей памяти разговора сейчас '+hot+' '+plural(hot,'запись','записи','записей')+'.')]:[])];
+  else if(tab==='skills')body=[...(m.memskills?[await examSec(sec),mskillSec(m.memskills,sec,row)]:[]),
+   sec('навыки из опыта',...(m.skills.length?m.skills.slice(0,10).map(k=>row((k.status==='retired'?'(на покое) ':'')+k.rule+' · ✓'+k.ok+' ✎'+k.fix,()=>postJson('/api/brain/skills/remove',{id:k.id}),'Убрать навык')):[el('div','brain-fix-ok','Появятся, когда вы подтвердите 👍 несколько похожих ответов.')]))];
+  else body=[...(m.growth?[growthSec(m.growth,sec,row)]:[]),matureSec(sec)];
+  if(diaBox.hidden)return;
+  diaBox.replaceChildren(head,tabBar,...body);
  }
+ // Мышление: настройки, догадки, вопросы о вас, забытое и предложения по своей инициативе.
+ async function mindSecs(sec,row){
+  let t;try{const r=await fetch('/api/brain/thinking');if(!r.ok)throw 0;t=await r.json()}catch{return [el('p','brain-fix-ok','Не удалось открыть мышление.')]}
+  const btn=(text,label,fn)=>{const b=el('button','brain-btn',text);b.type='button';b.title=label;b.setAttribute('aria-label',label);b.onclick=async()=>{b.disabled=true;try{await fn()}catch{}void renderDiary();window.dispatchEvent(new CustomEvent('tenma:memory'))};return b};
+  const out=[];
+  const set=el('div','brain-mind-set');
+  for(const [k,label] of Object.entries(t.labels||{})){const lb=el('label','brain-check'),cb=el('input');cb.type='checkbox';cb.checked=t.settings[k]!==false;cb.onchange=async()=>{try{await postJson('/api/brain/settings',{key:k,value:cb.checked})}catch{}};lb.append(cb,el('span','',label));set.append(lb)}
+  out.push(sec('как я думаю',el('div','brain-fix-ok','Всё это я делаю сама. Лишнее можно выключить.'),set));
+  const open=(t.guesses||[]).filter(g=>g.status==='open'),gs=t.guessStats||{};
+  const gk=[el('div','brain-fix-ok','Предполагаю то, чего мне не говорили, и проверяю: новыми фактами или вопросом. Подтвердилось '+(gs.confirmed||0)+', не подтвердилось '+(gs.rejected||0)+'.')];
+  for(const g of open.slice(0,8)){const r=el('div','brain-dia-row');r.append(el('span','brain-fix-ok','💡 '+g.subject+' — '+g.predicate+' → '+g.object+' · '+Math.round(g.confidence*100)+'%'+(g.why?' ('+trim(g.why,90)+')':'')),btn('✓','Верно',()=>postJson('/api/brain/guesses/answer',{id:g.id,yes:true})),btn('✗','Неверно',()=>postJson('/api/brain/guesses/answer',{id:g.id,yes:false})));gk.push(r)}
+  if(!open.length)gk.push(el('div','brain-fix-ok','Открытых догадок нет — новые появятся, когда я поразмышляю.'));
+  out.push(sec('догадки',...gk));
+  const qs=(t.questions||[]).filter(q=>q.status==='open'||q.status==='asked'),done=(t.questions||[]).filter(q=>q.status==='answered').slice(0,3);
+  const qk=[el('div','brain-fix-ok','Спрашиваю в разговоре по одному, не чаще раза в несколько сообщений.')];
+  for(const q of qs.slice(0,8)){const r=el('div','brain-dia-row');r.append(el('span','brain-fix-ok','❓ '+q.text+(q.status==='asked'?' (спросила)':'')+(q.reason?' — '+trim(q.reason,80):'')),btn('✕','Не спрашивать',()=>postJson('/api/brain/questions/dismiss',{id:q.id})));qk.push(r)}
+  for(const q of done)qk.push(row('✓ «'+trim(q.text,60)+'» → '+trim(q.answer||'',80)));
+  if(!qs.length&&!done.length)qk.push(el('div','brain-fix-ok','Пока ни о чём не хочу спросить.'));
+  out.push(sec('что хочу узнать о вас',...qk));
+  const st=t.strength||{},fk=[el('div','brain-fix-ok','Сила памяти: действуют '+(st.active||0)+', спят '+(st.dormant||0)+', угасают '+(st.fading||0)+'. Что давно не вспоминали, сначала засыпает, потом угасает и забывается. Людей, вас и то, чему вы научили вручную, я не забываю.')];
+  for(const f of (t.forgotten||[]).slice(0,8)){const r=el('div','brain-dia-row');r.append(el('span','brain-fix-ok','🌫 '+f.subject+' — '+f.predicate+' → '+f.object),btn('Вернуть','Вспомнить снова',()=>postJson('/api/brain/forgotten/restore',{ids:[f.id]})));fk.push(r)}
+  out.push(sec('забывание',...fk));
+  const SN={new:'ещё не показала',shown:'предложила',accepted:'вы согласились',dismissed:'не надо'};
+  const sg=(t.suggestions||[]).slice(0,6);
+  out.push(sec('предлагаю сама',...(sg.length?sg.map(x=>row('💡 '+x.text+' · '+(SN[x.status]||x.status))):[el('div','brain-fix-ok','Смотрю на дела и даты: просроченное, важное на завтра, дни рождения. Пока предложить нечего.')])));
+  return out;
+ }
+ // График самоэкзамена: доля вопросов, на которые нашла ответ, по дням.
+ async function examSec(sec){
+  let tests=[];try{const r=await fetch('/api/brain/memskills');if(r.ok)tests=(await r.json()).selftests||[]}catch{}
+  if(!tests.length)return sec('самоэкзамен по дням',el('div','brain-fix-ok','Ещё не сдавала. Начну в простое, когда в переписке будет о чём себя спросить.'));
+  const days=new Map();for(const x of tests){const d=String(x.at).slice(0,10);const v=days.get(d)||{n:0,ok:0};v.n++;if(x.passed)v.ok++;days.set(d,v)}
+  const list=[...days].sort((a,b)=>a[0].localeCompare(b[0])).slice(-14),W2=320,H2=90,P=8;
+  const NS='http://www.w3.org/2000/svg',svg=document.createElementNS(NS,'svg');svg.setAttribute('viewBox','0 0 '+W2+' '+H2);svg.setAttribute('class','brain-exam');svg.setAttribute('role','img');
+  const x=i=>P+(list.length<2?(W2-2*P)/2:i*(W2-2*P)/(list.length-1)),y=v=>H2-P-v*(H2-2*P);
+  for(const v of [0,.5,1]){const l=document.createElementNS(NS,'line');l.setAttribute('x1',P);l.setAttribute('x2',W2-P);l.setAttribute('y1',y(v));l.setAttribute('y2',y(v));l.setAttribute('class','grid');svg.append(l)}
+  const pts=list.map(([,v],i)=>x(i)+','+y(v.ok/v.n)).join(' ');const pl=document.createElementNS(NS,'polyline');pl.setAttribute('points',pts);pl.setAttribute('class','line');svg.append(pl);
+  list.forEach(([d,v],i)=>{const c=document.createElementNS(NS,'circle');c.setAttribute('cx',x(i));c.setAttribute('cy',y(v.ok/v.n));c.setAttribute('r',3);const tt=document.createElementNS(NS,'title');tt.textContent=d+': '+v.ok+' из '+v.n;c.append(tt);svg.append(c)});
+  const lastV=list[list.length-1][1],firstV=list[0][1],delta=Math.round((lastV.ok/lastV.n-firstV.ok/firstV.n)*100);
+  svg.setAttribute('aria-label','Самоэкзамен: последний день '+Math.round(lastV.ok/lastV.n*100)+'%');
+  return sec('самоэкзамен по дням',svg,el('div','brain-fix-ok','Последний день: '+Math.round(lastV.ok/lastV.n*100)+'% ('+lastV.ok+' из '+lastV.n+')'+(list.length>1?', '+(delta>=0?'+':'')+delta+' п. с '+list[0][0].slice(5).split('-').reverse().join('.'):'')+'.'));
+ }
+ // Зрелость зон: молодые тусклее и реже, зрелые плотнее.
+ function matureSec(sec){
+  const ls=[...model.lobes].filter(l=>!l.bad).sort((a,b)=>(b.mature||0)-(a.mature||0));
+  return sec('зрелость зон',...(ls.length?ls.slice(0,10).map(l=>{const r=el('div','brain-mature');const bar=el('i');bar.style.width=Math.round((l.mature||0)*100)+'%';bar.style.background=rgba(l.color,.85);r.append(el('span','',l.label),el('b','',''),el('small','',l.items.length+' · '+Math.round((l.mature||0)*100)+'%'));r.children[1].append(bar);return r}):[el('div','brain-fix-ok','Зон пока нет.')]));
+ }
+ /* ---------- Мысли: живая лента ---------- */
+ let thLast=0,thFirst=true;
+ function showThoughts(){const on=cfg.thoughts??wideQuery.matches;thBox.hidden=!on;thinkBtn.setAttribute('aria-pressed',String(on));thinkBtn.classList.toggle('on',on)}
+ thinkBtn.onclick=()=>{cfg.thoughts=thBox.hidden;write(CFG_KEY,cfg);showThoughts();if(!thBox.hidden)void pollThoughts()};
+ async function pollThoughts(){
+  if(thBox.hidden||document.hidden||!host.isConnected)return;
+  let d;try{const r=await fetch('/api/brain/thoughts?since='+thLast+'&limit=30');if(!r.ok)return;d=await r.json()}catch{return}
+  const items=d.items||[];
+  if(!items.length){if(!thList.children.length)thList.append(el('li','brain-muted','Пока тихо. Мысли появятся, когда я отвечу или поразмышляю.'));thFirst=false;return}
+  thList.querySelector('.brain-muted')?.remove();
+  for(const t of items){thLast=Math.max(thLast,t.id);const li=el('li','th-'+t.kind);li.append(el('span','brain-th-k',t.label),el('span','brain-th-t',t.text),el('time','',when(Date.parse(t.at))));li.title=t.text;thList.prepend(li);
+   if(!thFirst&&!reduceQuery.matches){li.classList.add('new');coreKind=t.label;coreText=trim(t.text,42);coreTextT=3;core.pulse=Math.max(core.pulse,.6);if(model.lobes.length&&impulses.length<30){const l=model.lobes[Math.floor(Math.random()*model.lobes.length)];impulses.push({lobe:l,u:0,f:Math.floor(Math.random()*l.state.fil.length)})}dirty=true}}
+  while(thList.children.length>12)thList.lastChild.remove();
+  thFirst=false;
+ }
+ const thTimer=setInterval(()=>void pollThoughts(),4000);
+ /* ---------- Время: как мозг рос день за днём ---------- */
+ const dayOf=t=>{const d=new Date(t);d.setHours(0,0,0,0);return d.getTime()};
+ let tmTimer=0;
+ function setDay(i){
+  if(!timeSpan)return;const max=+tmRange.max,end=dayOf(timeSpan.from)+i*DAY+DAY-1;
+  timeCut=i>=max?null:end;apply();
+  const n=model.lobes.reduce((a,l)=>a+l.items.length,0);
+  tmLabel.textContent=new Date(Math.min(end,Date.now())).toLocaleDateString('ru-RU',{day:'numeric',month:'short',year:'2-digit'})+' · '+n+' '+plural(n,'нейрон','нейрона','нейронов')+' · '+model.lobes.length+' '+plural(model.lobes.length,'зона','зоны','зон');
+ }
+ function stopPlay(){clearInterval(tmTimer);tmTimer=0;tmPlay.textContent='▶';tmPlay.setAttribute('aria-label','Проиграть рост')}
+ function openTime(){
+  if(!timeSpan){tmLabel.textContent='Пока нечего показывать';tmBox.hidden=false;return}
+  const days=Math.max(0,Math.round((dayOf(Date.now())-dayOf(timeSpan.from))/DAY));tmRange.max=String(days);tmRange.value=String(days);tmBox.hidden=false;timeBtn.setAttribute('aria-pressed','true');timeBtn.classList.add('on');setDay(days);
+ }
+ function closeTime(){stopPlay();tmBox.hidden=true;timeBtn.setAttribute('aria-pressed','false');timeBtn.classList.remove('on');if(timeCut){timeCut=null;apply()}}
+ timeBtn.onclick=()=>tmBox.hidden?openTime():closeTime();
+ tmClose.onclick=closeTime;
+ tmRange.oninput=()=>{stopPlay();setDay(+tmRange.value)};
+ tmPlay.onclick=()=>{
+  if(tmTimer){stopPlay();return}
+  const max=+tmRange.max;if(+tmRange.value>=max)tmRange.value='0';setDay(+tmRange.value);
+  const step=Math.max(1,Math.ceil(max/60));tmPlay.textContent='❚❚';tmPlay.setAttribute('aria-label','Пауза');
+  tmTimer=setInterval(()=>{const v=Math.min(max,+tmRange.value+step);tmRange.value=String(v);setDay(v);if(v>=max)stopPlay()},reduceQuery.matches?900:420);
+ };
  // Сердцевина: три блока, которые всегда в подсказке. Можно поправить руками и вернуть прежнюю версию.
  const srcName={seed:'начальное',chat:'сама в разговоре',reflect:'пересмотрела',review:'из разбора',user:'вы',rules:'из фактов'};
  function coreSec(blocks,sec){
@@ -1317,8 +1441,8 @@ function mount(host){
   fpsT+=dt;fpsN++;if(fpsT>=1.2){const fps=fpsN/fpsT;if(fps<(calm?22:42)&&quality>.25)quality*=.8;else if(fps>(calm?27:56)&&quality<baseQ)quality=Math.min(baseQ,quality*1.1);
    slowN=glr&&glMode!=='force'&&quality<=.26&&fps<20?slowN+1:0;if(slowN>=3){console.warn('Мозг: WebGL слишком медленный, перехожу на 2D');dropGL()}fpsT=0;fpsN=0}
  }
- function destroy(){io?.disconnect();cancelAnimationFrame(raf);clearInterval(poll);ro.disconnect();hudRo.disconnect();window.removeEventListener('tenma:workspace',onWorkspace);window.removeEventListener('tenma:memory',onMemory);wideQuery.removeEventListener('change',onWide);document.removeEventListener('keydown',onKey);document.removeEventListener('fullscreenchange',onFsChange);document.documentElement.classList.remove('brain-fs-lock');window.removeEventListener('tenma:thinking',onThinking);window.removeEventListener('tenma:recall',onRecall);window.removeEventListener('tenma:learn',onLearn);window.removeEventListener('tenma:experience',onExperience);glr?.destroy()}
- checkSleep();setPalette();placeHud();resize();apply();renderLearn();loadFacts();raf=requestAnimationFrame(frame);
+ function destroy(){io?.disconnect();cancelAnimationFrame(raf);clearInterval(poll);clearInterval(thTimer);clearInterval(tmTimer);document.removeEventListener('click',onDocClick);ro.disconnect();hudRo.disconnect();window.removeEventListener('tenma:workspace',onWorkspace);window.removeEventListener('tenma:memory',onMemory);wideQuery.removeEventListener('change',onWide);document.removeEventListener('keydown',onKey);document.removeEventListener('fullscreenchange',onFsChange);document.documentElement.classList.remove('brain-fs-lock');window.removeEventListener('tenma:thinking',onThinking);window.removeEventListener('tenma:recall',onRecall);window.removeEventListener('tenma:learn',onLearn);window.removeEventListener('tenma:experience',onExperience);glr?.destroy()}
+ checkSleep();setPalette();placeHud();resize();apply();renderLearn();loadFacts();showThoughts();void pollThoughts();raf=requestAnimationFrame(frame);
  return {destroy};
 }
 window.TenmaBrain={mount};

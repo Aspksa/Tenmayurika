@@ -41,16 +41,17 @@ async function generate({complete=null}={}){
  const facts=memory.queryFacts({limit:2000}).filter(f=>!f.valid_to),now=Date.now();
  // Пробелы: сущность упоминается объектом в нескольких фактах, а о ней самой почти ничего.
  const asSubject=new Map(),asObject=new Map(),names=new Map();
- for(const f of facts){const s=predicates.entityKey(f.subject),o=predicates.entityKey(f.object);asSubject.set(s,(asSubject.get(s)||0)+1);asObject.set(o,(asObject.get(o)||0)+1);if(!names.has(o))names.set(o,f.object)}
+ // Места («живёт в Казани») — не пробел в знаниях: о городе спрашивать незачем.
+ for(const f of facts){const s=predicates.entityKey(f.subject),o=predicates.entityKey(f.object);asSubject.set(s,(asSubject.get(s)||0)+1);if(/^(живёт в|находится в|живу в)$/.test(f.relation)||/^жив/.test(predicates.clean(f.predicate)))continue;asObject.set(o,(asObject.get(o)||0)+1);if(!names.has(o))names.set(o,f.object)}
  const gaps=[...asObject].filter(([k,n])=>n>=2&&(asSubject.get(k)||0)<=1&&k!=='я'&&/^\p{Lu}/u.test(names.get(k)||'')).sort((a,b)=>b[1]-a[1]).slice(0,2);
  for(const [k,n] of gaps)push({text:'Расскажи про «'+names.get(k)+'»: что это или кто это для тебя?',about:names.get(k),reason:'упоминается '+n+' раза, а знаю мало',kind:'gap',ref:'gap:'+k,weight:Math.min(.8,.35+.1*n)});
  // Неуверенное: факт с уверенностью ниже 0,75.
- for(const f of facts.filter(f=>Number(f.confidence)<.75).slice(0,2))push({text:'Правильно ли я помню: '+f.subject+' — '+f.predicate+' '+f.object+'?',about:f.subject,reason:'не уверена ('+Math.round(f.confidence*100)+'%)',kind:'check',ref:f.id,weight:.45});
+ for(const f of facts.filter(f=>Number(f.confidence)<.75).slice(0,2))push({text:'Правильно ли я помню: «'+f.subject+' — '+f.predicate+' '+f.object+'»?',about:f.subject,reason:'не уверена ('+Math.round(f.confidence*100)+'%)',kind:'check',ref:f.id,weight:.45});
  // Давнее меняющееся: где живёт, где работает, сказано давно.
  for(const f of facts.filter(f=>['живёт в','работает в','учится в'].includes(f.relation)&&f.polarity>0&&now-Date.parse(f.observed_at)>STALE_DAYS*864e5).slice(0,1))
   push({text:(predicates.entityKey(f.subject)==='я'?'Ты всё ещё ':f.subject+' всё ещё ')+f.predicate+' '+f.object+'?',about:f.subject,reason:'сказано давно, могло измениться',kind:'stale',ref:f.id,weight:.4});
  // Догадки с достаточной уверенностью проверяются вопросом.
- for(const g of guesses.list('open',10).filter(g=>g.confidence>=.5).slice(0,2))push({text:'Мне кажется, '+(predicates.entityKey(g.subject)==='я'?'ты':g.subject)+' '+g.predicate+' '+g.object+'. Это так?',about:g.subject,reason:'догадка: '+(g.why||''),kind:'guess',ref:g.id,weight:.3+.5*g.confidence});
+ for(const g of guesses.list('open',10).filter(g=>g.confidence>=.5).slice(0,2))push({text:'Есть догадка: «'+g.subject+' — '+g.predicate+' '+g.object+'». Я угадала?',about:g.subject,reason:'догадка: '+(g.why||''),kind:'guess',ref:g.id,weight:.3+.5*g.confidence});
  if(complete&&made.length<2){try{
   let human='';try{human=require('./core').get('human').body}catch{}
   const msg=await complete({messages:[{role:'system',content:'Ты помогаешь ассистентке лучше понять человека. Предложи до двух тёплых, не навязчивых вопросов, ответы на которые помогут ей помогать (цели, важные люди, привычки, что радует). Не спрашивай о том, что уже известно, и о чувствительном (здоровье, деньги, политика, религия). Строки: QUESTION: вопрос на «ты» | о ком или о чём | зачем. Если нечего — NONE.'},

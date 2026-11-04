@@ -12,6 +12,7 @@ const predicates=require('./predicates');
 const thoughts=require('./thoughts');
 const {use}=require('./brain-db');
 const MAX_OPEN=12,PER_RUN=3,EXPIRE_DAYS=30;
+const SYMMETRIC=new Set(['знает','дружит с','женат на']);
 const key=s=>predicates.entityKey(s);
 function list(status=null,limit=30){
  return use(db=>status?db.prepare('SELECT * FROM memory_guesses WHERE status=? ORDER BY updated_at DESC LIMIT ?').all(status,limit):db.prepare('SELECT * FROM memory_guesses ORDER BY updated_at DESC LIMIT ?').all(limit)).map(r=>({...r,evidence:JSON.parse(r.evidence||'[]')}));
@@ -41,7 +42,7 @@ function byRules(facts){
  // Общий тип любимого: «любит Дюну», «любит Солярис» и оба — фильмы → интересуется фильмами.
  const types=new Map(use(db=>{try{return db.prepare('SELECT key,type FROM memory_entity_types').all()}catch{return []}}).map(r=>[r.key,r.type]));
  const likes=new Map();
- for(const f of facts)if(f.relation==='любит'&&f.polarity>0){const t=types.get(key(f.object));if(!t||/^(человек|люди|место|город)$/.test(t))continue;const k=key(f.subject)+'|'+t;if(!likes.has(k))likes.set(k,{s:f.subject,t,list:[]});likes.get(k).list.push(f)}
+ for(const f of facts)if((f.relation==='любит'||/^(люблю|обожаю)$/.test(predicates.clean(f.predicate)))&&f.polarity>0){const t=types.get(key(f.object));if(!t||/^(человек|люди|место|город)$/.test(t))continue;const k=key(f.subject)+'|'+t;if(!likes.has(k))likes.set(k,{s:f.subject,t,list:[]});likes.get(k).list.push(f)}
  for(const v of likes.values())if(v.list.length>=2)out.push({subject:v.s,predicate:'интересуется',object:v.t,confidence:Math.min(.8,.45+.1*v.list.length),why:'любит '+v.list.slice(0,3).map(f=>'«'+f.object+'»').join(', '),evidence:v.list.map(f=>f.id)});
  return out;
 }
@@ -74,7 +75,9 @@ async function generate({complete=null}={}){
 function check(){
  const res={confirmed:[],rejected:[],expired:0},now=Date.now();
  for(const g of list('open',100)){
-  const k=predicates.classify(g.predicate),facts=memory.relations(g.subject,300).filter(f=>key(f.subject)===key(g.subject)&&predicates.classify(f.predicate).relation===k.relation);
+  // Взаимные связи («знаком с», «дружит с», «женат на»): «Петя знаком с Олей» подтверждает и «Оля знакома с Петей».
+  const k=predicates.classify(g.predicate),mutual=SYMMETRIC.has(k.relation);
+  const facts=memory.relations(g.subject,300).map(f=>mutual&&key(f.object)===key(g.subject)?{...f,subject:f.object,object:f.subject}:f).filter(f=>key(f.subject)===key(g.subject)&&predicates.classify(f.predicate).relation===k.relation);
   const same=facts.find(f=>key(f.object)===key(g.object)&&predicates.classify(f.predicate).polarity===k.polarity);
   const against=facts.find(f=>key(f.object)===key(g.object)?predicates.classify(f.predicate).polarity!==k.polarity:k.single);
   if(same){settle(g.id,'confirmed',same.id);res.confirmed.push(g);thoughts.add('guess','Догадка подтвердилась: '+text(g),{id:g.id})}

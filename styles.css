@@ -876,3 +876,47 @@ html.brain-fs-lock,html.brain-fs-lock body{overflow:hidden}
  .dk-grid{gap:3px}
  .dk-bar .dk-title{flex-basis:55%}
 }
+/* Мозг: меню «Вид», панель «Мысли», ползунок времени, вкладки дневника, зрелость зон, самоэкзамен. */
+.brain-menu-wrap{position:relative;pointer-events:auto}
+.brain-menu{position:absolute;right:0;top:calc(100% + .35rem);z-index:8;display:grid;gap:.3rem;min-width:11.5rem;padding:.45rem;background:rgba(6,3,2,.96);border:1px solid rgba(238,138,60,.35);border-radius:4px;box-shadow:0 14px 40px rgba(0,0,0,.75)}
+.brain-menu[hidden]{display:none}
+.brain-menu .brain-btn{text-align:left;width:100%}
+.brain-btn.on,.brain-btn[aria-expanded="true"]{border-color:var(--ember);color:var(--ember-hot)}
+.brain-thoughts{position:absolute;z-index:3;right:.75rem;top:3.4rem;width:min(22rem,34%);max-height:calc(100% - 17rem);overflow:hidden;display:flex;flex-direction:column;padding:.6rem .75rem;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.08);border-radius:2px;font-family:var(--mono);pointer-events:auto}
+.brain-thoughts[hidden]{display:none}
+.brain-th-live{color:var(--ember);animation:brain-blink 1.6s steps(2) infinite}
+.brain-th-list{list-style:none;margin:0;padding:0;display:grid;gap:.45em;overflow:auto;font-size:.7rem;min-height:0}
+.brain-th-list li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:.5em;align-items:baseline;color:#cfc6b6}
+.brain-th-list li.new{animation:brain-th-in .9s ease-out}
+@keyframes brain-th-in{from{opacity:0;transform:translateY(-4px);color:var(--ember-hot)}to{opacity:1}}
+.brain-th-k{font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:var(--ember);white-space:nowrap}
+.brain-th-t{overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow-wrap:anywhere}
+.brain-th-list time{color:#6f665a;font-size:.62rem}
+.brain-th-list li.th-guess .brain-th-k{color:#9ffcff}
+.brain-th-list li.th-ask .brain-th-k{color:#f2d27a}
+.brain-th-list li.th-check .brain-th-k{color:#9be59b}
+.brain-th-list li.th-forget .brain-th-k{color:#8d8272}
+.brain-th-list li.th-offer .brain-th-k{color:#ffb36b}
+.brain-time{position:absolute;z-index:3;left:50%;transform:translateX(-50%);top:3.4rem;width:min(34rem,calc(100% - 1.5rem));display:flex;align-items:center;gap:.5rem;padding:.4rem .55rem;background:rgba(0,0,0,.65);border:1px solid rgba(238,138,60,.35);border-radius:3px;font-family:var(--mono);pointer-events:auto}
+.brain-time[hidden]{display:none}
+.brain-time input[type=range]{flex:1 1 auto;min-width:4rem;-webkit-appearance:none;appearance:none;height:4px;padding:0;border:0;border-radius:2px;background:rgba(238,138,60,.3);cursor:pointer}
+.brain-time input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--ember-hot);box-shadow:0 0 8px var(--ember)}
+.brain-time input[type=range]::-moz-range-thumb{width:14px;height:14px;border:0;border-radius:50%;background:var(--ember-hot);box-shadow:0 0 8px var(--ember)}
+.brain-time-l{flex:none;font-size:.68rem;color:#e9e2d6;white-space:nowrap}
+.brain-tabs{display:flex;flex-wrap:wrap;gap:.3rem;border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:.5rem}
+.brain-tab{font:500 .7rem/1.2 var(--mono);padding:.4em .75em;border-radius:3px;background:none;border:1px solid transparent;color:#a99d8a;cursor:pointer}
+.brain-tab:hover{color:var(--ember-hot);box-shadow:none}
+.brain-tab.on{border-color:rgba(238,138,60,.55);color:var(--ember-hot);background:rgba(238,138,60,.08)}
+.brain-mind-set{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.35rem .8rem}
+.brain-mature{display:grid;grid-template-columns:minmax(0,9rem) minmax(0,1fr) auto;gap:.6em;align-items:center;font:.72rem/1.3 var(--mono);color:#e3dacb}
+.brain-mature span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brain-mature b{height:.4rem;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;display:block}
+.brain-mature b i{display:block;height:100%}
+.brain-mature small{color:var(--muted)}
+.brain-exam{width:100%;height:auto;max-height:8rem;display:block}
+.brain-exam .grid{stroke:rgba(255,255,255,.08);stroke-width:1}
+.brain-exam .line{fill:none;stroke:var(--ember);stroke-width:2;stroke-linejoin:round}
+.brain-exam circle{fill:var(--ember-hot)}
+.brain-stage.clean .brain-thoughts,.brain-stage.clean .brain-time{display:none}
+@media (max-width:900px){.brain-thoughts{left:.75rem;right:.75rem;width:auto;top:auto;bottom:.75rem;max-height:40%}}
+@media (max-width:640px){.brain-thoughts,.brain-time{top:auto}.brain-time{bottom:.75rem}}
