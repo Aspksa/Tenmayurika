@@ -28,9 +28,13 @@ function chunks(text){
  for(const raw of String(text||'').split(/\r?\n/)){
   const pm=raw.match(/^\[Страница (\d+)\]$/);if(pm){push();page=Number(pm[1]);continue}
   const line=raw.trim();if(!line)continue;
-  if(cur.length+line.length+1>CHUNK)push();
-  if(start===null)start=page;
-  cur+=(cur?'\n':'')+line.slice(0,CHUNK);
+  // Длинная строка (абзац без переносов) режется на несколько кусков, а не обрезается.
+  for(let at=0;at<line.length;at+=CHUNK){
+   const piece=line.slice(at,at+CHUNK);
+   if(cur.length+piece.length+1>CHUNK)push();
+   if(start===null)start=page;
+   cur+=(cur?'\n':'')+piece;
+  }
  }
  push();
  return out.slice(0,MAX_CHUNKS);
@@ -90,7 +94,9 @@ function readPending({limit=PASS_CHUNKS,force=false}={}){
  try{
   for(const doc of queue()){
    if(out.chunks>=limit)break;
-   const text=textOf(doc.path);if(!text.trim())continue;
+   const text=textOf(doc.path);
+   // Документ опустел: прежнее знание из него устарело — забываем, иначе он вечно «прочитан» со старыми выписками.
+   if(!text.trim()){use(d=>tx(d,()=>forgetIn(d,doc.path)));continue}
    const parts=chunks(text);
    let r=row(doc.path);
    if(!r||r.modified!==doc.modified){
@@ -143,9 +149,14 @@ function find(query,{limit=3}={}){
    if(score&&(!best||score>best.score))best={score,page,line:i};
   }
   if(!best||best.score<need)continue;
-  const near=lines.slice(Math.max(0,best.line-1),best.line+2).filter(l=>!/^\[Страница \d+\]$/.test(l)).join(' ');
+  // Отрывок строится вокруг найденной строки: она всегда видна, соседние — только если остаётся место.
+  const isPage=l=>/^\[Страница \d+\]$/.test(l);
+  let near=clean(lines[best.line]);
+  if(near.length>SNIPPET){const low=norm(near),hit=Math.min(...stems.map(s=>low.indexOf(s)).filter(i=>i>=0));const from=Math.max(0,Math.min(hit-60,near.length-SNIPPET));near=(from?'…':'')+near.slice(from)}
+  else{const prev=best.line>0&&!isPage(lines[best.line-1])?clean(lines[best.line-1]):'',next=best.line+1<lines.length&&!isPage(lines[best.line+1])?clean(lines[best.line+1]):'';
+   if(prev&&prev.length+near.length+1<=SNIPPET)near=prev+' '+near;if(next&&near.length+next.length+1<=SNIPPET)near=near+' '+next}
   const facts=use(d=>d.prepare('SELECT page,subject,predicate,object FROM brain_reading_facts WHERE path=?').all(r.path)).filter(f=>{const t=norm(f.subject+' '+f.predicate+' '+f.object);return stems.some(s=>t.includes(s))}).slice(0,3);
-  out.push({path:r.path,name:nameOf(r.path),page:best.page,excerpt:clean(near).slice(0,SNIPPET),facts,score:best.score});
+  out.push({path:r.path,name:nameOf(r.path),page:best.page,excerpt:near.slice(0,SNIPPET),facts,score:best.score});
   if(out.length>=limit)break;
  }
  return out.sort((a,b)=>b.score-a.score);

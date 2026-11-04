@@ -15,6 +15,22 @@ test('chunks keep the page each piece starts on',()=>{
  assert.deepEqual(c.map(x=>x.page),[1,2]);
 });
 
+test('long lines are split into chunks, not cut',()=>{
+ const long='Слово '.repeat(600).trim(),c=reading.chunks(long);
+ assert.ok(c.length>=2);assert.equal(c.map(x=>x.text).join('').replace(/\s/g,'').length,long.replace(/\s/g,'').length);
+});
+
+test('excerpt keeps the matching line even after a long paragraph',async()=>{
+ await fsp.mkdir(LIB,{recursive:true});
+ await fsp.writeFile(path.join(LIB,'вступление.txt'),'Вступление '.repeat(60).trim()+'\nПлатёж за парковку вносится до десятого числа.');
+ await queue.scan();await queue.run(10);reading.readPending();
+ const h=reading.find('платёж за парковку');assert.match(h[0].excerpt,/десятого числа/);
+ // Опустевший документ забывается.
+ await fsp.writeFile(path.join(LIB,'вступление.txt'),'   ');await queue.scan();await queue.run(10);reading.readPending();
+ assert.equal(reading.doc('вступление.txt'),null);
+ await fsp.unlink(path.join(LIB,'вступление.txt'));await queue.scan();
+});
+
 test('reads indexed documents locally: summary, facts with pages, search, reread, forgetting',async()=>{
  await fsp.mkdir(LIB,{recursive:true});
  const text='Договор аренды квартиры.\nАрендатор Анна Петрова живёт в Казани.\nМарина любит пионы.\nОплата аренды вносится до пятого числа каждого месяца, сумма аренды 40 000 рублей.\nАренда квартиры продлевается автоматически.';
