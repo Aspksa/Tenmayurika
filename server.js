@@ -49,9 +49,21 @@ async function handleFacts(req,res,p,url){
   if(req.method==='POST'&&p==='/api/facts/conflicts/resolve'){const input=await body(req);if(!input||typeof input!=='object')return respond(res,400,{error:'Invalid input'});const r=memory.resolveConflict(input.id,input.keep);return r?respond(res,200,r):respond(res,404,{error:'Not found'})}
   if(req.method==='GET'&&p==='/api/facts/conflicts')return respond(res,200,memory.conflicts(limitParam(url,100,500)));
   if(req.method==='GET'&&p==='/api/facts/diagnostics')return respond(res,200,memory.diagnostics());
+  // Граф памяти: связи на несколько шагов, путь между сущностями, темы (сообщества), почти-дубли, обзор, влияние.
+  const q=k=>url.searchParams.get(k)||'',depth=(k,d,max)=>{const raw=url.searchParams.get(k);if(raw===null)return d;const n=Number(raw);if(!Number.isInteger(n)||n<1||n>max)throw new TypeError('Invalid depth');return n};
+  if(req.method==='GET'&&p==='/api/facts/neighborhood')return respond(res,200,memory.neighborhood(q('subject'),depth('depth',2,3),limitParam(url,60,300)));
+  if(req.method==='GET'&&p==='/api/facts/path')return respond(res,200,memory.findPath(q('from'),q('to'),depth('depth',3,4)));
+  if(req.method==='GET'&&p==='/api/facts/communities')return respond(res,200,memory.communities());
+  if(req.method==='GET'&&p==='/api/facts/duplicates')return respond(res,200,memory.duplicates({limit:limitParam(url,50,200)}));
+  if(req.method==='POST'&&p==='/api/facts/duplicates/merge'){const input=await body(req);if(!input||typeof input!=='object')return respond(res,400,{error:'Invalid input'});const r=memory.mergeDuplicate(input.keep,input.drop);return r?respond(res,200,r):respond(res,404,{error:'Not found'})}
+  if(req.method==='POST'&&p==='/api/facts/duplicates/dismiss'){const input=await body(req);if(!input||typeof input!=='object')return respond(res,400,{error:'Invalid input'});return respond(res,200,memory.dismissDuplicate(input.a,input.b))}
+  if(req.method==='GET'&&p==='/api/facts/overview'){const ws=await storage.load();return respond(res,200,{...memory.overview(),notes:(ws.notes||[]).length,openTasks:(ws.tasks||[]).filter(t=>!t.done).length})}
+  if(req.method==='GET'&&p==='/api/facts/impact'){await indexWorkspace();const r=memory.impact(q('id'));return r?respond(res,200,r):respond(res,404,{error:'Not found'})}
   return respond(res,404,{error:'Not found'});
  }catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}
 }
+// Заметки и дела в полнотекстовом индексе памяти (обновляются только изменённые).
+async function indexWorkspace(){const ws=await storage.load();memory.syncRecords('note',ws.notes||[]);memory.syncRecords('task',ws.tasks||[]);return ws}
 // Строки вида «FACT: субъект | связь | объект» в тексте заметки сохраняются как факты.
 function ingestNoteFacts(item){if(!item.content||!item.content.includes('FACT:'))return;try{memory.extractFacts(item.content,'note:'+item.id)}catch(e){console.error('Fact ingestion failed:',e.name)}}
 // Общие операции с записями: используются API и инструментами аватара.
@@ -132,6 +144,8 @@ if(req.method==='POST'&&p==='/api/sync')return respond(res,200,await syncWorker.
 if(req.method==='GET'&&p==='/api/graph')return respond(res,200,storage.graph());
 if(req.method==='GET'&&p==='/api/search'){const query=url.searchParams.get('q')||'';if(!query.trim())return respond(res,400,{error:'Missing query'});return respond(res,200,await vectorStore.search(query));}
 if(p==='/api/facts'||p.startsWith('/api/facts/'))return await handleFacts(req,res,p,url);
+// Гибридное вспоминание (слова + смысл + связи) — им «Мозг» подсвечивает найденное.
+if(req.method==='GET'&&p==='/api/recall'){const query=url.searchParams.get('q')||'';if(!query.trim())return respond(res,400,{error:'Missing query'});const r=await require('./recall').recall(query.slice(0,300),{factLimit:30,noteLimit:20});return respond(res,200,{facts:r.facts.map(f=>({id:f.id,score:f.score,why:f.why})),notes:r.notes.map(n=>({id:n.id,score:n.score,why:n.why}))})}
 if(p==='/api/llm'||p.startsWith('/api/llm/'))return await handleLlm(req,res,p);
 if(req.method==='POST'&&p==='/api/chat'){try{return respond(res,200,await chat.reply(await body(req),chatContext))}catch(e){if(e instanceof TypeError)return respond(res,400,{error:e.message});throw e}}
 // Опыт аватара: как она понимала вопросы, что нашла и сделала; подтверждение или поправка ответа.
