@@ -336,6 +336,9 @@ function mount(host){
  const dupBox=el('div','brain-fix brain-calm');dupBox.hidden=true;dupBox.setAttribute('role','dialog');dupBox.setAttribute('aria-label','Похожие факты');
  const ovBox=el('div','brain-fix brain-calm');ovBox.hidden=true;ovBox.setAttribute('role','dialog');ovBox.setAttribute('aria-label','Обзор памяти');
  const diaBox=el('div','brain-fix brain-calm');diaBox.hidden=true;diaBox.setAttribute('role','dialog');diaBox.setAttribute('aria-label','Дневник мозга');
+ // Звезда — отображение настоящей работы библиотеки, а не искусственная активность.
+ const guardianStar=el('button','brain-guardian-star');guardianStar.type='button';guardianStar.setAttribute('aria-label','Хранитель библиотеки');guardianStar.setAttribute('aria-expanded','false');guardianStar.title='Хранитель библиотеки';guardianStar.dataset.state='unknown';
+ const guardianBox=el('div','brain-fix brain-calm brain-guardian-dialog');guardianBox.hidden=true;guardianBox.setAttribute('role','dialog');guardianBox.setAttribute('aria-label','Хранитель библиотеки');
  const diaBtn=el('button','brain-btn','✦ Дневник');diaBtn.type='button';diaBtn.title='О чём мозг думал в простое: выводы, навыки из опыта, ваши предпочтения, сводки тем, причинные связи';
  const ovBtn=el('button','brain-btn','☰ Обзор');ovBtn.type='button';ovBtn.title='Обзор памяти: темы, самые связанные узлы, что менялось за неделю';
  ctrl.prepend(diaBtn);ctrl.prepend(ovBtn);ctrl.prepend(find);
@@ -344,8 +347,8 @@ function mount(host){
  // Ползунок времени.
  const tmBox=el('div','brain-time'),tmPlay=el('button','brain-btn','▶'),tmRange=el('input'),tmLabel=el('span','brain-time-l'),tmClose=el('button','brain-btn','✕');
  tmPlay.type=tmClose.type='button';tmPlay.setAttribute('aria-label','Проиграть рост');tmClose.setAttribute('aria-label','Вернуться в сегодня');tmRange.type='range';tmRange.min='0';tmRange.step='1';tmRange.setAttribute('aria-label','День');tmBox.hidden=true;tmBox.append(tmPlay,tmRange,tmLabel,tmClose);
- stage.append(glc,canvas,lab,grain,top,thBox,tmBox,tip,empty,fixBox,dupBox,ovBox,diaBox);
- stage.setAttribute('role','img');
+ stage.append(glc,canvas,lab,grain,top,thBox,tmBox,tip,empty,guardianStar,fixBox,dupBox,ovBox,diaBox,guardianBox);
+ stage.setAttribute('role','group');
  const teach=el('form','brain-teach'),tIn=el('input'),tBtn=el('button','primary','Научить');
  tIn.placeholder='Научи меня: Анна | любит | зелёный чай';tIn.setAttribute('aria-label','Новый факт: субъект | связь | объект');tIn.maxLength=900;tBtn.type='submit';
  const tHint=el('span','brain-hint','Факт пишется как «субъект | связь | объект». Он сразу станет новым нейроном.');
@@ -1015,7 +1018,7 @@ function mount(host){
  function zoomLobe(l){camT.zoom=clamp(Math.min(W,H)*.32/Math.max(8,l.state.r/cam.zoom),2,5);camT.px=-l.state.qx;camT.py=-l.state.qy}
  canvas.addEventListener('click',e=>{if(moved){moved=false;return}const [x,y]=local(e),hit=pick(x,y);pinned=hit;hover=hit&&hit.type==='neuron'?hit.n.item:null;showTip(hit,x,y,true);if(hit&&hit.type==='lobe'){hit.l.state.pulse=1;if(hit.l.bad){tip.hidden=true;pinned=null;fixBox.hidden=false;renderFix()}}dirty=true});
  document.addEventListener('keydown',onKey);
- function onKey(e){if(e.key!=='Escape')return;if(!menu.hidden){setMenu(false);menuBtn.focus();return}if(!fixBox.hidden){fixBox.hidden=true;return}if(!diaBox.hidden){diaBox.hidden=true;return}if(!dupBox.hidden){dupBox.hidden=true;return}if(!ovBox.hidden){ovBox.hidden=true;return}if(focusN){const l=focusN.lobe;focusN=null;clearImpact();zoomLobe(l);dirty=true;return}if(isFs()){if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});stage.classList.remove('fs');setFs();return}if(pinned){pinned=null;tip.hidden=true;hover=null;clearImpact();dirty=true}}
+ function onKey(e){if(e.key!=='Escape')return;if(!guardianBox.hidden){guardianBox.hidden=true;guardianStar.setAttribute('aria-expanded','false');guardianStar.focus();return}if(!menu.hidden){setMenu(false);menuBtn.focus();return}if(!fixBox.hidden){fixBox.hidden=true;return}if(!diaBox.hidden){diaBox.hidden=true;return}if(!dupBox.hidden){dupBox.hidden=true;return}if(!ovBox.hidden){ovBox.hidden=true;return}if(focusN){const l=focusN.lobe;focusN=null;clearImpact();zoomLobe(l);dirty=true;return}if(isFs()){if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});stage.classList.remove('fs');setFs();return}if(pinned){pinned=null;tip.hidden=true;hover=null;clearImpact();dirty=true}}
 
  /* ---------- Обучение: новый факт прямо отсюда ---------- */
  teach.onsubmit=async e=>{
@@ -1468,6 +1471,33 @@ function mount(host){
   return sec('рост',...kids);
  }
  diaBtn.onclick=()=>{diaBox.hidden=false;void renderDiary()};
+ // Только фактические события процесса: OCR, чтение, индексирование и поиск.
+ const guardianHead=el('div','brain-fix-head'),guardianClose=el('button','brain-btn','✕');guardianClose.type='button';guardianClose.setAttribute('aria-label','Закрыть Хранителя');
+ guardianHead.append(el('div','brain-k','✦ Хранитель библиотеки'),guardianClose);
+ const guardianStatus=el('p','brain-guardian-status','Проверяю состояние…'),guardianCurrent=el('div','brain-guardian-current'),guardianCounts=el('p','brain-fix-ok'),guardianHistory=el('div','brain-guardian-history'),guardianJournal=el('div','brain-guardian-history');
+ const guardianOpen=el('button','brain-btn','Открыть библиотеку');guardianOpen.type='button';guardianOpen.onclick=()=>window.TenmaApp?.go('library');
+ guardianBox.append(guardianHead,guardianStatus,guardianCurrent,guardianCounts,guardianHistory,guardianJournal,guardianOpen);
+ guardianClose.onclick=()=>{guardianBox.hidden=true;guardianStar.setAttribute('aria-expanded','false');guardianStar.focus()};
+ guardianStar.onclick=()=>{guardianBox.hidden=!guardianBox.hidden;guardianStar.setAttribute('aria-expanded',String(!guardianBox.hidden));if(!guardianBox.hidden){guardianClose.focus();void pollGuardian()}};
+ let guardianPending=false,guardianDisposed=false;
+ const guardianKinds={scan:'Проверка библиотеки',read:'Чтение документа',ocr:'Распознавание',search:'Поиск'};
+ const guardianJournalLabels={folder_created:'Создана папка',file_uploaded:'Загружен файл',file_replaced:'Заменён файл',file_renamed:'Файл переименован',file_moved:'Файл перемещён',ocr_completed:'Распознан документ',collection_created:'Создана подборка',collection_added:'Добавлен файл в подборку',collection_removed:'Файл убран из подборки',collection_deleted:'Подборка удалена'};
+ async function pollGuardian(){
+  if(guardianPending||guardianDisposed)return;guardianPending=true;
+  try{const response=await fetch('/api/brain/guardian'+(guardianBox.hidden?'':'?journal=1'),{cache:'no-store'});if(!response.ok)throw Error('Нет связи');const data=await response.json();if(guardianDisposed)return;
+   const all=Array.isArray(data.active)?data.active:[],priority={ocr:0,read:1,search:2,scan:3},current=all.slice().sort((a,b)=>(priority[a.kind]??9)-(priority[b.kind]??9))[0];
+   const queue=data.queue||{},counts=queue.counts||{},recent=Array.isArray(data.history)?data.history:[],latest=recent[0];
+   const state=current?'working':(counts.error||latest?.result==='error')?'error':queue.enabled===false?'paused':counts.queued?'waiting':'idle';guardianStar.dataset.state=state;
+   const text=current?(current.phase||guardianKinds[current.kind]||'Работаю'):state==='error'?(counts.error?'Есть ошибки обработки':'Последняя операция завершилась ошибкой'):state==='paused'?'Фоновая обработка выключена':state==='waiting'?'Документы ожидают обработки':'Ожидает';
+   guardianStatus.textContent=text;guardianStar.title='Хранитель библиотеки · '+text;
+   guardianCurrent.replaceChildren();if(current){if(current.file)guardianCurrent.append(el('p','brain-fix-ok','Файл: '+current.file));if(current.page&&current.total)guardianCurrent.append(el('p','brain-fix-ok','Страница '+current.page+' из '+current.total));if(all.length>1)guardianCurrent.append(el('p','brain-fix-ok','Одновременно процессов: '+all.length))}
+   guardianCounts.textContent='Очередь: '+(counts.queued||0)+' · обработано: '+(counts.ready||0)+' · ошибки: '+(counts.error||0);
+   const errors=Array.isArray(queue.errors)?queue.errors:[];for(const error of errors)guardianCurrent.append(el('p','brain-guardian-error',(error.path||'Файл')+': '+(error.error||'ошибка')));
+   guardianHistory.replaceChildren(el('div','brain-k','Последние действия с момента запуска'),...(recent.length?recent.slice(0,6).map(event=>el('p','brain-fix-ok',new Date(event.finishedAt).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+' · '+(guardianKinds[event.kind]||'Операция')+(event.file?' · '+event.file:'')+' — '+(event.result==='error'?'ошибка'+(event.message?': '+event.message:''):event.result==='deferred'?'повторю после изменения':'готово'))):[el('p','brain-fix-ok','Пока действий не было.')]));
+   const journal=Array.isArray(data.journal)?data.journal:[];guardianJournal.replaceChildren(el('div','brain-k','Журнал библиотеки'),...(journal.length?journal.slice(0,6).map(event=>el('p','brain-fix-ok',new Date(event.at).toLocaleString('ru-RU')+' · '+(guardianJournalLabels[event.action]||'Действие')+(event.path?' · '+event.path:''))):[el('p','brain-fix-ok','Записей пока нет.')]));
+  }catch{if(!guardianDisposed){guardianStar.dataset.state='unknown';guardianStar.title='Хранитель библиотеки · нет связи';guardianStatus.textContent='Нет связи с локальным сервером';guardianCurrent.replaceChildren();guardianCounts.textContent='';guardianHistory.replaceChildren();guardianJournal.replaceChildren()}}finally{guardianPending=false}
+ }
+ const guardianPoll=setInterval(()=>{if(!document.hidden)void pollGuardian()},2000);void pollGuardian();
  const onWorkspace=()=>apply();
  const onMemory=()=>loadFacts();
  const onWide=()=>placeHud();
@@ -1501,9 +1531,10 @@ function mount(host){
   fpsT+=dt;fpsN++;if(fpsT>=1.2){const fps=fpsN/fpsT;if(fps<(calm?22:42)&&quality>.25)quality*=.8;else if(fps>(calm?27:56)&&quality<baseQ)quality=Math.min(baseQ,quality*1.1);
    slowN=glr&&glMode!=='force'&&quality<=.26&&fps<20?slowN+1:0;if(slowN>=3){console.warn('Мозг: WebGL слишком медленный, перехожу на 2D');dropGL()}fpsT=0;fpsN=0}
  }
- function destroy(){io?.disconnect();cancelAnimationFrame(raf);clearInterval(poll);clearInterval(thTimer);clearInterval(tmTimer);document.removeEventListener('click',onDocClick);ro.disconnect();hudRo.disconnect();window.removeEventListener('tenma:workspace',onWorkspace);window.removeEventListener('tenma:memory',onMemory);wideQuery.removeEventListener('change',onWide);document.removeEventListener('keydown',onKey);document.removeEventListener('fullscreenchange',onFsChange);document.documentElement.classList.remove('brain-fs-lock');window.removeEventListener('tenma:thinking',onThinking);window.removeEventListener('tenma:recall',onRecall);window.removeEventListener('tenma:learn',onLearn);window.removeEventListener('tenma:experience',onExperience);glr?.destroy()}
+ function destroy(){guardianDisposed=true;clearInterval(guardianPoll);io?.disconnect();cancelAnimationFrame(raf);clearInterval(poll);clearInterval(thTimer);clearInterval(tmTimer);document.removeEventListener('click',onDocClick);ro.disconnect();hudRo.disconnect();window.removeEventListener('tenma:workspace',onWorkspace);window.removeEventListener('tenma:memory',onMemory);wideQuery.removeEventListener('change',onWide);document.removeEventListener('keydown',onKey);document.removeEventListener('fullscreenchange',onFsChange);document.documentElement.classList.remove('brain-fs-lock');window.removeEventListener('tenma:thinking',onThinking);window.removeEventListener('tenma:recall',onRecall);window.removeEventListener('tenma:learn',onLearn);window.removeEventListener('tenma:experience',onExperience);glr?.destroy()}
  checkSleep();setPalette();placeHud();resize();apply();renderLearn();loadFacts();showThoughts();void pollThoughts();raf=requestAnimationFrame(frame);
  return {destroy};
 }
 window.TenmaBrain={mount};
 })();
+

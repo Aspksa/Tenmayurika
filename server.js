@@ -49,6 +49,8 @@ const libraryJournal=require('./library-journal');
 const libraryHealth=require('./library-health');
 const libraryIndex=require('./library-index');
 const libraryVersions=require('./library-versions');
+const guardianActivity=require('./guardian-activity');
+const watchLibrary=(kind,details,fn)=>guardianActivity.track(kind,details,fn);
 async function journal(action,detail){try{await libraryJournal.record(action,detail)}catch(e){console.error('Library journal failed:',e.code||e.name)}}
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
@@ -286,20 +288,21 @@ const url=new URL(req.url,'http://localhost');const p=url.pathname;
 if(req.method==='OPTIONS')return respond(res,204,'');
 if(!['GET','HEAD','OPTIONS'].includes(req.method)){const origin=req.headers.origin;if(origin){let parsed;try{parsed=new URL(origin)}catch{return respond(res,403,{error:'Forbidden origin'})}if(parsed.protocol!=='http:'||!['127.0.0.1','localhost'].includes(parsed.hostname)||Number(parsed.port||80)!==Number(server.address()?.port||PORT))return respond(res,403,{error:'Forbidden origin'})}}
 if(req.method==='GET'&&p==='/api/health'){try{ensureDisk()}catch{}return respond(res,diskHealthy?200:503,{ok:diskHealthy,version:'0.3.0',database:'connected',disk:diskHealthy?'ok':'unavailable'});}
+if(req.method==='GET'&&p==='/api/brain/guardian'){const [queue,journal]=await Promise.all([libraryQueue.status(),url.searchParams.get('journal')==='1'?libraryJournal.recent(6):Promise.resolve([])]);return respond(res,200,{...guardianActivity.snapshot(),queue:{enabled:queue.enabled,counts:queue.counts,lastScan:queue.lastScan,errors:queue.items.filter(x=>x.status==='error').slice(0,5).map(x=>({path:x.path,error:x.error}))},journal})}
 if(!['GET','HEAD','OPTIONS'].includes(req.method)){ensureDisk();if(p!=='/api/brain/reflect')reflect.touch()}
 if(p.startsWith('/api/library/')){
  try{
   if(req.method==='GET'&&p==='/api/library/list')return respond(res,200,{items:await library.list(url.searchParams.get('path')||'')});
-  if(req.method==='GET'&&p==='/api/library/search')return respond(res,200,await library.search(url.searchParams.get('q')||''));
-  if(req.method==='GET'&&p==='/api/library/search-text')return respond(res,200,await library.searchText(url.searchParams.get('q')||''));
-  if(req.method==='GET'&&p==='/api/library/search-index')return respond(res,200,await libraryIndex.search(url.searchParams.get('q')||''));
-  if(req.method==='GET'&&p==='/api/library/duplicates')return respond(res,200,await library.duplicates());
-  if(req.method==='GET'&&p==='/api/library/document')return respond(res,200,await libraryDocuments.describe(url.searchParams.get('path')||''));
+  if(req.method==='GET'&&p==='/api/library/search')return respond(res,200,await watchLibrary('search',{phase:'Ищу по названиям'},()=>library.search(url.searchParams.get('q')||'')));
+  if(req.method==='GET'&&p==='/api/library/search-text')return respond(res,200,await watchLibrary('search',{phase:'Ищу в документах'},()=>library.searchText(url.searchParams.get('q')||'')));
+  if(req.method==='GET'&&p==='/api/library/search-index')return respond(res,200,await watchLibrary('search',{phase:'Ищу в индексе'},()=>libraryIndex.search(url.searchParams.get('q')||'')));
+  if(req.method==='GET'&&p==='/api/library/duplicates')return respond(res,200,await watchLibrary('search',{phase:'Ищу одинаковые файлы'},()=>library.duplicates()));
+  if(req.method==='GET'&&p==='/api/library/document'){const file=url.searchParams.get('path')||'';return respond(res,200,await watchLibrary('read',{file,phase:'Открываю документ'},()=>libraryDocuments.describe(file)))}
   if(req.method==='GET'&&p==='/api/library/summary')return respond(res,200,await libraryAnalysis.analyze(url.searchParams.get('path')||''));
   if(req.method==='GET'&&p==='/api/library/suggest-name')return respond(res,200,await libraryAnalysis.suggestName(url.searchParams.get('path')||''));
-  if(req.method==='GET'&&p==='/api/library/similar')return respond(res,200,await libraryAnalysis.similar(url.searchParams.get('path')||''));
-  if(req.method==='GET'&&p==='/api/library/answer')return respond(res,200,await libraryAnalysis.answer(url.searchParams.get('q')||'',url.searchParams.get('path')||''));
-  if(req.method==='GET'&&p==='/api/library/propose-facts')return respond(res,200,await libraryAnalysis.proposeFacts(url.searchParams.get('path')||''));
+  if(req.method==='GET'&&p==='/api/library/similar')return respond(res,200,await watchLibrary('search',{phase:'Ищу похожие документы'},()=>libraryAnalysis.similar(url.searchParams.get('path')||'')));
+  if(req.method==='GET'&&p==='/api/library/answer')return respond(res,200,await watchLibrary('search',{phase:'Ищу ответ в документах'},()=>libraryAnalysis.answer(url.searchParams.get('q')||'',url.searchParams.get('path')||'')));
+  if(req.method==='GET'&&p==='/api/library/propose-facts'){const file=url.searchParams.get('path')||'';return respond(res,200,await watchLibrary('read',{file,phase:'Ищу предложения фактов'},()=>libraryAnalysis.proposeFacts(file)))}
   if(req.method==='POST'&&p==='/api/library/tables'){const input=await body(req);return respond(res,200,await libraryAnalysis.tables(input?.files))}
   if(req.method==='GET'&&p==='/api/library/suggest-folder')return respond(res,200,{folder:libraryAnalysis.suggestFolder(url.searchParams.get('name')||'')});
   if(req.method==='GET'&&p==='/api/library/suggest-file-folder')return respond(res,200,await libraryAnalysis.suggestFileFolder(url.searchParams.get('path')||''));
@@ -385,5 +388,6 @@ return respond(res,404,{error:'Not found'})
 server.on('error',e=>{console.error('Server error:',e.code||e.name);process.exitCode=1});
 if(require.main===module)Promise.resolve().then(()=>ensureDisk()).then(()=>storage.connect()).then(()=>server.listen(PORT,HOST,()=>{console.log('Tenmayurika: http://'+HOST+':'+PORT);syncWorker.run().catch(console.error);const timer=setInterval(()=>{syncWorker.run().catch(console.error);chatlog.learnPending().catch(console.error);idleReflect();libraryQueue.status().then(s=>s.enabled?libraryQueue.scan().then(()=>libraryQueue.run()):null).catch(e=>console.error('Library queue failed:',e.name))},60000);timer.unref();chatlog.learnPending().catch(console.error);startBackupSchedule();const maintenanceTimer=setInterval(()=>{try{ensureDisk();maintenance.maintenance()}catch(e){console.error('Disk maintenance failed:',e.code||e.name)}},3600000);maintenanceTimer.unref()})).catch(e=>{console.error('Database connection failed:',e.message);process.exitCode=1});
 module.exports={server};
+
 
 

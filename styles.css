@@ -1352,3 +1352,21 @@ input:checked+.switch::after{background:var(--ember-hot)}
 .pn-tg-col{container-type:inline-size}
 @container (max-width:5.5rem){.pn-ev time{display:none}.pn-ev-check{display:none}}
 
+
+
+/* Хранитель: золотая звезда отражает только зарегистрированную работу. */
+.brain-guardian-star{position:absolute;z-index:5;left:64%;top:47%;transform:translate(-50%,-50%);width:44px;height:44px;padding:0;border:0;border-radius:50%;background:transparent;cursor:pointer}
+.brain-guardian-star::before{content:'';position:absolute;inset:12px;background:#f6cb72;clip-path:polygon(50% 0%,61% 34%,98% 35%,68% 57%,79% 93%,50% 72%,21% 93%,32% 57%,2% 35%,39% 34%);filter:drop-shadow(0 0 5px #edaa45)}
+.brain-guardian-star:hover::before{background:#fff0bc}
+.brain-guardian-star:focus-visible{outline:2px solid #f6cb72;outline-offset:2px}
+.brain-guardian-star[data-state=working]::before{animation:guardian-pulse 1.2s ease-in-out infinite}
+.brain-guardian-star[data-state=error]::before{background:#ff7163}
+.brain-guardian-star[data-state=paused]::before,.brain-guardian-star[data-state=unknown]::before{opacity:.45}
+@keyframes guardian-pulse{50%{transform:scale(1.35);filter:drop-shadow(0 0 9px #ffd074)}}
+@media (prefers-reduced-motion:reduce){.brain-guardian-star[data-state=working]::before{animation:none;background:#fff0bc}}
+.brain-guardian-dialog{border-color:rgba(241,194,102,.55)!important;gap:.8rem;font-family:inherit}
+.brain-guardian-dialog .brain-fix-head .brain-k{color:#f6cb72!important}
+.brain-guardian-status{color:#f6cb72;margin:0;font-weight:600}
+.brain-guardian-current,.brain-guardian-history{display:grid;gap:.35rem;overflow-wrap:anywhere}
+.brain-guardian-history{border-top:1px solid rgba(255,255,255,.1);padding-top:.6rem}
+.brain-guardian-error{margin:0;color:#ff9a8e;font-size:.8rem;overflow-wrap:anywhere}
