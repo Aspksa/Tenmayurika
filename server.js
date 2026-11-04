@@ -246,6 +246,7 @@ if(p.startsWith('/api/library/')){
   if(req.method==='GET'&&p==='/api/library/suggest-name')return respond(res,200,await libraryAnalysis.suggestName(url.searchParams.get('path')||''));
   if(req.method==='GET'&&p==='/api/library/similar')return respond(res,200,await libraryAnalysis.similar(url.searchParams.get('path')||''));
   if(req.method==='GET'&&p==='/api/library/answer')return respond(res,200,await libraryAnalysis.answer(url.searchParams.get('q')||''));
+  if(req.method==='GET'&&p==='/api/library/propose-facts')return respond(res,200,await libraryAnalysis.proposeFacts(url.searchParams.get('path')||''));
   if(req.method==='GET'&&p==='/api/library/suggest-folder')return respond(res,200,{folder:libraryAnalysis.suggestFolder(url.searchParams.get('name')||'')});
   if(req.method==='POST'&&p==='/api/library/ocr'){const input=await body(req),result=await libraryOcr.recognize(input?.path);await journal('ocr_completed',{path:input.path});return respond(res,200,result)}
   if(req.method==='POST'&&p==='/api/library/compare'){const input=await body(req);return respond(res,200,await libraryDocuments.compare(input?.left,input?.right))}
@@ -264,6 +265,9 @@ if(p.startsWith('/api/library/')){
   if(req.method==='GET'&&p==='/api/library/memos')return respond(res,200,{items:await libraryCollections.memos()});
   if(req.method==='POST'&&p==='/api/library/memos'){const input=await body(req);return respond(res,201,await libraryCollections.addMemo(input?.source,input?.kind,input?.text,input?.due))}
   if(req.method==='POST'&&p==='/api/library/memos/change'){const input=await body(req);return respond(res,200,await libraryCollections.changeMemo(input?.id,input?.action))}
+  if(req.method==='GET'&&p==='/api/library/facts')return respond(res,200,{items:await libraryCollections.facts()});
+  if(req.method==='POST'&&p==='/api/library/facts'){const input=await body(req);return respond(res,201,await libraryCollections.addFact(input?.source,input?.subject,input?.predicate,input?.object,input?.quote))}
+  if(req.method==='POST'&&p==='/api/library/facts/delete'){const input=await body(req);return respond(res,200,await libraryCollections.deleteFact(input?.id))}
   if(req.method==='GET'&&p==='/api/library/journal')return respond(res,200,{items:await libraryJournal.recent()});
   if(req.method==='GET'&&p==='/api/library/health')return respond(res,200,await libraryHealth.check());
   if(req.method==='POST'&&p==='/api/library/rename'){const input=await body(req),result=await library.renameFile(input?.path,input?.name,libraryCollections.replacePath);if(!result.unchanged)await journal('file_renamed',{path:input.path,target:result.path});return respond(res,200,result)}

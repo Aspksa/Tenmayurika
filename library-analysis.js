@@ -36,3 +36,10 @@ async function answer(question){
  return {items:matches.sort((a,b)=>b.score-a.score).slice(0,10),scanned:Math.min(scanned,200),unreadable,truncated:truncated||pending.length>0,method:'extractive'};
 }
 module.exports.answer=answer;
+
+async function proposeFacts(file){
+ const d=await docs.read(file),out=[],seen=new Set();let lineNo=0;
+ for(const raw of d.text.slice(0,16000).split(/\r?\n/)){lineNo++;for(const sentence of raw.match(/[^.!?;]+[.!?;]?/g)||[]){if(sentence.includes('?'))continue;const value=sentence.trim().replace(/[.!;]+$/,'').trim();const m=value.match(/^(.{1,70}?)\s+(не любит|любит|жив[её]т в|работает в|находится в|состоит из|содержит|принадлежит|предпочитает|создан[ао]? в)\s+(.{2,160})$/iu);if(!m)continue;const item={subject:m[1].trim(),predicate:m[2].toLocaleLowerCase('ru'),object:m[3].trim(),quote:value.slice(0,500),line:lineNo},key=[item.subject,item.predicate,item.object].join('|').toLocaleLowerCase('ru');if(!seen.has(key)){seen.add(key);out.push(item)}if(out.length>=8)return {source:file,items:out,truncated:true}}}
+ return {source:file,items:out,truncated:d.text.length>16000};
+}
+module.exports.proposeFacts=proposeFacts;
