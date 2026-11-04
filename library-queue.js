@@ -7,6 +7,7 @@ const documents=require('./library-documents');
 const index=require('./library-index');
 const activity=require('./guardian-activity');
 const guardian=require('./guardian-memory');
+const agents=require('./agents');
 const analysis=require('./library-analysis');
 const FILE=process.env.TENMAYURIKA_LIBRARY_QUEUE||path.join(__dirname,'data','library-queue.json');
 const MAX_ENTRIES=5000,MAX_ATTEMPTS=3;
@@ -24,7 +25,7 @@ async function scan(){
 async function run(limit=2){
  if(busy)return {busy:true};busy=true;
  try{const s=await load();if(!s.enabled)return {disabled:true};const items=Object.values(s.items).filter(x=>x.status==='queued').slice(0,Math.max(1,Math.min(10,limit)));
-  for(const item of items){const operation=activity.start('read',{file:item.path,phase:'Читаю документ'});try{const info=await documents.read(item.path);if(info.modified!==item.modified||info.bytes!==item.size){item.status='queued';item.modified=info.modified;item.size=info.bytes;item.attempts=0;await save();activity.finish(operation,'deferred');continue}activity.update(operation,{phase:'Обновляю индекс'});index.put(item.path,item.modified,item.size,info.text);activity.update(operation,{phase:'Ищу предложения знаний'});await guardian.setProposals(item.path,item.modified,item.size,analysis.extractProposals(item.path,info.text).items,await analysis.proposeMetadata(item.path,info.text));item.status='ready';item.lineCount=info.text.split(/\r?\n/).length;item.error=null;activity.finish(operation)}catch(e){item.attempts++;item.status=item.attempts>=MAX_ATTEMPTS?'error':'queued';item.error=String(e.message||'Ошибка').slice(0,200);activity.finish(operation,'error',item.error)}await save()}
+  for(const item of items){const operation=activity.start('read',{file:item.path,phase:'Читаю документ'});try{const info=await documents.read(item.path);if(info.modified!==item.modified||info.bytes!==item.size){item.status='queued';item.modified=info.modified;item.size=info.bytes;item.attempts=0;await save();activity.finish(operation,'deferred');continue}activity.update(operation,{phase:'Обновляю индекс'});index.put(item.path,item.modified,item.size,info.text);activity.update(operation,{phase:'Ищу предложения знаний'});const found=analysis.extractProposals(item.path,info.text).items;await guardian.setProposals(item.path,item.modified,item.size,found,await analysis.proposeMetadata(item.path,info.text));if(found.length)agents.record('researcher','сверяет факты из «'+item.path.split('/').pop().slice(0,80)+'»','Предложений фактов: '+found.length+' — проверь их в «Памяти Хранителя»',{from:'guardian'});item.status='ready';item.lineCount=info.text.split(/\r?\n/).length;item.error=null;activity.finish(operation)}catch(e){item.attempts++;item.status=item.attempts>=MAX_ATTEMPTS?'error':'queued';item.error=String(e.message||'Ошибка').slice(0,200);activity.finish(operation,'error',item.error)}await save()}
   return {processed:items.length};
  }finally{busy=false}
 }
