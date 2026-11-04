@@ -18,6 +18,8 @@ const atlas=require('../atlas');
 const preferences=require('../preferences');
 const reflect=require('../reflect');
 const {parseCommand,reply}=require('../chat');
+// Эти тесты считают вызовы модели: внутренний голос и сверка (лишние вызовы) здесь выключены.
+for(const k of ['innerVoice','verify'])require('../thoughts').setSetting(k,false);
 const say=text=>({content:text});
 
 test('core blocks: seed, append, replace, limit, injection, history and restore',()=>{

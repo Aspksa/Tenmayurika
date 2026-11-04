@@ -159,6 +159,15 @@ button:hover{border-color:var(--gold);color:var(--gold-bright);box-shadow:0 0 16
 .msg-rate button{background:none;border:1px solid transparent;border-radius:8px;padding:.05em .35em;cursor:pointer;opacity:.55;font-size:1em;line-height:1.4}
 .msg-rate button:hover,.msg-rate button:focus-visible{opacity:1;border-color:var(--line)}
 .msg-rate.done{opacity:.8}
+.msg-think{margin-top:.35em;font-size:.76em;color:var(--muted);white-space:pre-wrap}
+.msg-think summary{cursor:pointer;opacity:.7;list-style:none;width:max-content}
+.msg-think summary::-webkit-details-marker{display:none}
+.msg-think[open] summary{opacity:1;margin-bottom:.2em}
+.msg-think div{padding-left:.6em;border-left:2px solid var(--line);margin:.15em 0}
+.msg-offer{display:flex;gap:.4em;margin-top:.45em;font-size:.82em}
+.msg-offer button{background:none;border:1px solid var(--line);border-radius:999px;padding:.15em .8em;cursor:pointer;color:inherit}
+.msg-offer button.msg-offer-yes{border-color:var(--gold,#d4af37);color:var(--gold,#d4af37)}
+.msg-offer button:disabled{opacity:.5;cursor:default}
 .msg.typing span{display:inline-block;animation:typing 1.2s infinite}
 .msg.typing span:nth-child(2){animation-delay:.2s}.msg.typing span:nth-child(3){animation-delay:.4s}
 .msg.typing .typing-sec{animation:none;font-size:.8em;margin-left:.4em}
