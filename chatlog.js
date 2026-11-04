@@ -9,6 +9,9 @@ const {DatabaseSync}=require('node:sqlite');
 const memory=require('./memory-core');
 const learn=require('./learn');
 const memskills=require('./memskills');
+const evidence=require('./evidence');
+const plans=require('./plans');
+const thoughts=require('./thoughts');
 const DB=process.env.TENMAYURIKA_MEMORY_DB?path.resolve(process.env.TENMAYURIKA_MEMORY_DB):path.join(__dirname,'data','tenmayurika.sqlite');
 const MAX_TEXT=8000,BATCH=5;
 const STOP=new Set('что как где когда кто чем чего это эти мне меня мой моя мои твой ты вы для про при над под без или если уже ещё еще так там тут вот надо нужно можно есть очень просто скажи расскажи покажи какой какая какие'.split(' '));
@@ -29,7 +32,12 @@ function open(){
 function save(role,text,skip=false){
  const t=String(text||'');if(!t.trim()||!['user','assistant'].includes(role))return null;
  const db=open();
- try{return Number(db.prepare('INSERT INTO chat_log(at,role,text,learned) VALUES(?,?,?,?)').run(new Date().toISOString(),role,t.slice(0,MAX_TEXT),role==='user'&&!skip&&t.trim().length>=8?0:2).lastInsertRowid)}finally{db.close()}
+ try{
+  // Короткий ответ на вопрос Юрики («Аня» на «как зовут сестру?») — тоже есть что запомнить.
+  let learnable=role==='user'&&!skip&&t.trim().length>=8;
+  if(role==='user'&&!skip&&!learnable&&t.trim().length>=2){const prev=db.prepare('SELECT role,text FROM chat_log ORDER BY id DESC LIMIT 1').get();learnable=!!(prev&&prev.role==='assistant'&&/\?/.test(prev.text))}
+  return Number(db.prepare('INSERT INTO chat_log(at,role,text,learned) VALUES(?,?,?,?)').run(new Date().toISOString(),role,t.slice(0,MAX_TEXT),learnable?0:2).lastInsertRowid);
+ }finally{db.close()}
 }
 function autoLearn(){const db=open();try{const r=db.prepare("SELECT value FROM brain_settings WHERE key='autolearn'").get();return r?r.value==='1':true}finally{db.close()}}
 function setAutoLearn(on){const db=open();try{db.prepare("INSERT INTO brain_settings(key,value) VALUES('autolearn',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(on?'1':'0');return !!on}finally{db.close()}}
@@ -84,6 +92,9 @@ function apply(r,sourceId){
  for(const u of r.updates||[]){try{const res=memory.addFact({...u.fact,sourceId,confidence:conf,restore:false});if(!res.duplicate){n++;born.push(res.id);if(res.id!==u.id)memory.retireFact(u.id,'updated')}}catch(e){if(!(e instanceof TypeError))throw e}}
  for(const f of r.retire||[])if(memory.retireFact(f.id,'outdated'))n++;
  if(born.length&&r.skills?.length)memskills.attribute(born,r.skills);
+ // Уже известное, сказанное снова, — подтверждение (уверенность растёт), а не дубль.
+ for(const id of r.confirmed||[]){try{evidence.confirm(id,sourceId)}catch(e){console.error('Evidence failed:',e.name)}}
+ r.born=born;
  return n;
 }
 // Перезапоминание: старые сообщения, где встречаются подсказки нового или уточнённого навыка, разбираются заново.
@@ -99,6 +110,15 @@ function relearn(cues,limit=30){
  }finally{db.close()}
 }
 function message(id){const db=open();try{return db.prepare('SELECT id,at,role,text,learned,facts FROM chat_log WHERE id=?').get(id)||null}finally{db.close()}}
+// До трёх реплик перед сообщением, не старше получаса: для разбора «Аня» в ответ на «как зовут сестру?».
+function before(id,n=3){
+ const db=open();
+ try{
+  const row=db.prepare('SELECT at FROM chat_log WHERE id=?').get(id);if(!row)return [];
+  const from=new Date(Date.parse(row.at)-30*60*1000).toISOString();
+  return db.prepare('SELECT role,text FROM chat_log WHERE id<? AND at>=? ORDER BY id DESC LIMIT ?').all(id,from,n).reverse().map(r=>({role:r.role,text:r.text.slice(0,600)}));
+ }finally{db.close()}
+}
 // Фоновый разбор: по несколько сообщений за проход, по одному запросу к модели на сообщение.
 let busy=false;
 async function learnPending(limit=BATCH){
@@ -106,12 +126,15 @@ async function learnPending(limit=BATCH){
  busy=true;let processed=0,added=0;
  try{
   const db=open();let rows;
-  try{rows=db.prepare("SELECT id,text FROM chat_log WHERE role='user' AND learned=0 ORDER BY id LIMIT ?").all(limit)}finally{db.close()}
+  try{rows=db.prepare("SELECT id,at,text FROM chat_log WHERE role='user' AND learned=0 ORDER BY id LIMIT ?").all(limit)}finally{db.close()}
   for(const row of rows){
    let n=0;
    try{
-    const r=await learn.extract({text:row.text,source:'chat:'+row.id,domain:'chat'});
+    // Соседние реплики: на что человек отвечал и о ком шла речь (в пределах получаса).
+    const r=await learn.extract({text:row.text,source:'chat:'+row.id,domain:'chat',context:before(row.id)});
     n=apply(r,'chat:'+row.id);
+    // Срок в будущем («в следующем месяце переезжаю») — факт становится планом, потом Юрика спросит, сбылось ли.
+    if(r.born?.length){try{const made=plans.capture(row.text,memory.factsById(r.born),row.at);if(made.length)thoughts.add('future','Запомнила план: '+made.map(p=>'«'+p.fact.subject+' — '+p.fact.predicate+' '+p.fact.object+'» '+p.phrase).join('; '))}catch(e){console.error('Plan capture failed:',e.name)}}
    }catch(e){console.error('Chat learning failed:',e.name)}
    const w=open();try{w.prepare('UPDATE chat_log SET learned=1,facts=facts+? WHERE id=?').run(n,row.id)}finally{w.close()}
    processed++;added+=n;
@@ -119,4 +142,4 @@ async function learnPending(limit=BATCH){
   return {processed,facts:added};
  }finally{busy=false}
 }
-module.exports={save,search,between,around,stats,recent,message,autoLearn,setAutoLearn,learnPending,relearn,apply};
+module.exports={before,save,search,between,around,stats,recent,message,autoLearn,setAutoLearn,learnPending,relearn,apply};

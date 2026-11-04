@@ -112,7 +112,11 @@ function open(){
   source TEXT NOT NULL DEFAULT 'rules', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(subject,predicate,object));
   CREATE TABLE IF NOT EXISTS brain_suggestions(
   id TEXT PRIMARY KEY, kind TEXT NOT NULL, ref TEXT NOT NULL, text TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'new',
-  created_at TEXT NOT NULL, shown_at TEXT, done_at TEXT, UNIQUE(kind,ref));`);
+  created_at TEXT NOT NULL, shown_at TEXT, done_at TEXT, UNIQUE(kind,ref));
+  CREATE TABLE IF NOT EXISTS memory_plans(fact_id TEXT PRIMARY KEY, due TEXT NOT NULL, phrase TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'open', at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS memory_plans_due ON memory_plans(status,due);
+  CREATE TABLE IF NOT EXISTS memory_evidence(fact_id TEXT NOT NULL, source_id TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY(fact_id,source_id));
+  CREATE TABLE IF NOT EXISTS memory_fact_vectors(fact_id TEXT PRIMARY KEY, model TEXT NOT NULL, text TEXT NOT NULL, vec BLOB NOT NULL, at TEXT NOT NULL);`);
   ready.add(file);
  }
  return db;

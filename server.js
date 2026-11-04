@@ -116,7 +116,7 @@ async function handleBrain(req,res,p,url){
   // Мышление: поток мыслей, настройки, догадки, вопросы, забытое, предложения, рост по дням.
   if(req.method==='GET'&&p==='/api/brain/thoughts')return respond(res,200,{items:thoughts.since(Number(url.searchParams.get('since'))||0,limitParam(url,60,200)),settings:thoughts.settings(),labels:thoughts.LABELS});
   if(req.method==='POST'&&p==='/api/brain/settings'){const input=await body(req);return respond(res,200,thoughts.setSetting(input?.key,input?.value))}
-  if(req.method==='GET'&&p==='/api/brain/thinking')return respond(res,200,{guesses:guesses.list(null,30),guessStats:guesses.stats(),questions:curiosity.list(null,30),questionStats:curiosity.stats(),forgotten:strength.forgotten({limit:20}),strength:strength.stats(),suggestions:initiative.list(null,20),suggestionStats:initiative.stats(),settings:thoughts.settings(),labels:thoughts.LABELS});
+  if(req.method==='GET'&&p==='/api/brain/thinking')return respond(res,200,{plans:require('./plans').upcoming(10),tune:require('./tune').view(),vectors:require('./factvec').status(),guesses:guesses.list(null,30),guessStats:guesses.stats(),questions:curiosity.list(null,30),questionStats:curiosity.stats(),forgotten:strength.forgotten({limit:20}),strength:strength.stats(),suggestions:initiative.list(null,20),suggestionStats:initiative.stats(),settings:thoughts.settings(),labels:thoughts.LABELS});
   if(req.method==='POST'&&p==='/api/brain/guesses/answer'){const input=await body(req);if(typeof input?.yes!=='boolean')return respond(res,400,{error:'Invalid value'});const r=guesses.answer(input.id,input.yes);return r?respond(res,200,r):respond(res,404,{error:'Not found'})}
   if(req.method==='POST'&&p==='/api/brain/questions/dismiss'){const input=await body(req);return curiosity.dismiss(input?.id)?respond(res,200,{ok:true}):respond(res,404,{error:'Not found'})}
   if(req.method==='POST'&&p==='/api/brain/forgotten/restore'){const input=await body(req);const ids=Array.isArray(input?.ids)?input.ids.filter(x=>typeof x==='string').slice(0,50):[];const r=strength.remember(ids);if(r.length)thoughts.add('wake','Вы вернули забытое: '+r.map(f=>f.subject+' — '+f.predicate+' '+f.object).slice(0,3).join('; '));return respond(res,200,{restored:r.length})}
@@ -226,6 +226,7 @@ async function handleLlm(req,res,p){
   if(req.method==='POST'&&p==='/api/llm')return respond(res,200,llm.save(await body(req)));
   if(req.method==='POST'&&p==='/api/llm/models')return respond(res,200,{models:await llm.listModels()});
   if(req.method==='POST'&&p==='/api/llm/test')return respond(res,200,await llm.test());
+  if(req.method==='POST'&&p==='/api/llm/embed-test')return respond(res,200,await llm.embedTest());
   return respond(res,404,{error:'Not found'});
  }catch(e){
   if(e instanceof SyntaxError)throw e;

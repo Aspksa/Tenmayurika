@@ -3,14 +3,8 @@ const path=require('node:path');
 // Векторы лежат рядом с базой: TENMAYURIKA_DATA_DIR (тесты) изолирует и их, чтобы сверка не тронула рабочий индекс.
 const VECTORS=path.join(process.env.TENMAYURIKA_DATA_DIR?path.resolve(process.env.TENMAYURIKA_DATA_DIR):path.join(__dirname,'data'),'vectors');
 let database;
-async function embed(text){
- if(!process.env.EMBEDDING_URL)return null;
- const response=await fetch(process.env.EMBEDDING_URL,{method:'POST',headers:{'Content-Type':'application/json',...(process.env.EMBEDDING_API_KEY?{Authorization:'Bearer '+process.env.EMBEDDING_API_KEY}:{})},body:JSON.stringify({model:process.env.EMBEDDING_MODEL||'text-embedding-3-small',input:text}),signal:AbortSignal.timeout(15000)});
- if(!response.ok)throw Error('Embedding API HTTP '+response.status);
- const data=await response.json(),v=data.data?.[0]?.embedding;
- if(!Array.isArray(v)||!v.length||!v.every(Number.isFinite))throw Error('Invalid embedding vector');
- return v;
-}
+// Эмбеддинги: модель из «Модель ИИ» или EMBEDDING_URL из .env (llm.js).
+async function embed(text){return require('./llm').embed(text)}
 async function connect(){if(!database){const lance=await import('@lancedb/lancedb');database=await lance.connect(VECTORS)}return database}
 async function syncNote(note){
  const vector=await embed(note.title+'\n'+(note.content||''));if(!vector)return {enabled:false,reason:'Embedding provider not configured'};

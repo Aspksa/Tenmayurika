@@ -9,7 +9,9 @@ const PRESETS={
  openai:{label:'OpenAI',baseUrl:'https://api.openai.com/v1'},
  custom:{label:'Другой OpenAI-совместимый',baseUrl:''}
 };
-const DEFAULTS={enabled:true,provider:'cloudru',baseUrl:PRESETS.cloudru.baseUrl,apiKey:'',model:'',temperature:0.6,maxTokens:1024,useTools:true,systemPrompt:''};
+const DEFAULTS={enabled:true,provider:'cloudru',baseUrl:PRESETS.cloudru.baseUrl,apiKey:'',model:'',temperature:0.6,maxTokens:1024,useTools:true,systemPrompt:'',embeddingModel:''};
+// Модели эмбеддингов (поиск по смыслу), которые стоит предложить в меню для Cloud.ru.
+const EMBEDDING_HINTS={cloudru:['BAAI/bge-m3','Qwen/Qwen3-Embedding-0.6B','Qwen/Qwen3-Embedding-8B'],openai:['text-embedding-3-small','text-embedding-3-large'],custom:[]};
 
 const dataDir=()=>process.env.TENMAYURIKA_DATA_DIR?path.resolve(process.env.TENMAYURIKA_DATA_DIR):path.join(__dirname,'data');
 const file=()=>path.join(dataDir(),'llm-settings.json');
@@ -37,6 +39,7 @@ function save(input){
  if('model' in input){const m=String(input.model||'').trim();if(m.length>200)throw new TypeError('Слишком длинное имя модели');next.model=m}
  if('temperature' in input){const t=Number(input.temperature);if(!Number.isFinite(t)||t<0||t>2)throw new TypeError('Температура должна быть от 0 до 2');next.temperature=t}
  if('maxTokens' in input){const n=Number(input.maxTokens);if(!Number.isInteger(n)||n<16||n>32000)throw new TypeError('Длина ответа: от 16 до 32000 токенов');next.maxTokens=n}
+ if('embeddingModel' in input){const m=String(input.embeddingModel||'').trim();if(m.length>200)throw new TypeError('Слишком длинное имя модели эмбеддингов');next.embeddingModel=m}
  if('systemPrompt' in input){const s=String(input.systemPrompt||'');if(s.length>4000)throw new TypeError('Характер слишком длинный (до 4000 символов)');next.systemPrompt=s}
  for(const k of ['enabled','useTools'])if(k in input)next[k]=input[k]===true;
  fs.mkdirSync(dataDir(),{recursive:true});
@@ -58,7 +61,8 @@ function config(){
 function view(){
  const s=stored(),c=config();
  const base=s||{...DEFAULTS};
- return {provider:base.provider,baseUrl:base.baseUrl,model:base.model,enabled:base.enabled,useTools:base.useTools,temperature:base.temperature,maxTokens:base.maxTokens,systemPrompt:base.systemPrompt,
+ const e=embedConfig();
+ return {embeddingModel:base.embeddingModel||'',embeddingActive:Boolean(e),embeddingSource:e?e.source:'none',embeddingHints:EMBEDDING_HINTS,provider:base.provider,baseUrl:base.baseUrl,model:base.model,enabled:base.enabled,useTools:base.useTools,temperature:base.temperature,maxTokens:base.maxTokens,systemPrompt:base.systemPrompt,
   hasKey:Boolean(base.apiKey),keyHint:base.apiKey?'…'+base.apiKey.slice(-4):'',
   active:Boolean(c),source:c?c.source:'none',activeModel:c?c.model:'',
   presets:Object.fromEntries(Object.entries(PRESETS).map(([k,v])=>[k,{label:v.label,baseUrl:v.baseUrl,keyUrl:v.keyUrl||''}]))};
@@ -105,6 +109,31 @@ async function complete({messages,tools,temperature}){
  return {...msg,content:text};
 }
 
+// Эмбеддинги для поиска по смыслу: модель из «Модель ИИ» (тот же адрес и ключ), иначе EMBEDDING_URL из .env.
+function embedConfig(){
+ const s=stored();
+ if(s&&s.embeddingModel&&s.baseUrl)return {url:trimSlash(s.baseUrl)+'/embeddings',key:s.apiKey,model:s.embeddingModel,source:'settings'};
+ if(process.env.EMBEDDING_URL)return {url:process.env.EMBEDDING_URL,key:process.env.EMBEDDING_API_KEY||'',model:process.env.EMBEDDING_MODEL||'text-embedding-3-small',source:'env'};
+ return null;
+}
+// Строка → вектор, массив строк → массив векторов (в том же порядке). Без настройки — null.
+async function embed(input,{timeoutMs=15000}={}){
+ const c=embedConfig();if(!c)return null;
+ const many=Array.isArray(input),list=(many?input:[input]).map(t=>String(t||'').slice(0,4000));
+ if(!list.length)return many?[]:null;
+ const r=await fetch(c.url,{method:'POST',headers:headers(c.key),body:JSON.stringify({model:c.model,input:many?list:list[0]}),signal:AbortSignal.timeout(timeoutMs)});
+ if(!r.ok)throw Error('Embedding API HTTP '+r.status);
+ const data=await r.json(),rows=Array.isArray(data.data)?[...data.data].sort((a,b)=>(a.index??0)-(b.index??0)):[];
+ const out=rows.map(x=>x&&x.embedding);
+ if(out.length!==list.length||!out.every(v=>Array.isArray(v)&&v.length&&v.every(Number.isFinite)))throw Error('Invalid embedding vector');
+ return many?out:out[0];
+}
+async function embedTest(){
+ const c=embedConfig();if(!c)throw new TypeError('Модель эмбеддингов не выбрана');
+ const started=Date.now();
+ let v;try{v=await embed('проверка связи')}catch(e){throw new TypeError(/HTTP 40[13]/.test(e.message)?'Ключ не подошёл для эмбеддингов':/HTTP 404/.test(e.message)?'Модель эмбеддингов не найдена (HTTP 404)':'Эмбеддинги не ответили: '+e.message)}
+ return {ok:true,model:c.model,dim:v.length,ms:Date.now()-started};
+}
 async function test(){
  const c=config();if(!c)throw new TypeError('Модель не выбрана или выключена');
  const started=Date.now();
@@ -112,4 +141,4 @@ async function test(){
  return {ok:true,model:c.model,ms:Date.now()-started,reply:String(msg.content||'').slice(0,300)};
 }
 
-module.exports={PRESETS,save,view,config,listModels,complete,test,messageText};
+module.exports={PRESETS,save,view,config,listModels,complete,test,messageText,embedConfig,embed,embedTest};
