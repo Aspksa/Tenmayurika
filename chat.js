@@ -21,6 +21,7 @@ const growth=require('./growth');
 const core=require('./core');
 const soul=require('./soul');
 const psyche=require('./psyche');
+const heart=require('./heart');
 const selfrules=require('./selfrules');
 const mytools=require('./mytools');
 const selfcode=require('./selfcode');
@@ -584,6 +585,7 @@ async function modelReply(name,message,all,facts,notes,enabled,impl,result,past=
  // Сердцевина, оглавление памяти, знакомство и сводка начала разговора (идеи letta-code).
  try{side+=core.promptText({tools:selfEdit})}catch(e){console.error('Core prompt failed:',e.name)}
  try{side+=soul.promptText()}catch(e){console.error('Soul prompt failed:',e.name)}
+ try{side+=heart.promptText(message)}catch(e){console.error('Heart prompt failed:',e.name)}
  try{side+=psyche.promptText()+selfrules.promptText()+(allowed.includes('use_my_tool')?mytools.promptText():'')}catch(e){console.error('Psyche prompt failed:',e.name)}
  // Уроки помощников (agents.js): свой агент видит свои, в разговоре — уроки Секретаря и Исследователя.
  try{side+=agents.promptText({agent:result.agent||null,enabled})}catch(e){console.error('Agent lessons prompt failed:',e.name)}
@@ -670,6 +672,8 @@ async function reply(input,ctx={}){
  const corrected=answered?.effect?null:await learnFromFeedback(input,message);
  // Душа откликается на слова хозяина: черты крепнут, настроение меняется, дорогое запоминается (soul.js).
  let felt=null;try{felt=soul.feel(message)}catch(e){console.error('Soul failed:',e.name)}
+ // Сердце: потребности, подсознание, возвращение хозяина, переломные моменты (heart.js).
+ try{heart.onMessage(message,felt)}catch(e){console.error('Heart failed:',e.name)}
  // Предпочтения («отвечай короче») действуют сразу, уже в этом ответе.
  let prefs=[];try{prefs=preferences.learnFrom(message,'chat')}catch(e){console.error('Preference learning failed:',e.name)}
  // Каждое сообщение сохраняется; команды («дело: …»), поправки и пожелания к ответам не разбираются фоном
@@ -693,6 +697,9 @@ async function reply(input,ctx={}){
  delete out.offerId;
  if(answered?.effect){out.answered=answered.effect;out.changed=true}
  if(felt?.level)out.soulGrew=felt.level;
+ if(out.tools?.length)try{heart.helped()}catch{}
+ // Фоном: что хозяин чувствует на самом деле, по смыслу (heart.sense).
+ if(!out.secret&&llm.config())setImmediate(()=>heart.sense(message,{complete:llm.complete}).catch(e=>console.error('Sense failed:',e.name)));
  // Учимся фоном, не задерживая ответ.
  // Затем новые факты получают векторы для поиска по смыслу (если выбрана модель эмбеддингов).
  setImmediate(()=>chatlog.learnPending().then(()=>factvec.index()).catch(e=>console.error('Chat learning failed:',e.name)));

@@ -27,6 +27,7 @@ const zones=require('./zones');
 const memskills=require('./memskills');
 const core=require('./core');
 const psyche=require('./psyche');
+const heart=require('./heart');
 const teacher=require('./teacher');
 const agents=require('./agents');
 const selfrules=require('./selfrules');
@@ -275,6 +276,8 @@ async function run({ws,complete=null,reason='idle'}={}){
   try{d.core=await core.rethink({complete,context:{diary:diary(5),skills:skills.list().filter(x=>x.status==='active').map(x=>x.rule),insights:insightList(5).map(i=>i.text)}})}catch(e){console.error('Reflect core failed:',e.name)}
   // Душа и рост себя: мечты, вкусы, зеркало, сны, летопись и письмо; свои правила; правка своего кода (раз в сутки).
   try{d.psyche=await psyche.reflect({complete})}catch(e){console.error('Reflect psyche failed:',e.name)}
+  // Сердце: её день без хозяина, рассказ о себе, переломные моменты.
+  try{const h=await heart.live({complete});d.heart={day:!!h?.day,story:!!h?.story}}catch(e){console.error('Reflect heart failed:',e.name)}
   // Мечта без помощника: душа придумывает агента — он появится только после «да» хозяина.
   try{const p=await agents.proposeForGoals({complete});if(p)d.proposal={name:p.name,goal:p.goal}}catch(e){console.error('Reflect agent proposal failed:',e.name)}
   try{d.selfRules=(await selfrules.induce({complete})).length}catch(e){console.error('Reflect self rules failed:',e.name)}

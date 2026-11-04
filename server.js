@@ -27,6 +27,7 @@ const selfstudy=require('./selfstudy');
 const core=require('./core');
 const soul=require('./soul');
 const psyche=require('./psyche');
+const heart=require('./heart');
 const selfrules=require('./selfrules');
 const mytools=require('./mytools');
 const selfcode=require('./selfcode');
@@ -109,7 +110,7 @@ async function handleBrain(req,res,p,url){
   if(req.method==='GET'&&p==='/api/brain/ties')return respond(res,200,{...require('./ties').view(80),exams:require('./teacher').exams().slice(0,12)});
   if(req.method==='POST'&&p==='/api/brain/soul/reset')return respond(res,200,soul.reset());
   // Внутренний мир и рост себя (psyche.js, selfrules.js, mytools.js, selfcode.js). Код меняется только по кнопке хозяина.
-  if(req.method==='GET'&&p==='/api/brain/psyche')return respond(res,200,{soul:soul.view(),...psyche.view(),rules:selfrules.rules(),tune:selfrules.tuneView(),tools:mytools.list(),code:selfcode.view()});
+  if(req.method==='GET'&&p==='/api/brain/psyche')return respond(res,200,{soul:soul.view(),heart:heart.view(),...psyche.view(),rules:selfrules.rules(),tune:selfrules.tuneView(),tools:mytools.list(),code:selfcode.view()});
   if(req.method==='POST'&&p.startsWith('/api/brain/psyche/')){
    const input=await body(req)||{},act=p.slice('/api/brain/psyche/'.length);
    try{

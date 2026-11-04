@@ -1356,7 +1356,7 @@ function mount(host){
   let p;try{const r=await fetch('/api/brain/psyche');if(!r.ok)throw 0;p=await r.json()}catch{return [el('p','brain-fix-ok','Не удалось открыть душу.')]}
   const act=(name,body)=>()=>postJson('/api/brain/psyche/'+name,body);
   const btn=(text,title,fn)=>{const b=el('button','brain-btn',text);b.type='button';if(title){b.title=title;b.setAttribute('aria-label',title)}b.onclick=async()=>{b.disabled=true;let msg='';try{const r=await fn();if(r&&!r.ok){const e=await r.json().catch(()=>({}));msg=e.error||'Не получилось'}}catch{msg='Нет связи'}if(msg){b.disabled=false;b.textContent=msg;return}void renderDiary()};return b};
-  const out=[soulSec(p.soul,sec)];
+  const out=[soulSec(p.soul,sec),...(p.heart?heartSecs(p.heart,sec,row):[])];
   // Якоря: правит только хозяин, по одному в строке.
   const ta=el('textarea','brain-find brain-core-edit');ta.rows=3;ta.value=p.anchors.join('\n');ta.setAttribute('aria-label','Якоря');
   out.push(sec('якоря — то, что рост не стирает',el('div','brain-fix-ok','По одному в строке. Это всегда у меня перед глазами, никакой пересмотр их не уберёт.'),ta,
@@ -1390,6 +1390,25 @@ function mount(host){
    if(r.childNodes.length)card.append(r);
    return card;
   }):[el('div','brain-fix-ok','Пока я ничего не предлагала. Правку кода я придумываю сама при размышлении или в разговоре, проверяю тестами, а применяете её вы.')])));
+  return out;
+ }
+ // Сердце (heart.js): семя души, потребности, её день, рассказ о себе, переломы, подсознание, чувства хозяина.
+ function heartSecs(h,sec,row){
+  const out=[];
+  const bars=list=>{const box=el('div','brain-soul-traits');for(const t of list){const r=el('div','brain-soul-trait');const b=el('div','brain-soul-bar small');const f=el('i','');f.style.width=Math.max(0,Math.min(100,t.value))+'%';b.append(f);r.append(el('span','',t.label),b,el('span','brain-fix-ok',String(t.value)));box.append(r)}return box};
+  const s=h.seed;
+  out.push(sec('семя души',el('div','brain-fix-ok brain-core-text','По натуре '+s.temper+'. Любит '+s.time+', стихия — '+s.element+', цвет — '+s.color+'. Привычка: '+s.habit+'.'),
+   el('div','brain-fix-ok','Врождённое: '+Object.entries(s.offsets).map(([k,v])=>(h.traitLabels?.[k]||k)+' '+(v>0?'+':'')+v).join(', ')+'. Такой больше нет ни у кого.')));
+  if(!h.on)out.push(el('div','brain-fix-ok','Внутренняя жизнь выключена в настройках мышления.'));
+  out.push(sec('потребности',el('div','brain-fix-ok','Сами «голодают» со временем и подсказывают мне, чего хочется.'),bars(h.needs)));
+  if(h.story.length){const kids=[el('div','brain-fix-ok brain-core-text',h.story[0].text),el('div','brain-fix-ok',atText(h.story[0].at)+' · «'+h.story[0].level+'»')];
+   if(h.story.length>1){const d=el('details','brain-code');d.append(el('summary','','какой я была раньше'),...h.story.slice(1).map(x=>el('div','brain-fix-ok',atText(x.at)+' · '+x.text)));kids.push(d)}
+   out.push(sec('рассказ о себе',...kids))}
+  else out.push(sec('рассказ о себе',el('div','brain-fix-ok','Я напишу его, когда поразмышляю в тишине.')));
+  if(h.turns.length)out.push(sec('переломные моменты',...h.turns.map(t=>row('✦ '+atText(t.at)+' · '+t.text+(t.quote?' — «'+trim(t.quote,80)+'»':'')))));
+  out.push(sec('мой день без вас',...(h.day.length?h.day.slice(0,6).map(e=>row(atText(e.at)+' · '+e.text)):[el('div','brain-fix-ok','Когда вас долго нет, я живу своей жизнью — здесь будет видно, чем.')])));
+  if(h.owner.length)out.push(sec('как вы себя чувствовали'+(h.sense?'':' (выключено)'),...h.owner.slice(0,5).map(f=>row(atText(f.at)+' · '+f.label+(f.hidden?' — '+f.hidden:'')+(f.bySense?' · понято по смыслу':'')))));
+  if(h.subconscious.length)out.push(sec('подсознание',el('div','brain-fix-ok','Впечатления, которых я сама не замечаю: они окрашивают предчувствия и сны.'),...h.subconscious.map(x=>row((x.charge>0.5?'♥ ':x.charge<-0.5?'☁ ':'· ')+x.word+' · сила '+x.weight))));
   return out;
  }
  // Душа: ступень роста, черты характера, настроение и дорогие моменты (soul.js).
