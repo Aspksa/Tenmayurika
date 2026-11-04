@@ -18,7 +18,9 @@ const realConfig=llm.config,realComplete=llm.complete;
 function fakeModel(fn){llm.config=()=>({model:'fake'});llm.complete=async({messages})=>({content:fn(messages[0].content,messages[messages.length-1].content)})}
 function noModel(){llm.config=realConfig;llm.complete=realComplete}
 const ws={notes:[],tasks:[]};
-test.after(()=>{noModel();fs.rmSync(dir,{recursive:true,force:true})});
+// На Windows файл базы может ещё держаться открытым до выхода процесса: временная папка тогда остаётся,
+// это не провал теста (проверки выше уже прошли).
+test.after(()=>{noModel();try{fs.rmSync(dir,{recursive:true,force:true,maxRetries:5,retryDelay:200})}catch(e){if(!['EPERM','EBUSY'].includes(e.code))throw e}});
 
 test('bank starts with seed skills and picks skills by text and domain',()=>{
  const names=memskills.list().map(s=>s.name);
