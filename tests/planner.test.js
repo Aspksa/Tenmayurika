@@ -190,3 +190,31 @@ test('bare hours and uppercase dayparts',()=>{
  const {parseTask}=require('../chat');
  assert.deepEqual(parseTask('созвон завтра в 10 #работа !'),{title:'созвон',category:'work',priority:'high',due:planner.ymd(planner.addDays(new Date(),1)),time:'10:00'});
 });
+
+test('planner lists: own lists hold tasks, built-ins can be renamed, deleting moves records to personal',async()=>{
+ const {server}=require('../server');
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ try{
+  const base='http://127.0.0.1:'+server.address().port;
+  const call=async(method,body)=>{const r=await fetch(base+'/api/items',{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return {status:r.status,data:await r.json()}};
+  const list=await call('POST',{collection:'lists',title:'  Здоровье ',color:'#7FD6A0'});
+  assert.equal(list.status,201);assert.equal(list.data.title,'Здоровье');assert.equal(list.data.color,'#7fd6a0');assert.match(list.data.id,/^l-/);
+  assert.equal((await call('POST',{collection:'lists',title:''})).status,400);
+  assert.equal((await call('POST',{collection:'lists',title:'x',color:'red'})).status,400);
+  const task=await call('POST',{collection:'tasks',title:'Пробежка',category:list.data.id});
+  assert.equal(task.status,201);assert.equal(task.data.category,list.data.id);
+  const note=await call('POST',{collection:'notes',title:'План тренировок',category:list.data.id});
+  assert.equal(note.data.category,list.data.id);
+  assert.equal((await call('POST',{collection:'tasks',title:'x',category:'l-missing'})).status,400);
+  assert.equal((await call('PATCH',{collection:'lists',id:'work',title:'Работа'})).data.title,'Работа');
+  assert.equal((await call('DELETE',{collection:'lists',id:'personal'})).status,400);
+  const removed=await call('DELETE',{collection:'lists',id:list.data.id});
+  assert.equal(removed.status,200);assert.equal(removed.data.moved,2);
+  assert.equal((await call('DELETE',{collection:'lists',id:list.data.id})).status,404);
+  const ws=await (await fetch(base+'/api/workspace')).json();
+  assert.equal(ws.tasks.find(t=>t.id===task.data.id).category,'personal');
+  assert.equal(ws.notes.find(n=>n.id===note.data.id).category,'personal');
+  assert.ok(!ws.lists.some(l=>l.id===list.data.id));
+  assert.equal(ws.lists.find(l=>l.id==='work').title,'Работа');
+ }finally{await new Promise(r=>server.close(r))}
+});
