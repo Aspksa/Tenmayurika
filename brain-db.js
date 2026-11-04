@@ -1,6 +1,7 @@
 'use strict';
 // Общая база «Мозга» для новых слоёв памяти: полезность записей, предпочтения, навыки,
-// сводки тем, причинные связи, выводы и дневник. Таблицы создаются один раз на процесс.
+// сводки тем, причинные связи, выводы и дневник; рост: крепнущие связи, карточки сущностей,
+// псевдонимы, свои типы, постепенно растущие зоны и отбор при размышлении. Таблицы создаются один раз на процесс.
 const fs=require('node:fs');
 const path=require('node:path');
 const {DatabaseSync}=require('node:sqlite');
@@ -38,7 +39,28 @@ function open(){
   source TEXT NOT NULL DEFAULT 'rules', created_at TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1);
   CREATE TABLE IF NOT EXISTS brain_diary(
   id TEXT PRIMARY KEY, at TEXT NOT NULL, text TEXT NOT NULL, details TEXT NOT NULL DEFAULT '{}');
-  CREATE TABLE IF NOT EXISTS brain_state(key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+  CREATE TABLE IF NOT EXISTS brain_state(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS memory_bonds(
+  a TEXT NOT NULL, b TEXT NOT NULL, charge REAL NOT NULL DEFAULT 0, uses INTEGER NOT NULL DEFAULT 0,
+  last_at TEXT NOT NULL, PRIMARY KEY(a,b));
+  CREATE TABLE IF NOT EXISTS memory_cards(
+  key TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, fact_ids TEXT NOT NULL DEFAULT '[]',
+  signature TEXT NOT NULL, grew INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL DEFAULT 'rules',
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS memory_aliases(
+  alias TEXT PRIMARY KEY, canonical TEXT NOT NULL, canonical_name TEXT NOT NULL, alias_name TEXT NOT NULL,
+  evidence TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'rules', created_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS memory_alias_rejects(alias TEXT NOT NULL, canonical TEXT NOT NULL, PRIMARY KEY(alias,canonical));
+  CREATE TABLE IF NOT EXISTS memory_entity_types(
+  key TEXT PRIMARY KEY, type TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'rules', updated_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS memory_types(
+  kind TEXT NOT NULL, name TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, multi INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'rules', created_at TEXT NOT NULL, PRIMARY KEY(kind,name));
+  CREATE TABLE IF NOT EXISTS memory_zones(entity TEXT PRIMARY KEY, zone TEXT NOT NULL, at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS memory_zones_zone ON memory_zones(zone);
+  CREATE TABLE IF NOT EXISTS memory_zone_info(
+  zone TEXT PRIMARY KEY, label TEXT NOT NULL, parent TEXT, created_at TEXT NOT NULL, split_at TEXT);
+  CREATE TABLE IF NOT EXISTS memory_selection(ref TEXT PRIMARY KEY, ok INTEGER NOT NULL DEFAULT 0, fix INTEGER NOT NULL DEFAULT 0, at TEXT NOT NULL);`);
   ready.add(file);
  }
  return db;

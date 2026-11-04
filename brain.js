@@ -201,7 +201,7 @@ function buildModel(ws,facts,conflicts,exp=[],topics=[]){
   const subjects=[...bySubject.values()].sort((a,b)=>b.list.length-a.list.length);
   big=subjects.filter(s=>s.list.length>=2).slice(0,6);rest=subjects.filter(s=>!big.includes(s)).flatMap(s=>s.list)}
  const factItem=f=>({id:'f:'+f.id,title:f.subject+' — '+f.predicate+' → '+f.object,meta:'факт · '+(f.source_id||'')+' · уверенность '+f.confidence,ts:ts(f.observed_at),weight:.6+.6*(+f.confidence||0),fact:f,open:()=>app()?.go('facts')});
- const factSub=s=>s.topic&&s.topic.entities.length>1?'тема · '+s.topic.entities.slice(1,3).join(', '):[...new Set(s.list.map(f=>f.predicate))].slice(0,2).join(' · ');
+ const factSub=s=>s.topic&&s.topic.parent?'выросла из «'+s.topic.parent+'»':s.topic&&s.topic.entities.length>1?'тема · '+s.topic.entities.slice(1,3).join(', '):[...new Set(s.list.map(f=>f.predicate))].slice(0,2).join(' · ');
  for(const s of big)add('fs:'+s.name.toLocaleLowerCase(),s.name.toLocaleLowerCase(),factSub(s),COLORS.facts,s.list.map(factItem),()=>app()?.go('facts'));
  add('facts','факты',rest.length+' '+plural(rest.length,'факт','факта','фактов'),COLORS.facts,rest.map(factItem),()=>app()?.go('facts'));
  add('conflicts','противоречия','сбой · '+conflicts.length,COLORS.conflicts,conflicts.map(c=>({id:'c:'+c.id,title:c.subject+' — '+c.predicate+': «'+c.earlier+'» или «'+c.newer+'»',meta:'противоречие',ts:ts(c.detected_at),weight:1.3,open:()=>app()?.go('facts')})),()=>app()?.go('facts'));
@@ -271,6 +271,14 @@ function readRecall(){const r=read(RECALL_KEY,{});return r&&typeof r==='object'&
 // Совместные вспоминания: пары записей, которые чат вспоминал вместе. Нить между ними крепнет.
 const CO_KEY='tenma.brain.co.v1';
 function readCo(){const c=read(CO_KEY,{});return c&&typeof c==='object'&&!Array.isArray(c)?c:{}}
+// Связи с сервера (growth.js): общие для всех браузеров, крепнут от совместных вспоминаний и угасают без дела.
+// Заряд сервера +1 сравним со счётчиком этого браузера; берётся большее.
+let srvBonds=[];
+function buildCo(){
+ const m=new Map(Object.entries(readCo()));
+ for(const b of srvBonds){const k=[b.a,b.b].sort().join('|'),c=b.charge+1;if(c>(m.get(k)||0))m.set(k,c)}
+ return [...m].filter(([,c])=>c>=2).sort((a,b)=>b[1]-a[1]).slice(0,200).map(([k,c])=>[...k.split('|'),c]);
+}
 function recordCo(ids){
  const list=[...new Set(ids)].slice(0,12);if(list.length<2)return;const co=readCo();
  for(let i=0;i<list.length;i++)for(let j=i+1;j<list.length;j++){const k=[list[i],list[j]].sort().join('|');co[k]=(co[k]||0)+1}
@@ -527,7 +535,7 @@ function mount(host){
   linkCount=new Map();for(const [a,b] of model.links){linkCount.set(a,(linkCount.get(a)||0)+1);linkCount.set(b,(linkCount.get(b)||0)+1)}
   if(seen.size>4000)seen=new Set([...neurons.keys()]);
   write(SEEN_KEY,[...seen]);
-  coList=Object.entries(readCo()).filter(([,c])=>c>=2).sort((a,b)=>b[1]-a[1]).slice(0,200).map(([k,c])=>[...k.split('|'),c]);
+  coList=buildCo();
   applied=true;renderHud();dirty=true;
  }
 
@@ -908,6 +916,10 @@ function mount(host){
   if(d.episodes)parts.push('вспоминала в ответах '+d.episodes+' '+plural(d.episodes,'раз','раза','раз'));
   return parts.length?'Затронет: '+parts.join(', ')+'.':'Ни с чем больше не связан.';
  }
+ // Карточка сущности (growth.js) для подсказки над фактом; ответы кешируются на время открытой страницы.
+ const cardCache=new Map();
+ function loadCard(name){const k=String(name||'').toLocaleLowerCase();if(!k)return Promise.resolve(null);if(cardCache.has(k))return cardCache.get(k);
+  const p=fetch('/api/brain/card?name='+encodeURIComponent(name)).then(r=>r.ok?r.json():null).catch(()=>null);cardCache.set(k,p);setTimeout(()=>cardCache.delete(k),60000);return p}
  function showTip(hit,x,y,withButton){
   if(!(hit&&hit.type==='neuron'&&withButton)&&!(focusN&&hit?.n===focusN))clearImpact();
   if(!hit){tip.hidden=true;return}
@@ -915,6 +927,7 @@ function mount(host){
   if(hit.type==='seed'){const f=hit.sd.f;tip.append(el('div','brain-tip-k','предлагаю запомнить'),el('div','brain-tip-t',f.subject+' — '+f.predicate+' → '+f.object),el('div','brain-tip-m',(String(f.source||'').startsWith('note:')?'из заметки':'из чата')+(f.via==='model'?' · нашла модель':' · по правилам')));
    if(withButton){const row=el('div','brain-row'),ok=el('button','brain-btn','✓ Запомнить'),no=el('button','brain-btn','✗');ok.type=no.type='button';ok.onclick=()=>acceptSeed(f.id);no.onclick=()=>{TenmaLearn.reject(f.id);tip.hidden=true;pinned=null};row.append(ok,no);tip.append(row)}}
   else if(hit.type==='neuron'){const it=hit.n.item,r=recall[it.id];tip.append(el('div','brain-tip-k',hit.n.lobe.label),el('div','brain-tip-t',trim(it.title,140)),el('div','brain-tip-m',it.meta+' · сила памяти '+Math.round(Math.min(1,it.str??1)*100)+'%'+(r?' · вспоминала '+r.n+' '+plural(r.n,'раз','раза','раз'):'')+(linkCount.get(it.id)?' · связей '+linkCount.get(it.id):'')));
+   if(withButton&&it.fact){const cd=el('div','brain-tip-m brain-card');cd.hidden=true;tip.append(cd);loadCard(it.fact.subject).then(c=>{if(!c||tip.hidden)return;cd.textContent='карточка'+(c.type?' · '+c.type:'')+(c.aliases.length?' · она же '+c.aliases.join(', '):'')+': '+trim(c.description,220)+(c.grew?' · дописана '+c.grew+' '+plural(c.grew,'фактом','фактами','фактами'):'');cd.hidden=false})}
    if(withButton&&it.fact){const im=el('div','brain-tip-m brain-impact','Смотрю, что связано…');tip.append(im);loadImpact(it).then(d=>{if(d&&impactOf===it.id)im.textContent=impactText(d)+(impactIds.size?' Подсвечено.':'');else if(!d)im.remove()})}
    if(withButton){const b=el('button','brain-btn','Открыть');b.type='button';b.onclick=()=>{recordRecall([it.id]);recall=readRecall();grow(hit.n,true);it.open()};tip.append(b)}}
   else if(hit.type==='group'){const g=hit.g,ks={star:'дел',drop:'заметок',crystal:'фактов'};tip.append(el('div','brain-tip-k',hit.l.label+' · группа'),el('div','brain-tip-t',g.ids.length+' '+plural(g.ids.length,'запись','записи','записей')),el('div','brain-tip-m',Object.entries(g.kinds).map(([k,v])=>v+' '+ks[k]).join(' · ')+' · двойной щелчок — раскрыть'))}
@@ -968,6 +981,7 @@ function mount(host){
   // Опрос раз в 20 с: если факты и противоречия не менялись, мозг не пересобирается (на 10 тыс. записей это заметно).
   void loadChatStat();
   try{const r=await fetch('/api/brain/strength');if(r.ok){const d=await r.json();if(d&&typeof d==='object')srv=d}}catch{}
+  try{const r=await fetch('/api/brain/bonds?limit=400');if(r.ok){const d=await r.json();if(Array.isArray(d)){srvBonds=d;coList=buildCo();dirty=true}}}catch{}
   const sig=facts.length+':'+facts.map(f=>f.id).join(',')+'|'+conflicts.map(c=>c.id).join(',')+'|'+exp.map(e=>e.id+(e.feedback||'')).join(',')+'|'+topics.map(t=>t.id+':'+t.size).join(',');
   if(sig===factSig&&applied)return;factSig=sig;
   if(host.isConnected)apply();
@@ -1041,7 +1055,7 @@ function mount(host){
   recall=readRecall();const ids=recallIds(e.detail).filter(id=>neurons.has(id));
   if(!ids.length)return;
   for(const id of ids)grow(neurons.get(id),true);
-  coList=Object.entries(readCo()).filter(([,c])=>c>=2).sort((a,b)=>b[1]-a[1]).slice(0,200).map(([k,c])=>[...k.split('|'),c]);
+  coList=buildCo();
   ids.slice(0,12).forEach((id,i)=>{const n=neurons.get(id);setTimeout(()=>{if(n.lobe.state)impulses.push({lobe:n.lobe,item:n.item,u:0,f:Math.floor(Math.random()*n.lobe.state.fil.length),recall:true})},i*140)});
   const first=neurons.get(ids[0]);coreKind=e.detail?.experience?.used?.length?'вспоминаю опыт':'вспоминаю';coreText=first.item.title;coreTextT=3.5;
   buildChain(ids,e.detail?.text);
@@ -1159,7 +1173,18 @@ function mount(host){
    sec('как вы просили отвечать',...m.preferences.map(p=>row(p.text,()=>postJson('/api/brain/preferences/remove',{id:p.id}),'Убрать предпочтение')),prefForm),
    ...(m.summaries.length?[sec('сводки тем',...m.summaries.slice(0,8).map(t=>row(t.summary.startsWith(t.label)?t.summary:t.label+' · '+t.summary)))]:[]),
    ...(m.links.count?[sec('причинные связи ('+m.links.count+')',...m.links.recent.slice(0,10).map(l=>row(end(l.a)+' → '+l.type+' → '+end(l.b))))]:[]),
+   ...(m.growth?[growthSec(m.growth,sec,row)]:[]),
    ...(hot?[el('p','brain-fix-ok','В рабочей памяти разговора сейчас '+hot+' '+plural(hot,'запись','записи','записей')+'.')]:[]));
+ }
+ // Рост: связи, свои типы, карточки сущностей и псевдонимы (снять псевдоним можно здесь же).
+ function growthSec(g,sec,row){
+  const b=g.bonds||{},types=(g.types||[]).filter(t=>t.kind==='entity'),rels=(g.types||[]).filter(t=>t.kind==='relation');
+  const kids=[el('div','brain-fix-ok','Связи: сильных '+(b.strong||0)+', средних '+(b.medium||0)+', слабых '+(b.weak||0)+'. Карточек '+(g.cardCount||0)+(g.grew?', дописано '+g.grew:'')+'.')];
+  if(types.length)kids.push(el('div','brain-fix-ok','Типы: '+types.map(t=>t.name+' '+t.count+(t.source==='model'?' ✦':'')).join(', ')+'.'));
+  if(rels.length)kids.push(el('div','brain-fix-ok','Свои связи: '+rels.map(t=>t.name+(t.multi?' (много значений)':'')).join(', ')+'.'));
+  for(const c of (g.cards||[]).slice(0,5))kids.push(row((c.type?c.type+' · ':'')+trim(c.description,180)));
+  for(const a of (g.aliases||[]).slice(0,8))kids.push(row('«'+a.alias+'» = «'+a.canonical+'»',()=>postJson('/api/brain/aliases/remove',{alias:a.alias}),'Это разные'));
+  return sec('рост',...kids);
  }
  diaBtn.onclick=()=>{diaBox.hidden=false;void renderDiary()};
  const onWorkspace=()=>apply();

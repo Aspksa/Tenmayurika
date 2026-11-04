@@ -755,6 +755,7 @@ html.brain-fs-lock,html.brain-fs-lock body{overflow:hidden}
 .brain-fix-impact{color:#a89a86!important;font-size:.62rem!important}
 .brain-ov-chips{display:flex;flex-wrap:wrap;gap:.35rem}
 .brain-tip .brain-impact{color:var(--ember)}
+.brain-tip .brain-card{color:#d8c9a8;margin-top:4px}
 /* Слои мозга: WebGL (частицы + свечение) → 2D (нити, нейроны; смешиваются «экраном») → подписи → зерно */
 .brain-stage>canvas.brain-gl,.brain-stage>canvas.brain-lab{pointer-events:none}
 .brain-stage:not(.gl)>canvas.brain-gl{display:none}

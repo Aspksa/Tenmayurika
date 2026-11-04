@@ -5,6 +5,9 @@
 //  • причинные связи — «причина», «условие», «сначала — потом» между заметками, делами и фактами;
 //  • навыки — правила из подтверждённых ответов (skills.js);
 //  • выводы — не больше одного на тему, где появилось новое;
+//  • рост (growth.js, zones.js): глубокая чистка (дубли, псевдонимы, «он/она»), свои типы, карточки
+//    сущностей, новые и поделившиеся зоны, отбор (подтверждённое крепнет, поправленное слабеет),
+//    угасшие связи уходят;
 //  • дневник — короткая запись о том, что сделано, видна в «Мозге» (окно «Дневник»).
 // Повторно — не чаще раза в час и только если в памяти что-то изменилось.
 const crypto=require('node:crypto');
@@ -13,6 +16,8 @@ const predicates=require('./predicates');
 const skills=require('./skills');
 const links=require('./links');
 const experience=require('./experience');
+const growth=require('./growth');
+const zones=require('./zones');
 const {use,tx,parse,state,setState}=require('./brain-db');
 const IDLE_MS=Number(process.env.TENMAYURIKA_IDLE_MS)||10*60*1000,GAP_MS=60*60*1000;
 const MAX_INSIGHTS=3,MIN_TOPIC=3,DIARY_KEEP=200;
@@ -72,6 +77,9 @@ async function findLinks(ws,complete){
  let added=0;for(const l of found)try{if(links.add(l.a,l.type,l.b,{evidence:l.evidence,source:l.source||'rules'}))added++}catch(e){if(!(e instanceof TypeError))throw e}
  const alive=new Set([...records.map(r=>r.kind+':'+r.ref),...facts.map(f=>'fact:'+f.id)]);
  links.prune((k,r)=>alive.has(k+':'+r));
+ // Крепнущие связи «Мозга» держатся только между живыми записями.
+ const short=new Set([...(ws.notes||[]).map(n=>'n:'+n.id),...facts.map(f=>'f:'+f.id)]);
+ try{growth.pruneBonds(k=>short.has(k))}catch(e){console.error('Bond prune failed:',e.name)}
  return added;
 }
 
@@ -131,6 +139,23 @@ function diaryText(d){
  if(d.links)parts.push('нашла '+d.links+' '+plural(d.links,'причинную связь','причинные связи','причинных связей'));
  if(d.skills)parts.push('вывела '+d.skills+' '+plural(d.skills,'новый навык','новых навыка','новых навыков'));
  if(d.episodes)parts.push('вспомнила '+d.episodes+' '+plural(d.episodes,'ответ','ответа','ответов')+' и оценки к ним');
+ const c=d.clean||{};
+ if(c.merged)parts.push('слила '+c.merged+' '+plural(c.merged,'повтор','повтора','повторов'));
+ if(c.aliases)parts.push('поняла, что '+c.aliases+' '+plural(c.aliases,'имя','имени','имён')+' — это другие названия того же');
+ if(c.resolved)parts.push('разобралась, о ком «он/она» в '+c.resolved+' '+plural(c.resolved,'факте','фактах','фактах'));
+ const born=(d.types?.born||[]).filter(t=>t.kind==='entity');
+ if(born.length)parts.push('завела '+(born.length===1?'новый тип «'+born[0].name+'»':'новые типы: '+born.map(t=>'«'+t.name+'»').join(', ')));
+ const rel=(d.types?.born||[]).filter(t=>t.kind==='relation');
+ if(rel.length)parts.push('выучила '+(rel.length===1?'новую связь «'+rel[0].name+'»':'новые связи: '+rel.map(t=>'«'+t.name+'»').join(', ')));
+ const cr=d.cards||{};
+ if(cr.created)parts.push('завела '+cr.created+' '+plural(cr.created,'карточку','карточки','карточек'));
+ if(cr.grown)parts.push('дописала '+cr.grown+' '+plural(cr.grown,'карточку','карточки','карточек'));
+ const z=d.zones||{created:[],split:[]};
+ if(z.created.length)parts.push((z.created.length===1?'выросла новая зона «'+z.created[0].label+'»':'выросли новые зоны: '+z.created.map(x=>'«'+x.label+'»').join(', ')));
+ for(const x of z.split.slice(0,3))parts.push('зона «'+(x.parent_label||'?')+'» разрослась, и из неё выделилась «'+x.label+'»');
+ const sel=d.selection||{};
+ if(sel.strengthened)parts.push('укрепила '+sel.strengthened+' '+plural(sel.strengthened,'подтверждённый факт','подтверждённых факта','подтверждённых фактов'));
+ if(sel.weakened)parts.push('ослабила '+sel.weakened+' '+plural(sel.weakened,'поправленный факт','поправленных факта','поправленных фактов'));
  let text='Пока было тихо, '+(parts.length?parts.join(', '):'просто перебрала память, нового не нашлось')+'.';
  if(d.insights.length)text+=' '+(d.insights.length===1?'Вывод: ':'Выводы: ')+d.insights.map(i=>i.text).join(' ');
  return text;
@@ -156,12 +181,18 @@ async function run({ws,complete=null,reason='idle'}={}){
   const d={reason,newFacts:0,summaries:0,links:0,skills:0,episodes:0,insights:[]};
   d.newFacts=use(db=>db.prepare("SELECT COUNT(DISTINCT fact_id) AS n FROM memory_events WHERE occurred_at>=? AND action IN ('created','restored')").get(since.slice(0,19).replace('T',' ')).n);
   d.episodes=experience.list(500).filter(e=>e.at>=since&&e.feedback).length;
+  // Сначала глубокая чистка и типы: сводки, карточки и зоны строятся уже по очищенной памяти.
+  try{d.clean=await growth.deepClean({complete,ws})}catch(e){console.error('Reflect clean failed:',e.name)}
+  try{d.types=await growth.growTypes(complete)}catch(e){console.error('Reflect types failed:',e.name)}
   try{d.summaries=await summarize(complete)}catch(e){console.error('Reflect summaries failed:',e.name)}
+  try{d.zones=zones.grownSince(since)}catch(e){console.error('Reflect zones failed:',e.name)}
+  try{d.cards=await growth.growCards(complete)}catch(e){console.error('Reflect cards failed:',e.name)}
   try{d.links=await findLinks(ws,complete)}catch(e){console.error('Reflect links failed:',e.name)}
   try{d.skills=(await skills.induce({complete})).added}catch(e){console.error('Reflect skills failed:',e.name)}
   try{d.insights=await insights(since,complete)}catch(e){console.error('Reflect insights failed:',e.name)}
+  try{d.selection=growth.select()}catch(e){console.error('Reflect selection failed:',e.name)}
   let text=diaryText(d);
-  if(complete&&(d.newFacts||d.insights.length)){try{
+  if(complete&&(d.newFacts||d.insights.length||d.cards?.grown||d.zones?.created?.length)){try{
    const msg=await complete({messages:[{role:'system',content:'Ты — ассистентка, которая ведёт дневник своей памяти. Перескажи это в 2–3 тёплых предложениях от первого лица по-русски, ничего не выдумывая.'},{role:'user',content:text}]});
    const s=String(msg.content||'').trim();if(s&&s.length<=800)text=s;
   }catch(e){console.error('Diary model failed:',e.name)}}
