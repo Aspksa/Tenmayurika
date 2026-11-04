@@ -79,7 +79,9 @@ function check(){
   const k=predicates.classify(g.predicate),mutual=SYMMETRIC.has(k.relation);
   const facts=memory.relations(g.subject,300).map(f=>mutual&&key(f.object)===key(g.subject)?{...f,subject:f.object,object:f.subject}:f).filter(f=>key(f.subject)===key(g.subject)&&predicates.classify(f.predicate).relation===k.relation);
   const same=facts.find(f=>key(f.object)===key(g.object)&&predicates.classify(f.predicate).polarity===k.polarity);
-  const against=facts.find(f=>key(f.object)===key(g.object)?predicates.classify(f.predicate).polarity!==k.polarity:k.single);
+  // Опровергает: то же значение с обратным знаком или (у единственной связи) другое значение, сказанное утвердительно.
+  // «Анна не живёт в Москве» не спорит с догадкой «Анна живёт в Казани».
+  const against=facts.find(f=>{const pol=predicates.classify(f.predicate).polarity;return key(f.object)===key(g.object)?pol!==k.polarity:k.single&&k.polarity>0&&pol>0});
   if(same){settle(g.id,'confirmed',same.id);res.confirmed.push(g);thoughts.add('guess','Догадка подтвердилась: '+text(g),{id:g.id})}
   else if(against){settle(g.id,'rejected');res.rejected.push(g);thoughts.add('guess','Догадка не подтвердилась: '+text(g)+' (известно: '+against.predicate+' '+against.object+')',{id:g.id})}
   else if(now-Date.parse(g.created_at)>EXPIRE_DAYS*864e5){settle(g.id,'dropped');res.expired++}
