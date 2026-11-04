@@ -6,6 +6,7 @@ const path=require('node:path');
 const predicates=require('./predicates');
 const zones=require('./zones');
 const aliases=require('./aliases');
+const meta=require('./meta');
 const DB=process.env.TENMAYURIKA_MEMORY_DB ? path.resolve(process.env.TENMAYURIKA_MEMORY_DB) : path.join(__dirname,'data','tenmayurika.sqlite');
 function open(){
  fs.mkdirSync(path.dirname(DB),{recursive:true});
@@ -90,7 +91,8 @@ function addFact(input){
    const kind=predicates.classify(predicate);
    if(old)db.prepare('UPDATE memory_facts SET valid_to=NULL,observed_at=?,valid_from=?,confidence=?,relation=?,polarity=? WHERE id=?').run(now,now,confidence,kind.relation,kind.polarity,id);
    else db.prepare('INSERT INTO memory_facts(id,subject,predicate,object,source_id,observed_at,valid_from,confidence,fingerprint,relation,polarity) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(id,subject,predicate,object,source,now,now,confidence,fingerprint,kind.relation,kind.polarity);
-   const prior=conflictingWith(db,{id,subject,object,...kind});
+   // Прошлое («раньше жила в Москве») и мнения не спорят с нынешними фактами (meta.js).
+   const prior=meta.quiet(predicate,object)?[]:conflictingWith(db,{id,subject,object,...kind});
    for(const row of prior){
     db.prepare('INSERT OR IGNORE INTO memory_conflicts(id,earlier_id,newer_id) VALUES(?,?,?)').run(crypto.randomUUID(),row.id,id);
    }
@@ -104,7 +106,7 @@ function addFact(input){
 // «любит X» и «не любит X». Регистр субъекта, «ё» и «г.» в объекте не важны.
 function conflictingWith(db,f){
  const key=predicates.entityKey(f.object);
- const rows=db.prepare('SELECT id,object,polarity FROM memory_facts WHERE unicode_lower(subject)=unicode_lower(?) AND relation=? AND valid_to IS NULL AND id<>?').all(f.subject,f.relation,f.id);
+ const rows=db.prepare('SELECT id,predicate,object,polarity FROM memory_facts WHERE unicode_lower(subject)=unicode_lower(?) AND relation=? AND valid_to IS NULL AND id<>?').all(f.subject,f.relation,f.id).filter(r=>!meta.quiet(r.predicate,r.object));
  return rows.filter(r=>{const same=predicates.entityKey(r.object)===key;return r.polarity!==f.polarity?same:(f.single&&!same)});
 }
 function extractFacts(text,sourceId){

@@ -2,7 +2,8 @@
 // Общая база «Мозга» для новых слоёв памяти: полезность записей, предпочтения, навыки,
 // сводки тем, причинные связи, выводы и дневник; навыки запоминания, промахи и самоэкзамен; рост: крепнущие связи, карточки сущностей,
 // псевдонимы, свои типы, постепенно растущие зоны и отбор при размышлении; сердцевина (блоки «кто я», «кто ты»,
-// «как мы общаемся») с историей версий. Таблицы создаются один раз на процесс.
+// «как мы общаемся») с историей версий; время и вид фактов, сила памяти и забывание, поток мыслей, вопросы о человеке,
+// догадки и предложения по своей инициативе. Таблицы создаются один раз на процесс.
 const fs=require('node:fs');
 const path=require('node:path');
 const {DatabaseSync}=require('node:sqlite');
@@ -92,7 +93,26 @@ function open(){
   CREATE TABLE IF NOT EXISTS memory_core_history(
   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, version INTEGER NOT NULL, body TEXT NOT NULL,
   source TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', at TEXT NOT NULL);
-  CREATE INDEX IF NOT EXISTS memory_core_history_name ON memory_core_history(name,version);`);
+  CREATE INDEX IF NOT EXISTS memory_core_history_name ON memory_core_history(name,version);
+  CREATE TABLE IF NOT EXISTS memory_fact_meta(
+  fact_id TEXT PRIMARY KEY, since TEXT, until TEXT, past INTEGER NOT NULL DEFAULT 0, span TEXT NOT NULL DEFAULT 'changing',
+  opinion INTEGER NOT NULL DEFAULT 0, origin TEXT NOT NULL DEFAULT 'said', at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS memory_strength(
+  fact_id TEXT PRIMARY KEY, value REAL NOT NULL, stage TEXT NOT NULL DEFAULT 'active', protected INTEGER NOT NULL DEFAULT 0, at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS brain_thoughts(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, details TEXT NOT NULL DEFAULT '{}');
+  CREATE TABLE IF NOT EXISTS memory_questions(
+  id TEXT PRIMARY KEY, text TEXT NOT NULL, about TEXT NOT NULL DEFAULT '', reason TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT 'gap',
+  ref TEXT, weight REAL NOT NULL DEFAULT .5, status TEXT NOT NULL DEFAULT 'open', answer TEXT, source TEXT NOT NULL DEFAULT 'rules',
+  created_at TEXT NOT NULL, asked_at TEXT, done_at TEXT);
+  CREATE INDEX IF NOT EXISTS memory_questions_status ON memory_questions(status,weight);
+  CREATE TABLE IF NOT EXISTS memory_guesses(
+  id TEXT PRIMARY KEY, subject TEXT NOT NULL, predicate TEXT NOT NULL, object TEXT NOT NULL, why TEXT NOT NULL DEFAULT '',
+  confidence REAL NOT NULL DEFAULT .5, evidence TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'open', fact_id TEXT,
+  source TEXT NOT NULL DEFAULT 'rules', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(subject,predicate,object));
+  CREATE TABLE IF NOT EXISTS brain_suggestions(
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL, ref TEXT NOT NULL, text TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'new',
+  created_at TEXT NOT NULL, shown_at TEXT, done_at TEXT, UNIQUE(kind,ref));`);
   ready.add(file);
  }
  return db;

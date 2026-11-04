@@ -5,6 +5,8 @@ process.env.TENMAYURIKA_MEMORY_DB=path.join(dir,'facts.sqlite');
 process.env.TENMAYURIKA_DATA_DIR=dir;
 delete process.env.CHAT_URL;
 const {parseCommand}=require('../chat');
+// Эти тесты считают вызовы модели: внутренний голос и сверка (лишние вызовы) здесь выключены.
+for(const k of ['innerVoice','verify'])require('../thoughts').setSetting(k,false);
 test('chat commands are parsed into tools',()=>{
  assert.deepEqual(parseCommand('заметка: Чай — матча с молоком'),{fn:'add_note',args:{title:'Чай',content:'матча с молоком'}});
  assert.deepEqual(parseCommand('дело: купить чай'),{fn:'add_task',args:{title:'купить чай'}});

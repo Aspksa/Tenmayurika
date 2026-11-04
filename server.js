@@ -28,6 +28,12 @@ const core=require('./core');
 const onboarding=require('./onboarding');
 const review=require('./review');
 const atlas=require('./atlas');
+const thoughts=require('./thoughts');
+const strength=require('./strength');
+const meta=require('./meta');
+const guesses=require('./guesses');
+const curiosity=require('./curiosity');
+const initiative=require('./initiative');
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
 const HOST='127.0.0.1',PORT=Number(process.env.PORT)||5173;
@@ -85,6 +91,17 @@ async function handleBrain(req,res,p,url){
    if(a==='restart')return respond(res,200,onboarding.restart());
    return respond(res,400,{error:'Invalid action'})}
   // Разбор разговора вручную и оглавление памяти.
+  // Мышление: поток мыслей, настройки, догадки, вопросы, забытое, предложения, рост по дням.
+  if(req.method==='GET'&&p==='/api/brain/thoughts')return respond(res,200,{items:thoughts.since(Number(url.searchParams.get('since'))||0,limitParam(url,60,200)),settings:thoughts.settings(),labels:thoughts.LABELS});
+  if(req.method==='POST'&&p==='/api/brain/settings'){const input=await body(req);return respond(res,200,thoughts.setSetting(input?.key,input?.value))}
+  if(req.method==='GET'&&p==='/api/brain/thinking')return respond(res,200,{guesses:guesses.list(null,30),guessStats:guesses.stats(),questions:curiosity.list(null,30),questionStats:curiosity.stats(),forgotten:strength.forgotten({limit:20}),strength:strength.stats(),suggestions:initiative.list(null,20),suggestionStats:initiative.stats(),settings:thoughts.settings(),labels:thoughts.LABELS});
+  if(req.method==='POST'&&p==='/api/brain/guesses/answer'){const input=await body(req);if(typeof input?.yes!=='boolean')return respond(res,400,{error:'Invalid value'});const r=guesses.answer(input.id,input.yes);return r?respond(res,200,r):respond(res,404,{error:'Not found'})}
+  if(req.method==='POST'&&p==='/api/brain/questions/dismiss'){const input=await body(req);return curiosity.dismiss(input?.id)?respond(res,200,{ok:true}):respond(res,404,{error:'Not found'})}
+  if(req.method==='POST'&&p==='/api/brain/forgotten/restore'){const input=await body(req);const ids=Array.isArray(input?.ids)?input.ids.filter(x=>typeof x==='string').slice(0,50):[];const r=strength.remember(ids);if(r.length)thoughts.add('wake','Вы вернули забытое: '+r.map(f=>f.subject+' — '+f.predicate+' '+f.object).slice(0,3).join('; '));return respond(res,200,{restored:r.length})}
+  if(req.method==='GET'&&p==='/api/brain/initiative'){const ws=await storage.load();if(thoughts.on('initiative'))initiative.scan(ws);return respond(res,200,{items:thoughts.on('initiative')?initiative.fresh(3):[],on:thoughts.on('initiative')})}
+  if(req.method==='POST'&&p==='/api/brain/initiative/shown'){const input=await body(req);return respond(res,200,{ok:initiative.shown(input?.id)})}
+  if(req.method==='POST'&&p==='/api/brain/initiative/accept'){const input=await body(req);const r=await initiative.accept(input?.id,chatContext);return r?respond(res,200,r):respond(res,404,{error:'Not found'})}
+  if(req.method==='POST'&&p==='/api/brain/initiative/dismiss'){const input=await body(req);const r=initiative.dismiss(input?.id);return r?respond(res,200,r):respond(res,404,{error:'Not found'})}
   if(req.method==='POST'&&p==='/api/brain/review')return respond(res,200,await review.run({complete:llm.config()?llm.complete:null,reason:'manual'}));
   if(req.method==='GET'&&p==='/api/brain/atlas')return respond(res,200,atlas.index(limitParam(url,30,200)));
   if(req.method==='POST'&&p==='/api/brain/reflect'){const r=await reflect.run({ws:await storage.load(),complete:llm.config()?llm.complete:null,reason:'manual'});return respond(res,200,r)}
@@ -101,7 +118,10 @@ async function handleFacts(req,res,p,url){
   if(req.method==='GET'&&p==='/api/facts'){
    const q=url.searchParams.get('q'),subject=url.searchParams.get('subject');
    if(q&&q.trim())return respond(res,200,memory.searchFacts(q,limitParam(url,30,100)));
-   return respond(res,200,memory.queryFacts({subject:subject&&subject.trim()?subject:undefined,limit:limitParam(url,50,5000)}));
+   const list=memory.queryFacts({subject:subject&&subject.trim()?subject:undefined,limit:limitParam(url,50,5000)});
+   // Время, вид, источник и сила — «Мозг» показывает их у нейрона, спящие тусклее.
+   try{const live=list.filter(f=>!f.valid_to),m=meta.ensure(live),st=strength.get(live.map(f=>f.id));return respond(res,200,list.map(f=>{const x=m.get(f.id),s=st.get(f.id);return x||s?{...f,...(x?{meta:{...x,...meta.label(x)}}:{}),...(s?{stage:s.stage}:{})}:f}))}catch(e){console.error('Fact meta failed:',e.name)}
+   return respond(res,200,list);
   }
   if(req.method==='POST'&&p==='/api/facts'){
    const input=await body(req);
@@ -195,7 +215,7 @@ async function handleLlm(req,res,p){
  }
 }
 // Размышления в простое: раз в минуту проверяется, давно ли было тихо и есть ли о чём подумать.
-function idleReflect(){storage.load().then(ws=>reflect.maybeRun({ws,complete:llm.config()?llm.complete:null})).then(r=>{if(r)console.log('Мозг поразмышлял:',r.text.slice(0,120))}).catch(e=>console.error('Idle reflection failed:',e.name))}
+function idleReflect(){storage.load().then(ws=>{try{if(thoughts.on('initiative'))initiative.scan(ws)}catch(e){console.error('Initiative scan failed:',e.name)}return ws}).then(ws=>reflect.maybeRun({ws,complete:llm.config()?llm.complete:null})).then(r=>{if(r)console.log('Мозг поразмышлял:',r.text.slice(0,120))}).catch(e=>console.error('Idle reflection failed:',e.name))}
 const chatContext={addItem,setTaskDone:(id,done)=>updateItem('tasks',id,{done}),updateTask:(id,patch)=>updateItem('tasks',id,patch)};
 const server=http.createServer(async(req,res)=>{try{
 const host=req.headers.host||'';if(host!=='127.0.0.1:'+String(server.address()?.port||PORT)&&host!=='localhost:'+String(server.address()?.port||PORT))return respond(res,403,{error:'Forbidden host'});

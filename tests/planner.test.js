@@ -6,6 +6,8 @@ process.env.TENMAYURIKA_DATA_DIR=dir;
 delete process.env.CHAT_URL;
 const planner=require('../planner');
 const {parseCommand}=require('../chat');
+// Эти тесты считают вызовы модели: внутренний голос и сверка (лишние вызовы) здесь выключены.
+for(const k of ['innerVoice','verify'])require('../thoughts').setSetting(k,false);
 
 // Вторник, 3 ноября 2026, 10:00.
 const NOW=new Date(2026,10,3,10);

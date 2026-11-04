@@ -6,7 +6,8 @@
 //  • свежесть и уверенность факта — небольшая добавка;
 //  • польза — записи из подтверждённых ответов выше, из поправленных ниже (usefulness.js);
 //  • тема — горячие записи рабочей памяти текущего разговора (working.js);
-//  • причина — записи, связанные причинной связью с лучшими находками (links.js).
+//  • причина — записи, связанные причинной связью с лучшими находками (links.js);
+//  • сила памяти — спящие и угасающие факты находятся хуже (strength.js), прошлое — чуть ниже нынешнего (meta.js).
 // Затем отсев: слабые находки (меньше пятой части лучшей) отбрасываются, а из похожих друг на друга
 // берётся разнообразный набор (MMR), чтобы модель не получала пять почти одинаковых фактов.
 // Каждая находка помнит, почему она нашлась (why), — это видно в «Мозге» и в ответе.
@@ -15,6 +16,8 @@ const storage=require('./storage');
 const usefulness=require('./usefulness');
 const working=require('./working');
 const links=require('./links');
+const strength=require('./strength');
+const meta=require('./meta');
 
 const W={text:1,vector:.8,graph:.45,fresh:.12,topic:.35,cause:.4};
 const CUTOFF=.2,MMR_LAMBDA=.35;
@@ -78,10 +81,15 @@ async function recall(text,{factLimit=8,noteLimit=5,ws,diversify=true,topic=true
  // factsById берёт не больше 50 id за раз — грузим всех кандидатов пачками, чтобы порядок решал итоговый балл.
  const ids=[...facts.keys()],rows=[];for(let i=0;i<ids.length;i+=50)rows.push(...memory.factsById(ids.slice(i,i+50)));const now=Date.now();
  const useF=usefulness.get('fact',rows.map(f=>f.id));
- const allFacts=rows.map(f=>{const e=facts.get(f.id),age=(now-Date.parse(f.observed_at||0))/864e5,u=useF.get(f.id);
-   const score=(e.score+W.fresh*Math.exp(-Math.max(0,age)/30))*(.6+.4*(Number(f.confidence)||0))*usefulness.factor(u);
+ let stF=new Map(),metaF=new Map();try{stF=strength.get(rows.map(f=>f.id));metaF=meta.ensure(rows)}catch(e){console.error('Strength lookup failed:',e.name)}
+ // О прошлом спрашивают словами «раньше», «жил(а)», «был(а)» — тогда прошлое не опускается.
+ const askPast=/раньше|прежде|бывш|когда-то|в прошлом|\S+(л|ла|ли)\s/i.test(query+' ');
+ const allFacts=rows.map(f=>{const e=facts.get(f.id),age=(now-Date.parse(f.observed_at||0))/864e5,u=useF.get(f.id),st=stF.get(f.id),m=metaF.get(f.id);
+   const score=(e.score+W.fresh*Math.exp(-Math.max(0,age)/30))*(.6+.4*(Number(f.confidence)||0))*usefulness.factor(u)*strength.factor(st)*(m&&m.past&&!askPast?.85:1);
    if(u&&u.ok>u.fix)e.why.add('польза');
-   return {...f,score,why:[...e.why]}})
+   if(st&&st.stage!=='active')e.why.add(strength.label(st.stage));
+   if(m&&m.past)e.why.add('в прошлом');
+   return {...f,score,why:[...e.why],...(m?{meta:m}:{}),...(st?{stage:st.stage}:{})}})
   .sort((a,b)=>b.score-a.score||String(b.observed_at).localeCompare(String(a.observed_at)));
  const byId=new Map((data.notes||[]).map(n=>[n.id,n]));
  const live=[...notes.values()].filter(e=>byId.has(e.id)),useN=usefulness.get('note',live.map(e=>e.id));

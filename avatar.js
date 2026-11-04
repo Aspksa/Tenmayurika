@@ -225,7 +225,22 @@
    if(q.send){input.value=q.send;form.requestSubmit()}else{input.value=q.insert;input.focus();const at=q.insert.indexOf(' ')+1||q.insert.length;input.setSelectionRange(q.tool==='facts'?8:q.insert.length,q.tool==='facts'?8:q.insert.length);void at;autoGrow()}
   }})));
  }
- function bubble(role,text,tag,m){const el=h('div',{class:'msg '+role},document.createTextNode(text));const foot=[tag?h('span',{class:'msg-tag',text:tag.replace(/^⚙\s*/,'')}):null,m&&m.exp?rateRow(m):null].filter(Boolean);if(foot.length)el.append(h('div',{class:'msg-foot'},...foot));log.append(el);log.scrollTop=log.scrollHeight;return el}
+ function bubble(role,text,tag,m){const el=h('div',{class:'msg '+role},document.createTextNode(text));if(m&&m.thinking)el.append(thinkingRow(m.thinking));if(m&&m.offer)el.append(offerRow(m));const foot=[tag?h('span',{class:'msg-tag',text:tag.replace(/^⚙\s*/,'')}):null,m&&m.exp?rateRow(m):null].filter(Boolean);if(foot.length)el.append(h('div',{class:'msg-foot'},...foot));log.append(el);log.scrollTop=log.scrollHeight;return el}
+ // «Как думала»: план внутреннего голоса, подвопросы и сверка с памятью — свёрнуто под ответом.
+ function thinkingRow(t){
+  const lines=[t.split?.length?'Разбила вопрос: '+t.split.map(x=>'«'+x+'»').join(', '):'',t.plan?t.plan:'',t.check==='fixed'?'Сверила с памятью и поправила черновик.':t.check==='ok'?'Сверила с памятью: сходится.':''].filter(Boolean);
+  return h('details',{class:'msg-think'},h('summary',{text:'💭 как думала'}),...lines.map(l=>h('div',{text:l})));
+ }
+ // Предложение по своей инициативе: «Да» выполняет его, «Не надо» — отпускает.
+ function offerRow(m){
+  if(m.offerDone)return h('span',{class:'msg-rate done',text:m.offerDone});
+  const row=h('span',{class:'msg-offer'});
+  const act=async kind=>{row.querySelectorAll('button').forEach(b=>b.disabled=true);let text='';
+   try{const r=await fetch('/api/brain/initiative/'+kind,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:m.offer})});const d=await r.json().catch(()=>({}));text=d.text||(r.ok?'Хорошо.':'Уже неактуально.');if(d.changed)window.TenmaApp?.refresh({keepDrafts:true})}catch{text='Не получилось.'}
+   m.offerDone=text;store(CHAT_KEY,history);row.replaceWith(offerRow(m));window.dispatchEvent(new CustomEvent('tenma:memory'))};
+  row.append(h('button',{type:'button',class:'msg-offer-yes',text:'Да',onclick:()=>act('accept')}),h('button',{type:'button',text:'Не надо',onclick:()=>act('dismiss')}));
+  return row;
+ }
  // Оценка ответа: 👍 — она запоминает, что поняла верно; 👎 — следующее сообщение станет поправкой, и на похожий вопрос она её учтёт.
  let pendingFix=null;
  const BASE_PLACEHOLDER=input.placeholder;
@@ -279,7 +294,7 @@
   if(!answer||!String(answer).trim())answer='Модель прислала пустой ответ. Нажмите «Проверить связь» в меню «Модель ИИ».';
   typing.remove();busy=false;send.disabled=false;
   if(gen!==conversation)return; // чат очистили, пока шёл ответ
-  const entry={role:'assistant',text:answer,tag,...(data&&data.secret?{private:true}:{}),...(data?.experience?.id?{exp:data.experience.id}:{})};
+  const entry={role:'assistant',text:answer,tag,...(data&&data.secret?{private:true}:{}),...(data?.experience?.id?{exp:data.experience.id}:{}),...(data?.thinking?{thinking:data.thinking}:{})};
   history.push(entry);history=history.slice(-100);store(CHAT_KEY,history);
   bubble('assistant',answer,tag,entry);state('answer',2600);
   if(data.changed)window.TenmaApp?.refresh({keepDrafts:true});
@@ -367,6 +382,19 @@
  window.addEventListener('tenma:workspace',e=>{const tasks=e.detail?.tasks||[];scheduleTaskAlerts(tasks);dailyBrief(tasks)});
  // Раз в 10 минут пересчитываем таймеры (смена суток, дела из другой вкладки).
  setInterval(()=>{const w=window.TenmaApp?.workspace;if(w)scheduleTaskAlerts(w.tasks||[])},600000);
+ // Инициатива: раз в 10 минут спрашиваем у «Мозга», не хочет ли она что-то предложить сама.
+ // Новое предложение — облачко над аватаром и сообщение в чате с кнопками «Да» / «Не надо».
+ async function checkInitiative(){
+  if(document.hidden)return;
+  let items=[];try{const r=await fetch('/api/brain/initiative');if(!r.ok)return;items=(await r.json()).items||[]}catch{return}
+  for(const it of items.slice(0,1)){
+   if(history.some(m=>m.offer===it.id))continue;
+   try{await fetch('/api/brain/initiative/shown',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:it.id})})}catch{}
+   const entry={role:'assistant',text:'💡 '+it.text,tag:'⚙ сама',offer:it.id};history.push(entry);history=history.slice(-100);store(CHAT_KEY,history);
+   if(!chat.hidden)bubble('assistant',entry.text,entry.tag,entry);else{avatar.classList.add('has-unread');say(entry.text,15000)}
+  }
+ }
+ setTimeout(checkInitiative,30000);setInterval(checkInitiative,600000);
  if(window.TenmaApp?.workspace?.tasks)scheduleTaskAlerts(window.TenmaApp.workspace.tasks);
 
  /* ---------- Реплики (облачко над аватаром) ---------- */

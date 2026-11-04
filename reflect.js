@@ -11,6 +11,8 @@
 //  • самоучёба (memskills.js, selfstudy.js): самоэкзамен по недавней переписке, промахи, правка навыков
 //    запоминания кругами с пробой, перезапоминание, откат и просьба о подсказке;
 //  • сердцевина (core.js) — блоки «Кто я», «Кто ты», «Как мы общаемся» пересматриваются, знакомство отмечается;
+//  • мышление: время и вид фактов (meta.js), сила памяти и забывание (strength.js), проверка и новые
+//    догадки (guesses.js), вопросы о человеке (curiosity.js);
 //  • дневник — короткая запись о том, что сделано, видна в «Мозге» (окно «Дневник»).
 // Повторно — не чаще раза в час и только если в памяти что-то изменилось.
 const crypto=require('node:crypto');
@@ -25,6 +27,11 @@ const memskills=require('./memskills');
 const selfstudy=require('./selfstudy');
 const core=require('./core');
 const onboarding=require('./onboarding');
+const strength=require('./strength');
+const meta=require('./meta');
+const guesses=require('./guesses');
+const curiosity=require('./curiosity');
+const thoughts=require('./thoughts');
 const {use,tx,parse,state,setState}=require('./brain-db');
 const IDLE_MS=Number(process.env.TENMAYURIKA_IDLE_MS)||10*60*1000,GAP_MS=60*60*1000;
 const MAX_INSIGHTS=3,MIN_TOPIC=3,DIARY_KEEP=200;
@@ -184,6 +191,14 @@ function diaryText(d){
  for(const r of d.mskills?.retired||[])parts.push('отправила на покой навык «'+r.title+'»');
  for(const c of d.core||[])parts.push('пересмотрела в себе «'+c.title+'»');
  if(d.onboarding)parts.push('узнала о тебе всё, что хотела при знакомстве');
+ const fg=d.forget||{};
+ if(fg.forgotten)parts.push('забыла за давностью '+fg.forgotten+' '+plural(fg.forgotten,'факт','факта','фактов')+' (скажи «вспомни забытое», и я верну)');
+ if(fg.dormant)parts.push(fg.dormant+' '+plural(fg.dormant,'воспоминание спит','воспоминания спят','воспоминаний спят'));
+ const gs=d.guesses||{};
+ if(gs.made?.length)parts.push('догадалась: '+gs.made.map(g=>'«'+guesses.text(g)+'»').join(', '));
+ if(gs.confirmed)parts.push(gs.confirmed+' '+plural(gs.confirmed,'догадка подтвердилась','догадки подтвердились','догадок подтвердились'));
+ if(gs.rejected)parts.push(gs.rejected+' '+plural(gs.rejected,'догадка не подтвердилась','догадки не подтвердились','догадок не подтвердились'));
+ if(d.questions)parts.push('придумала '+d.questions+' '+plural(d.questions,'вопрос','вопроса','вопросов')+' о тебе');
  let text='Пока было тихо, '+(parts.length?parts.join(', '):'просто перебрала память, нового не нашлось')+'.';
  if(d.insights.length)text+=' '+(d.insights.length===1?'Вывод: ':'Выводы: ')+d.insights.map(i=>i.text).join(' ');
  return text;
@@ -191,6 +206,7 @@ function diaryText(d){
 // Запись в дневник от других слоёв (разбор разговора и т.п.).
 function note(text,details={}){
  const at=new Date().toISOString(),id=crypto.randomUUID();
+ try{thoughts.add(details.kind==='review'?'review':'reflect',String(text).slice(0,500))}catch{}
  use(db=>{db.prepare('INSERT INTO brain_diary(id,at,text,details) VALUES(?,?,?,?)').run(id,at,String(text).slice(0,2000),JSON.stringify(details));db.prepare('DELETE FROM brain_diary WHERE id IN (SELECT id FROM brain_diary ORDER BY at DESC LIMIT -1 OFFSET ?)').run(DIARY_KEEP)});
  return {id,at,text,details};
 }
@@ -216,6 +232,7 @@ async function run({ws,complete=null,reason='idle'}={}){
   d.newFacts=use(db=>db.prepare("SELECT COUNT(DISTINCT fact_id) AS n FROM memory_events WHERE occurred_at>=? AND action IN ('created','restored')").get(since.slice(0,19).replace('T',' ')).n);
   d.episodes=experience.list(500).filter(e=>e.at>=since&&e.feedback).length;
   // Сначала глубокая чистка и типы: сводки, карточки и зоны строятся уже по очищенной памяти.
+  thoughts.add('reflect',reason==='manual'?'Сажусь поразмышлять, как вы попросили.':'Тихо — перебираю память.');
   try{d.clean=await growth.deepClean({complete,ws})}catch(e){console.error('Reflect clean failed:',e.name)}
   try{d.types=await growth.growTypes(complete)}catch(e){console.error('Reflect types failed:',e.name)}
   try{d.summaries=await summarize(complete)}catch(e){console.error('Reflect summaries failed:',e.name)}
@@ -225,6 +242,12 @@ async function run({ws,complete=null,reason='idle'}={}){
   try{d.skills=(await skills.induce({complete})).added}catch(e){console.error('Reflect skills failed:',e.name)}
   try{d.insights=await insights(since,complete)}catch(e){console.error('Reflect insights failed:',e.name)}
   try{d.selection=growth.select()}catch(e){console.error('Reflect selection failed:',e.name)}
+  // Время и вид фактов, сила памяти и забывание.
+  try{meta.ensure(memory.queryFacts({limit:5000}).filter(f=>!f.valid_to))}catch(e){console.error('Reflect meta failed:',e.name)}
+  try{const r=strength.sweep({forget:thoughts.on('forgetting')});d.forget={forgotten:r.forgotten,dormant:r.dormant,fading:r.fading};if(r.forgotten)thoughts.add('forget','Забыла за давностью: '+r.forgottenFacts.slice(0,3).map(f=>f.subject+' — '+f.predicate+' '+f.object).join('; ')+(r.forgotten>3?' и ещё '+(r.forgotten-3):''))}catch(e){console.error('Reflect strength failed:',e.name)}
+  // Догадки: старые проверяются новыми фактами, новые строятся; вопросы о человеке.
+  try{if(thoughts.on('guesses')){const c=guesses.check();const made=await guesses.generate({complete});d.guesses={made:made.map(g=>({subject:g.subject,predicate:g.predicate,object:g.object})),confirmed:c.confirmed.length,rejected:c.rejected.length}}}catch(e){console.error('Reflect guesses failed:',e.name)}
+  try{if(thoughts.on('curiosity'))d.questions=(await curiosity.generate({complete})).length}catch(e){console.error('Reflect curiosity failed:',e.name)}
   // Самоучёба: экзамен → откат, если стало хуже → правка навыков по промахам → покой и выпуск навыков.
   try{d.selfTest=await selfstudy.selfTest({ws,complete})}catch(e){console.error('Reflect self-test failed:',e.name)}
   try{d.rollback=selfstudy.watch()}catch(e){console.error('Reflect rollback failed:',e.name)}
@@ -245,6 +268,7 @@ async function run({ws,complete=null,reason='idle'}={}){
   const at=new Date().toISOString(),id=crypto.randomUUID(),details={...d,insights:d.insights,ms:Date.now()-started};
   use(db=>{db.prepare('INSERT INTO brain_diary(id,at,text,details) VALUES(?,?,?,?)').run(id,at,text,JSON.stringify(details));db.prepare('DELETE FROM brain_diary WHERE id IN (SELECT id FROM brain_diary ORDER BY at DESC LIMIT -1 OFFSET ?)').run(DIARY_KEEP)});
   setState('reflect.last',mark);
+  thoughts.add('reflect',text.slice(0,500),{diary:id});
   return {id,at,text,details};
  })();
  try{return await running}finally{running=null}
