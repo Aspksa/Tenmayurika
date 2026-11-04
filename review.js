@@ -66,7 +66,9 @@ async function run({complete=null,reason='messages'}={}){
   // 2. Предпочтения.
   for(const p of plan.prefs){try{if(!preferences.addText(p).duplicate)done.prefs++}catch(e){if(!(e instanceof TypeError))throw e}}
   // 3. Факты, пропущенные фоновым извлечением.
-  for(const f of plan.facts){try{const r=memory.addFact({subject:f.subject,predicate:f.predicate,object:f.object,sourceId:'review:'+mark.lastId,confidence:.7,restore:false});if(!r.duplicate)done.facts++}catch(e){if(!(e instanceof TypeError))throw e}}
+  const norm=x=>String(x||'').trim().toLocaleLowerCase().replace(/ё/g,'е');
+  const known=f=>{try{return memory.queryFacts({subject:f.subject,limit:500}).some(g=>!g.valid_to&&norm(g.predicate)===norm(f.predicate)&&norm(g.object)===norm(f.object))}catch{return false}};
+  for(const f of plan.facts){if(known(f))continue;try{const r=memory.addFact({subject:f.subject,predicate:f.predicate,object:f.object,sourceId:'review:'+mark.lastId,confidence:.7,restore:false});if(!r.duplicate)done.facts++}catch(e){if(!(e instanceof TypeError))throw e}}
   // 5. Понимание человека.
   for(const h of plan.human){try{if(!core.get('human').body.includes(h)){core.append('human',h,{source:'review',reason:'понимание из разбора разговора'});done.human++}}catch(e){if(!(e instanceof TypeError))throw e}}
   // Блок, в который дописали (или который переполнился), пересматривается: дописанное сводится в принципы.
@@ -86,6 +88,8 @@ async function run({complete=null,reason='messages'}={}){
 // После каждого ответа: пора ли разобрать разговор.
 async function maybeRun({complete=null,reason='messages'}={}){
  if(running)return null;
+ // «Учиться фоном» выключено — разговор сам не разбирается (вручную из «Мозга» можно).
+ if(!chatlog.autoLearn())return null;
  const {user,state:s}=pending();
  if(s.at&&Date.now()-Date.parse(s.at)<GAP_MS)return null;
  if(user<(reason==='compaction'?MIN_ON_COMPACT:EVERY))return null;

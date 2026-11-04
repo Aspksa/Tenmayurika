@@ -200,3 +200,40 @@ test('chat model gets core, atlas, onboarding and summary; self-edit tools chang
  assert.match((await reply({message:'сердцевина'})).reply,/Моя сердцевина:[\s\S]*Кто ты/);
  assert.match((await reply({message:'о чём мы говорили сегодня?'})).reply,/Разговоры сегодня/);
 });
+
+test('review fixes: no wrong fact touched, stale or failed revisions, emptied «Кто ты», known facts, background toggle',async()=>{
+ // Явно названный объект, которого нет, не трогает единственный факт с той же связью.
+ memory.addFact({subject:'Вера',predicate:'любит',object:'чай',sourceId:'fix'});
+ const chat=require('../chat');
+ let calls=0;const srv=http.createServer((req,res)=>{calls++;req.resume();req.on('end',()=>{res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(calls===1?{choices:[{message:{role:'assistant',content:null,tool_calls:[{id:'f1',type:'function',function:{name:'forget_fact',arguments:JSON.stringify({subject:'Вера',predicate:'любит',object:'кофе'})}}]}}]}:{choices:[{message:{role:'assistant',content:'Ок.'}}]}))})});
+ await new Promise(r=>srv.listen(0,'127.0.0.1',r));
+ process.env.CHAT_URL='http://127.0.0.1:'+srv.address().port+'/v1/chat/completions';
+ try{await chat.reply({message:'забудь, что Вера любит кофе'},{addItem(){},setTaskDone(){}})}finally{delete process.env.CHAT_URL;await new Promise(r=>srv.close(r))}
+ assert.ok(memory.queryFacts({subject:'Вера',limit:10}).some(f=>f.object==='чай'&&!f.valid_to),'чай не тронут');
+ // Ручная правка во время пересмотра не затирается.
+ preferences.addText('пиши списком');
+ let release;const pendingModel=new Promise(r=>{release=r});
+ const run=core.revise('bond',{complete:async()=>{await pendingModel;return say('Старый пересмотр.')}});
+ core.write('bond','Правка человека.',{source:'user'});
+ release();const st=await run;
+ assert.equal(st.changed,false);assert.equal(core.get('bond').body,'Правка человека.');
+ // Сбой модели не запоминается как «уже пересмотрено».
+ preferences.addText('обращайся ко мне на ты');
+ await core.revise('bond',{complete:async()=>{throw Error('down')}});
+ let asked=0;await core.revise('bond',{complete:async()=>{asked++;return say('NOCHANGE')}});
+ assert.equal(asked,1);
+ // Собранное из фактов «Кто ты» очищается, когда фактов о «Я» не осталось.
+ for(const f of memory.queryFacts({subject:'Я',limit:100}).filter(f=>!f.valid_to))memory.retireFact(f.id,'outdated');
+ core.write('human','Что я знаю о человеке: живу в Казань.',{source:'rules'});
+ await core.revise('human');
+ assert.equal(core.get('human').body,core.BLOCKS.human.seed);assert.doesNotMatch(core.promptText(),/Казань\./);
+ // Разбор не дублирует уже известный факт.
+ memory.addFact({subject:'Анна',predicate:'любит',object:'кофе',sourceId:'chat:1'});
+ const n0=memory.queryFacts({subject:'Анна',limit:100}).filter(f=>!f.valid_to&&f.object==='кофе').length;
+ chatlog.save('user','Анна обожает кофе по утрам',true);
+ await review.run({complete:async()=>say('FACT: Анна | любит | кофе')});
+ assert.equal(memory.queryFacts({subject:'Анна',limit:100}).filter(f=>!f.valid_to&&f.object==='кофе').length,n0);
+ // «Учиться фоном» выключено — автоматического разбора нет.
+ chatlog.setAutoLearn(false);
+ try{for(let i=0;i<5;i++)chatlog.save('user','ещё сообщение '+i,true);assert.equal(await review.maybeRun({complete:async()=>say('FACT: Я | люблю | море')}),null)}finally{chatlog.setAutoLearn(true)}
+});
