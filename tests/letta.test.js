@@ -237,3 +237,17 @@ test('review fixes: no wrong fact touched, stale or failed revisions, emptied «
  chatlog.setAutoLearn(false);
  try{for(let i=0;i<5;i++)chatlog.save('user','ещё сообщение '+i,true);assert.equal(await review.maybeRun({complete:async()=>say('FACT: Я | люблю | море')}),null)}finally{chatlog.setAutoLearn(true)}
 });
+
+test('review fixes 2: atlas follows aliases, rules-only pass does not block a model revision',async()=>{
+ const aliases=require('../aliases');
+ memory.addFact({subject:'мама',predicate:'любит',object:'пионы',sourceId:'al'});
+ memory.addFact({subject:'Ольга Петровна',predicate:'живёт в',object:'Туле',sourceId:'al'});
+ atlas.reset();
+ const before=atlas.open('Ольга Петровна').facts.length;
+ aliases.add('мама','Ольга Петровна',{evidence:'тест',source:'user'});
+ assert.ok(atlas.open('Ольга Петровна').facts.length>before,'зона пересчитана после псевдонима');
+ preferences.addText('пиши таблицей');
+ await core.revise('bond');
+ let asked=0;await core.revise('bond',{complete:async()=>{asked++;return say('NOCHANGE')}});
+ assert.equal(asked,1);
+});

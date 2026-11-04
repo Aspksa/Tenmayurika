@@ -7,7 +7,10 @@ const memory=require('./memory-core');
 const {use}=require('./brain-db');
 const MAX_CHARS=1400,MAX_ZONES=12;
 let cache={sig:null,zones:[]};
-function signature(){return use(db=>{try{const r=db.prepare('SELECT MAX(id) AS m,COUNT(*) AS n FROM memory_events').get();const t=db.prepare('SELECT MAX(updated_at) AS u FROM memory_topic_summaries').get();return (r.m||0)+':'+(r.n||0)+':'+(t.u||'')}catch{return '0'}})}
+function signature(){return use(db=>{try{const r=db.prepare('SELECT MAX(id) AS m,COUNT(*) AS n FROM memory_events').get();const t=db.prepare('SELECT MAX(updated_at) AS u FROM memory_topic_summaries').get();
+  // Псевдонимы меняют состав зон без событий фактов — они тоже часть подписи.
+  const a=db.prepare('SELECT COUNT(*) AS n,MAX(created_at) AS u FROM memory_aliases').get();
+  return (r.m||0)+':'+(r.n||0)+':'+(t.u||'')+':'+a.n+':'+(a.u||'')}catch{return '0'}})}
 function zones(){
  memory.queryFacts({limit:1});
  const sig=signature();if(cache.sig===sig)return cache.zones;

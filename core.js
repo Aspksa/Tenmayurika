@@ -109,7 +109,9 @@ const REVISE='Ты пересматриваешь блок своей долго
  +'Если менять нечего, ответь одним словом NOCHANGE. Иначе ответь только новым текстом блока.';
 async function revise(name,{complete=null,context={}}={}){
  const n=blockName(name),cur=get(n),ev=evidence(n,context);
- const s=sig(n+'|'+cur.body+'|'+ev.join('\n'));
+ // Режим в подписи: проход без модели не отменяет пересмотр моделью, когда она появится.
+ const mode=complete?'model':'rules',key=body=>sig(n+'|'+mode+'|'+body+'|'+ev.join('\n'));
+ const s=key(cur.body);
  if(state('core.sig.'+n,'')===s)return {name:n,changed:false,skipped:true};
  let result={name:n,changed:false};
  if(complete&&ev.length){
@@ -130,7 +132,7 @@ async function revise(name,{complete=null,context={}}={}){
    :cur.source==='rules'?write(n,BLOCKS.human.seed,{source:'seed',reason:'фактов о тебе не осталось',ifVersion:cur.version}):null;
   if(w){result={name:n,changed:!w.unchanged,version:w.version};if(w.stale)return result}
  }
- setState('core.sig.'+n,sig(n+'|'+get(n).body+'|'+ev.join('\n')));
+ setState('core.sig.'+n,key(get(n).body));
  return result;
 }
 async function rethink({complete=null,context={}}={}){
