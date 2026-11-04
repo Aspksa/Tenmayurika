@@ -17,7 +17,7 @@ async function run(){
  if(fs.existsSync(vectors))fs.cpSync(vectors,path.join(dest,'vectors'),{recursive:true});
  const library=path.join(data,'library');
  if(fs.existsSync(library))fs.cpSync(library,path.join(dest,'library'),{recursive:true});
- for(const name of ['library-collections.json','library-queue.json']){const file=path.join(data,name);if(fs.existsSync(file))fs.copyFileSync(file,path.join(dest,name),fs.constants.COPYFILE_EXCL)}
+ for(const name of ['library-collections.json','library-queue.json','library-journal.jsonl']){const file=path.join(data,name);if(fs.existsSync(file))fs.copyFileSync(file,path.join(dest,name),fs.constants.COPYFILE_EXCL)}
  const checked=new DatabaseSync(path.join(dest,'tenmayurika.sqlite'),{readOnly:true});
  try{if(checked.prepare('PRAGMA integrity_check').get().integrity_check!=='ok')throw Error('Копия SQLite повреждена')}finally{checked.close()}
  const manifest={createdAt:new Date().toISOString(),files:[]};

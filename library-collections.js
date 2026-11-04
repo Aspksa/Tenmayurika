@@ -15,4 +15,5 @@ function create(name){return mutate(state=>{const nameSafe=title(name);if(state.
 function add(id,file){return mutate(async state=>{const item=get(state,id);await library.filePath(file);if(!item.files.includes(file))item.files.push(file);return item})}
 function remove(id,file){return mutate(state=>{const item=get(state,id);item.files=item.files.filter(x=>x!==file);return item})}
 function drop(id){return mutate(state=>{get(state,id);state.collections=state.collections.filter(x=>x.id!==id);return {ok:true}})}
-module.exports={list,create,add,remove,drop};
+function replacePath(oldPath,newPath){return mutate(state=>{for(const item of state.collections)item.files=[...new Set(item.files.map(x=>x===oldPath?newPath:x))];return {ok:true}})}
+module.exports={list,create,add,remove,drop,replacePath};
