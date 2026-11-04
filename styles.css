@@ -677,6 +677,16 @@ html.brain-fs-lock,html.brain-fs-lock body{overflow:hidden}
 @media (max-width:640px){.brain-thoughts,.brain-time{top:auto}.brain-time{bottom:.75rem}}
 
 
+
+/* Разделы личной библиотеки: показываем только выбранную группу. */
+.panel[data-library-tab][hidden]{display:none}
+.library-tabs{margin-bottom:1rem}
+.library-actions{position:relative;align-self:center;flex-shrink:0}
+.library-actions>summary{cursor:pointer;color:var(--gold-bright);padding:.5rem;list-style:none}
+.library-actions>summary::-webkit-details-marker{display:none}
+.library-action-list{position:absolute;right:0;z-index:20;display:grid;gap:.3rem;min-width:15rem;max-width:80vw;padding:.5rem;background:var(--surface-2);border:1px solid var(--line-strong);border-radius:12px;box-shadow:0 12px 32px #0009}
+.library-action-list button{text-align:left;white-space:normal}
+
 /* Душа: ступень, черты, настроение (brain.js soulSec) */
 .brain-soul-level{display:flex;flex-wrap:wrap;gap:.3rem .8rem;align-items:baseline;justify-content:space-between}
 .brain-soul-name{color:#e8c25a;font-weight:600}
@@ -1341,3 +1351,4 @@ input:checked+.switch::after{background:var(--ember-hot)}
 .pn-tg.is-day .pn-ev-title{white-space:normal;display:-webkit-box;-webkit-line-clamp:2}
 .pn-tg-col{container-type:inline-size}
 @container (max-width:5.5rem){.pn-ev time{display:none}.pn-ev-check{display:none}}
+

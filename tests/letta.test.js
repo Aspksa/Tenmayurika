@@ -286,3 +286,5 @@ test('review fixes 3: explicit predicate respected, overflowing lessons kept, ne
  assert.equal(all.total,2006);assert.equal(all.messages.at(-1).text,'уникальная тема цеппелин');
  assert.equal(chatlog.between(d.from,d.to,{query:'цеппелин'}).matched,1);
 });
+
+

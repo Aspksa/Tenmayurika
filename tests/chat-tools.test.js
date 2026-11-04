@@ -3,6 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'tenmayurika-tools-'));
 process.env.TENMAYURIKA_MEMORY_DB=path.join(dir,'facts.sqlite');
 process.env.TENMAYURIKA_DATA_DIR=dir;
+process.env.TENMAYURIKA_LIBRARY_DIR=path.join(dir,'library');
 delete process.env.CHAT_URL;
 const {parseCommand}=require('../chat');
 // Эти тесты считают вызовы модели: внутренний голос и сверка (лишние вызовы) здесь выключены.
@@ -18,6 +19,7 @@ test('chat commands are parsed into tools',()=>{
  assert.deepEqual(parseCommand('покажи мозг'),{fn:'open_page',args:{page:'brain'}});
  assert.deepEqual(parseCommand('открой мозг'),{fn:'open_page',args:{page:'brain'}});
  assert.equal(parseCommand('найди Анна').fn,'search_memory');
+ assert.deepEqual(parseCommand('найди в библиотеке договор'),{fn:'search_library',args:{query:'договор'}});
  assert.equal(parseCommand('сделай резервную копию').fn,'create_backup');
  assert.equal(parseCommand('который час?').fn,'current_time');
  assert.equal(parseCommand('как дела у лисы в лесу'),null);
@@ -40,6 +42,9 @@ test('avatar tools act through the chat API and respect disabled tools',async()=
   assert.match(found.reply,/Лиса — живёт в → Инари/);
   // Явный поиск тоже «вспоминание»: найденный факт уходит в recalled для «Мозга».
   assert.equal(found.recalled.facts.length,1);
+  fs.mkdirSync(process.env.TENMAYURIKA_LIBRARY_DIR,{recursive:true});fs.writeFileSync(path.join(process.env.TENMAYURIKA_LIBRARY_DIR,'план.txt'),'Договор на доставку');
+  const lib=await say('найди в библиотеке договор');assert.match(lib.reply,/план\.txt/);assert.match(lib.reply,/строка 1/);
+  assert.match((await say('найди в библиотеке договор',['clock'])).reply,/выключен/);
   const nav=await say('открой факты');
   assert.deepEqual(nav.actions,[{type:'navigate',page:'facts'}]);
   const blocked=await say('дело: нельзя',['clock']);

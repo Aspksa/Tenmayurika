@@ -48,7 +48,7 @@
  };
  const KEY='tenmayurika.avatar.v1',CHAT_KEY='tenmayurika.avatar.chat.v1',TAB_KEY='tenmayurika.avatar.menu',REM_KEY='tenmayurika.avatar.reminders';
  const load=(key,fallback)=>{try{const v=JSON.parse(localStorage.getItem(key));return v??fallback}catch{return fallback}};
- const store=(key,value)=>{try{localStorage.setItem(key,JSON.stringify(value))}catch{}};
+ const store=(key,value)=>{try{const safe=key===CHAT_KEY&&Array.isArray(value)?value.filter(m=>!m.private):value;localStorage.setItem(key,JSON.stringify(safe))}catch{}};
  const merge=saved=>{const c={...DEFAULTS,...(saved&&typeof saved==='object'?saved:{})};c.tools={...DEFAULTS.tools,...(saved?.tools||{})};if(!POSES.some(p=>p.id===c.pose))c.pose=DEFAULTS.pose;if(!PARTICLES[c.particleType])c.particleType=DEFAULTS.particleType;return c};
  let cfg=merge(load(KEY,{}));
  let history=load(CHAT_KEY,[]);if(!Array.isArray(history))history=[];
@@ -283,7 +283,7 @@
   const gen=conversation,fixFor=pendingFix;pendingFix=null;input.placeholder=BASE_PLACEHOLDER;
    if(!history.length)log.replaceChildren();
    log.classList.remove('is-empty');
-   history.push({role:'user',text});bubble('user',text);quick.hidden=true;
+   history.push({role:'user',text,...(/^(?:(?:найди|поищи|поиск)\s+(?:в библиотеке|по библиотеке)|спроси библиотеку|спроси файл|ответь по документам)\s*[:—–-]?\s*\S/iu.test(text)?{private:true}:{})});bubble('user',text);quick.hidden=true;
   const typing=h('div',{class:'msg assistant typing','aria-label':cfg.name+' думает'},h('span',{text:'•'}),h('span',{text:'•'}),h('span',{text:'•'}));
   log.append(typing);log.scrollTop=log.scrollHeight;state('think');
   window.dispatchEvent(new CustomEvent('tenma:thinking',{detail:{on:true,text}}));
@@ -737,4 +737,6 @@
  applyLook();spawnParticles();scheduleBehaviour();readSoul();setInterval(readSoul,15*60e3);
  if(cfg.phrases&&cfg.visible)setTimeout(()=>say(phrase()),2500);
 })();
+
+
 

@@ -40,6 +40,16 @@ const guesses=require('./guesses');
 const curiosity=require('./curiosity');
 const initiative=require('./initiative');
 const library=require('./library');
+const libraryDocuments=require('./library-documents');
+const libraryQueue=require('./library-queue');
+const libraryCollections=require('./library-collections');
+const libraryAnalysis=require('./library-analysis');
+const libraryOcr=require('./library-ocr');
+const libraryJournal=require('./library-journal');
+const libraryHealth=require('./library-health');
+const libraryIndex=require('./library-index');
+const libraryVersions=require('./library-versions');
+async function journal(action,detail){try{await libraryJournal.record(action,detail)}catch(e){console.error('Library journal failed:',e.code||e.name)}}
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
 const HOST='127.0.0.1',PORT=Number(process.env.PORT)||5173;
@@ -281,8 +291,48 @@ if(p.startsWith('/api/library/')){
  try{
   if(req.method==='GET'&&p==='/api/library/list')return respond(res,200,{items:await library.list(url.searchParams.get('path')||'')});
   if(req.method==='GET'&&p==='/api/library/search')return respond(res,200,await library.search(url.searchParams.get('q')||''));
-  if(req.method==='POST'&&p==='/api/library/folder'){const input=await body(req);await library.mkdir(input?.path);return respond(res,201,{ok:true})}
-  if(req.method==='PUT'&&p==='/api/library/upload')return respond(res,201,await library.upload(url.searchParams.get('path')||'',req));
+  if(req.method==='GET'&&p==='/api/library/search-text')return respond(res,200,await library.searchText(url.searchParams.get('q')||''));
+  if(req.method==='GET'&&p==='/api/library/search-index')return respond(res,200,await libraryIndex.search(url.searchParams.get('q')||''));
+  if(req.method==='GET'&&p==='/api/library/duplicates')return respond(res,200,await library.duplicates());
+  if(req.method==='GET'&&p==='/api/library/document')return respond(res,200,await libraryDocuments.describe(url.searchParams.get('path')||''));
+  if(req.method==='GET'&&p==='/api/library/summary')return respond(res,200,await libraryAnalysis.analyze(url.searchParams.get('path')||''));
+  if(req.method==='GET'&&p==='/api/library/suggest-name')return respond(res,200,await libraryAnalysis.suggestName(url.searchParams.get('path')||''));
+  if(req.method==='GET'&&p==='/api/library/similar')return respond(res,200,await libraryAnalysis.similar(url.searchParams.get('path')||''));
+  if(req.method==='GET'&&p==='/api/library/answer')return respond(res,200,await libraryAnalysis.answer(url.searchParams.get('q')||'',url.searchParams.get('path')||''));
+  if(req.method==='GET'&&p==='/api/library/propose-facts')return respond(res,200,await libraryAnalysis.proposeFacts(url.searchParams.get('path')||''));
+  if(req.method==='POST'&&p==='/api/library/tables'){const input=await body(req);return respond(res,200,await libraryAnalysis.tables(input?.files))}
+  if(req.method==='GET'&&p==='/api/library/suggest-folder')return respond(res,200,{folder:libraryAnalysis.suggestFolder(url.searchParams.get('name')||'')});
+  if(req.method==='GET'&&p==='/api/library/suggest-file-folder')return respond(res,200,await libraryAnalysis.suggestFileFolder(url.searchParams.get('path')||''));
+  if(req.method==='GET'&&p==='/api/library/organization-plan')return respond(res,200,await libraryAnalysis.organizationPlan());
+  if(req.method==='POST'&&p==='/api/library/ocr'){const input=await body(req),result=await libraryOcr.recognize(input?.path);await journal('ocr_completed',{path:input.path});return respond(res,200,result)}
+  if(req.method==='POST'&&p==='/api/library/compare'){const input=await body(req);return respond(res,200,await libraryDocuments.compare(input?.left,input?.right))}
+  if(req.method==='GET'&&p==='/api/library/queue')return respond(res,200,await libraryQueue.status());
+  if(req.method==='POST'&&p==='/api/library/queue/scan'){const result=await libraryQueue.scan();await libraryQueue.run();return respond(res,200,result)}
+  if(req.method==='POST'&&p==='/api/library/queue/enabled'){const input=await body(req);return respond(res,200,await libraryQueue.setEnabled(input?.enabled))}
+  if(req.method==='POST'&&p==='/api/library/queue/retry'){const input=await body(req);await libraryQueue.retry(input?.path);return respond(res,200,{ok:true})}
+  if(req.method==='GET'&&p==='/api/library/collections')return respond(res,200,{items:await libraryCollections.list()});
+  if(req.method==='POST'&&p==='/api/library/collections'){const input=await body(req),item=await libraryCollections.create(input?.name);await journal('collection_created',{collection:item.name});return respond(res,201,item)}
+  if(req.method==='POST'&&p==='/api/library/collections/add'){const input=await body(req),item=await libraryCollections.add(input?.id,input?.path);await journal('collection_added',{collection:item.name,path:input.path});return respond(res,200,item)}
+  if(req.method==='POST'&&p==='/api/library/collections/remove'){const input=await body(req),item=await libraryCollections.remove(input?.id,input?.path);await journal('collection_removed',{collection:item.name,path:input.path});return respond(res,200,item)}
+  if(req.method==='POST'&&p==='/api/library/collections/delete'){const input=await body(req),result=await libraryCollections.drop(input?.id);await journal('collection_deleted',{});return respond(res,200,result)}
+  if(req.method==='GET'&&p==='/api/library/links')return respond(res,200,{items:await libraryCollections.links()});
+  if(req.method==='POST'&&p==='/api/library/links'){const input=await body(req);return respond(res,201,await libraryCollections.connect(input?.a,input?.b,input?.label))}
+  if(req.method==='POST'&&p==='/api/library/links/delete'){const input=await body(req);return respond(res,200,await libraryCollections.disconnect(input?.id))}
+  if(req.method==='GET'&&p==='/api/library/memos')return respond(res,200,{items:await libraryCollections.memos()});
+  if(req.method==='POST'&&p==='/api/library/memos'){const input=await body(req);return respond(res,201,await libraryCollections.addMemo(input?.source,input?.kind,input?.text,input?.due,input?.time))}
+  if(req.method==='POST'&&p==='/api/library/memos/change'){const input=await body(req);return respond(res,200,await libraryCollections.changeMemo(input?.id,input?.action))}
+  if(req.method==='GET'&&p==='/api/library/facts')return respond(res,200,{items:await libraryCollections.factsWithStatus()});
+  if(req.method==='POST'&&p==='/api/library/facts'){const input=await body(req);return respond(res,201,await libraryCollections.addFact(input?.source,input?.subject,input?.predicate,input?.object,input?.quote))}
+  if(req.method==='POST'&&p==='/api/library/facts/delete'){const input=await body(req);return respond(res,200,await libraryCollections.deleteFact(input?.id))}
+  if(req.method==='GET'&&p==='/api/library/journal')return respond(res,200,{items:await libraryJournal.recent()});
+  if(req.method==='GET'&&p==='/api/library/health')return respond(res,200,await libraryHealth.check());
+  if(req.method==='POST'&&p==='/api/library/rename'){const input=await body(req),result=await library.renameFile(input?.path,input?.name,libraryCollections.replacePath);if(!result.unchanged)await journal('file_renamed',{path:input.path,target:result.path});return respond(res,200,result)}
+  if(req.method==='POST'&&p==='/api/library/move'){const input=await body(req);if(input?.create===true)try{await library.mkdir(input.folder)}catch(e){if(e.code!=='EEXIST')throw e}const result=await library.moveFile(input?.path,input?.folder,libraryCollections.replacePath);if(!result.unchanged)await journal('file_moved',{path:input.path,target:result.path});return respond(res,200,result)}
+  if(req.method==='POST'&&p==='/api/library/folder'){const input=await body(req);await library.mkdir(input?.path);await journal('folder_created',{path:input.path});return respond(res,201,{ok:true})}
+  if(req.method==='PUT'&&p==='/api/library/upload'){const rel=url.searchParams.get('path')||'',result=await library.upload(rel,req);await journal('file_uploaded',{path:rel});return respond(res,201,result)}
+  if(req.method==='PUT'&&p==='/api/library/replace'){const rel=url.searchParams.get('path')||'',result=await libraryVersions.replace(rel,req);await journal('file_replaced',{path:rel,target:result.backup});return respond(res,200,result)}
+  if(req.method==='GET'&&p==='/api/library/versions')return respond(res,200,{items:await libraryVersions.list(url.searchParams.get('path')||'')});
+  if(req.method==='GET'&&p==='/api/library/version'){const version=await libraryVersions.file(url.searchParams.get('id')||'');res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':"attachment; filename=\"backup\"; filename*=UTF-8''"+encodeURIComponent(version.meta.path.split('/').pop()),'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});return fs.createReadStream(version.full).on('error',()=>res.destroy()).pipe(res)}
   if(req.method==='GET'&&p==='/api/library/download'){
    const rel=url.searchParams.get('path')||'',file=await library.filePath(rel);
    res.writeHead(200,{'Content-Type':'application/octet-stream','Content-Disposition':"attachment; filename=\"download\"; filename*=UTF-8''"+encodeURIComponent(rel.split('/').pop()),'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});
@@ -333,6 +383,7 @@ if(req.method==='GET'&&AVATAR_PATH.test(p)){const file=path.join(ROOT,p.slice(1)
 return respond(res,404,{error:'Not found'})
 }catch(e){console.error('Request failed:',e.name,e.code||'',e instanceof SyntaxError?'invalid JSON':'request processing error');respond(res,e.message==='Request too large'?413:e instanceof SyntaxError?400:500,{error:e.message==='Request too large'?'Request too large':e instanceof SyntaxError?'Invalid JSON':'Internal server error'})}});
 server.on('error',e=>{console.error('Server error:',e.code||e.name);process.exitCode=1});
-if(require.main===module)Promise.resolve().then(()=>ensureDisk()).then(()=>storage.connect()).then(()=>server.listen(PORT,HOST,()=>{console.log('Tenmayurika: http://'+HOST+':'+PORT);syncWorker.run().catch(console.error);const timer=setInterval(()=>{syncWorker.run().catch(console.error);chatlog.learnPending().catch(console.error);idleReflect()},60000);timer.unref();chatlog.learnPending().catch(console.error);startBackupSchedule();const maintenanceTimer=setInterval(()=>{try{ensureDisk();maintenance.maintenance()}catch(e){console.error('Disk maintenance failed:',e.code||e.name)}},3600000);maintenanceTimer.unref()})).catch(e=>{console.error('Database connection failed:',e.message);process.exitCode=1});
+if(require.main===module)Promise.resolve().then(()=>ensureDisk()).then(()=>storage.connect()).then(()=>server.listen(PORT,HOST,()=>{console.log('Tenmayurika: http://'+HOST+':'+PORT);syncWorker.run().catch(console.error);const timer=setInterval(()=>{syncWorker.run().catch(console.error);chatlog.learnPending().catch(console.error);idleReflect();libraryQueue.status().then(s=>s.enabled?libraryQueue.scan().then(()=>libraryQueue.run()):null).catch(e=>console.error('Library queue failed:',e.name))},60000);timer.unref();chatlog.learnPending().catch(console.error);startBackupSchedule();const maintenanceTimer=setInterval(()=>{try{ensureDisk();maintenance.maintenance()}catch(e){console.error('Disk maintenance failed:',e.code||e.name)}},3600000);maintenanceTimer.unref()})).catch(e=>{console.error('Database connection failed:',e.message);process.exitCode=1});
 module.exports={server};
+
 
