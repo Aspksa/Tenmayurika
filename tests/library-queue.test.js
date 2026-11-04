@@ -2,6 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os');
 const dir=require('node:fs').mkdtempSync(path.join(os.tmpdir(),'tenma-queue-'));
 process.env.TENMAYURIKA_LIBRARY_DIR=path.join(dir,'library');process.env.TENMAYURIKA_LIBRARY_QUEUE=path.join(dir,'queue.json');
+process.env.TENMAYURIKA_MEMORY_DB=path.join(dir,'memory.sqlite');
 const queue=require('../library-queue');
 test('queue tracks local files, changes, failures and retries',async()=>{try{
  await fs.mkdir(process.env.TENMAYURIKA_LIBRARY_DIR,{recursive:true});const file=path.join(process.env.TENMAYURIKA_LIBRARY_DIR,'заметка.txt');

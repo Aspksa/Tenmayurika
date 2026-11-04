@@ -4,21 +4,22 @@ const fs=require('node:fs/promises');
 const path=require('node:path');
 const library=require('./library');
 const documents=require('./library-documents');
+const index=require('./library-index');
 const FILE=process.env.TENMAYURIKA_LIBRARY_QUEUE||path.join(__dirname,'data','library-queue.json');
 const MAX_ENTRIES=5000,MAX_ATTEMPTS=3;
 let state=null,busy=false,saveChain=Promise.resolve();
-async function load(){if(state)return state;try{const input=JSON.parse(await fs.readFile(FILE,'utf8'));state={enabled:input.enabled!==false,items:input.items&&typeof input.items==='object'?input.items:{},lastScan:input.lastScan||null}}catch(e){if(e.code!=='ENOENT')throw e;state={enabled:true,items:{},lastScan:null}}return state}
+async function load(){if(state)return state;try{const input=JSON.parse(await fs.readFile(FILE,'utf8'));state={enabled:input.enabled!==false,items:input.items&&typeof input.items==='object'?input.items:{},lastScan:input.lastScan||null,indexVersion:1};if(input.indexVersion!==1)for(const item of Object.values(state.items))if(item.status==='ready'){item.status='queued';item.attempts=0}}catch(e){if(e.code!=='ENOENT')throw e;state={enabled:true,items:{},lastScan:null,indexVersion:1}}return state}
 async function save(){const data=JSON.stringify(state);saveChain=saveChain.catch(()=>{}).then(async()=>{await fs.mkdir(path.dirname(FILE),{recursive:true});const temp=FILE+'.tmp';await fs.writeFile(temp,data,{mode:0o600});await fs.rename(temp,FILE)});return saveChain}
 async function scan(){
  const s=await load(),pending=[''],found=new Set();let seen=0,truncated=false;
  while(pending.length&&seen<MAX_ENTRIES){const dir=pending.pop();for(const item of await library.list(dir)){if(++seen>MAX_ENTRIES){truncated=true;break}if(item.type==='folder'){pending.push(item.path);continue}if(!/\.(txt|md|csv|json|docx|xlsx|pdf)$/i.test(item.name))continue;found.add(item.path);const old=s.items[item.path];if(!old||old.modified!==item.modified||old.size!==item.size)s.items[item.path]={path:item.path,modified:item.modified,size:item.size,status:'queued',attempts:0,error:null}}}
- truncated=truncated||pending.length>0;if(!truncated)for(const key of Object.keys(s.items))if(!found.has(key))delete s.items[key];
+ truncated=truncated||pending.length>0;if(!truncated){for(const key of Object.keys(s.items))if(!found.has(key))delete s.items[key];index.reconcile(found)}
  s.lastScan=new Date().toISOString();await save();return {seen,truncated};
 }
 async function run(limit=2){
  if(busy)return {busy:true};busy=true;
  try{const s=await load();if(!s.enabled)return {disabled:true};const items=Object.values(s.items).filter(x=>x.status==='queued').slice(0,Math.max(1,Math.min(10,limit)));
-  for(const item of items){try{const info=await documents.describe(item.path);if(info.modified!==item.modified||info.bytes!==item.size){item.status='queued';item.modified=info.modified;item.size=info.bytes;item.attempts=0;continue}item.status='ready';item.lineCount=info.lineCount;item.error=null}catch(e){item.attempts++;item.status=item.attempts>=MAX_ATTEMPTS?'error':'queued';item.error=String(e.message||'Ошибка').slice(0,200)}await save()}
+  for(const item of items){try{const info=await documents.read(item.path);if(info.modified!==item.modified||info.bytes!==item.size){item.status='queued';item.modified=info.modified;item.size=info.bytes;item.attempts=0;await save();continue}index.put(item.path,item.modified,item.size,info.text);item.status='ready';item.lineCount=info.text.split(/\r?\n/).length;item.error=null}catch(e){item.attempts++;item.status=item.attempts>=MAX_ATTEMPTS?'error':'queued';item.error=String(e.message||'Ошибка').slice(0,200)}await save()}
   return {processed:items.length};
  }finally{busy=false}
 }

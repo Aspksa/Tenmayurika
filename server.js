@@ -42,6 +42,7 @@ const libraryAnalysis=require('./library-analysis');
 const libraryOcr=require('./library-ocr');
 const libraryJournal=require('./library-journal');
 const libraryHealth=require('./library-health');
+const libraryIndex=require('./library-index');
 async function journal(action,detail){try{await libraryJournal.record(action,detail)}catch(e){console.error('Library journal failed:',e.code||e.name)}}
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
@@ -238,6 +239,7 @@ if(p.startsWith('/api/library/')){
   if(req.method==='GET'&&p==='/api/library/list')return respond(res,200,{items:await library.list(url.searchParams.get('path')||'')});
   if(req.method==='GET'&&p==='/api/library/search')return respond(res,200,await library.search(url.searchParams.get('q')||''));
   if(req.method==='GET'&&p==='/api/library/search-text')return respond(res,200,await library.searchText(url.searchParams.get('q')||''));
+  if(req.method==='GET'&&p==='/api/library/search-index')return respond(res,200,await libraryIndex.search(url.searchParams.get('q')||''));
   if(req.method==='GET'&&p==='/api/library/duplicates')return respond(res,200,await library.duplicates());
   if(req.method==='GET'&&p==='/api/library/document')return respond(res,200,await libraryDocuments.describe(url.searchParams.get('path')||''));
   if(req.method==='GET'&&p==='/api/library/summary')return respond(res,200,await libraryAnalysis.analyze(url.searchParams.get('path')||''));
