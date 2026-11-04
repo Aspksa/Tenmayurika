@@ -50,6 +50,9 @@
  const merge=saved=>{const c={...DEFAULTS,...(saved&&typeof saved==='object'?saved:{})};c.tools={...DEFAULTS.tools,...(saved?.tools||{})};if(!POSES.some(p=>p.id===c.pose))c.pose=DEFAULTS.pose;if(!PARTICLES[c.particleType])c.particleType=DEFAULTS.particleType;return c};
  let cfg=merge(load(KEY,{}));
  let history=load(CHAT_KEY,[]);if(!Array.isArray(history))history=[];
+ // Номер разговора: по нему сервер копит сводку начала длинного разговора. «Новый чат» — новый номер.
+ const CID_KEY='tenmayurika.avatar.cid',freshCid=()=>{const id=(crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2,10));try{localStorage.setItem(CID_KEY,id)}catch{}return id};
+ let cid=(()=>{try{const v=localStorage.getItem(CID_KEY);return v&&/^[A-Za-z0-9-]{8,64}$/.test(v)?v:freshCid()}catch{return freshCid()}})();
  const save=()=>store(KEY,cfg);
  const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)');
  const poseOf=id=>POSES.find(p=>p.id===id)||POSES[0];
@@ -187,7 +190,7 @@
  const form=h('form',{class:'chat-form'},input,send);
  const chat=h('section',{class:'floating chat',role:'dialog','aria-label':'Чат с аватаром',hidden:true},
   h('header',{class:'floating-head'},chatImg,h('div',{class:'title'},chatName),
-   h('button',{type:'button',class:'icon-btn','aria-label':'Новый чат',title:'Новый чат: очистить переписку',onclick:()=>{if(!history.length)return;conversation++;history=[];pendingFix=null;input.placeholder=BASE_PLACEHOLDER;store(CHAT_KEY,history);renderHistory();renderQuick();input.focus()}},icon('i-plus')),
+   h('button',{type:'button',class:'icon-btn','aria-label':'Новый чат',title:'Новый чат: очистить переписку',onclick:()=>{if(!history.length)return;conversation++;cid=freshCid();history=[];pendingFix=null;input.placeholder=BASE_PLACEHOLDER;store(CHAT_KEY,history);renderHistory();renderQuick();input.focus()}},icon('i-plus')),
    h('button',{type:'button',class:'icon-btn','aria-label':'Настройки аватара',title:'Настройки аватара',onclick:()=>{const r=avatar.getBoundingClientRect();openSettings(r.left+r.width/2,r.top)}},icon('i-sliders')),
    h('button',{type:'button',class:'icon-btn','aria-label':'Закрыть чат',title:'Закрыть',onclick:()=>closeChat()},icon('i-close'))),
   log,quick,form);
@@ -248,8 +251,9 @@
   e.preventDefault();const text=input.value.trim();if(!text||busy)return;
   busy=true;send.disabled=true;input.value='';autoGrow();
   // Контекст для модели ограничен по объёму, чтобы запрос не превысил лимит сервера (100 КБ).
-  const prior=[];let budget=20000;
-  for(const m of history.filter(m=>!m.private).slice(-12).reverse()){const t=m.text.slice(0,1500);if(t.length>budget)break;budget-=t.length;prior.unshift({role:m.role,text:t})}
+  // Последние 12 — почти целиком (их модель видит дословно), до 40 — покороче: сервер свернёт их в сводку.
+  const prior=[];let budget=30000;
+  for(const [i,m] of history.filter(m=>!m.private).slice(-40).reverse().entries()){const t=m.text.slice(0,i<12?1500:600);if(t.length>budget)break;budget-=t.length;prior.unshift({role:m.role,text:t})}
   const gen=conversation,fixFor=pendingFix;pendingFix=null;input.placeholder=BASE_PLACEHOLDER;
   history.push({role:'user',text});bubble('user',text);quick.hidden=true;
   const typing=h('div',{class:'msg assistant typing','aria-label':cfg.name+' думает'},h('span',{text:'•'}),h('span',{text:'•'}),h('span',{text:'•'}));
@@ -261,7 +265,7 @@
   const ctrl=new AbortController(),limit=setTimeout(()=>ctrl.abort(),300000);
   let answer,tag,data={};
   try{
-   const r=await fetch('/api/chat',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,avatar:cfg.name,history:prior,tools:Object.keys(TOOLS).filter(k=>cfg.tools[k]),...(fixFor?{correctionFor:fixFor}:{})})});
+   const r=await fetch('/api/chat',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,avatar:cfg.name,history:prior,conversation:cid,tools:Object.keys(TOOLS).filter(k=>cfg.tools[k]),...(fixFor?{correctionFor:fixFor}:{})})});
    data=await r.json();if(!r.ok)throw Error(data.error||'Ошибка');answer=data.reply;
    if(data.tools?.length)tag='⚙ '+[...new Set(data.tools.map(t=>TOOL_TAG[t]||t))].join(', ');
   }catch(err){answer=err.name==='AbortError'?'Не получилось ответить: сервер не ответил за 5 минут. Проверьте, что окно Tenmayurika открыто.':'Не получилось ответить: '+(err.message==='Failed to fetch'?'нет связи с сервером Tenmayurika (окно сервера закрыто?)':err.message)}
@@ -537,7 +541,7 @@
      sw('Напоминать о делах со временем','taskAlerts',cfg,'Дела с датой и временем из раздела «Дела» и календаря'),range('Заранее','taskLead',0,60,5,v=>v?v+' мин':'в срок'),
      sw('Утренняя сводка','dailyBrief',cfg,'Раз в день расскажу, что запланировано и что просрочено'),h('div',{class:'reminder-list'},...reminderItems()))),
    card('Данные',h('div',{class:'menu-actions'},
-    h('button',{type:'button',text:'Очистить чат',onclick:()=>{conversation++;history=[];store(CHAT_KEY,history);renderHistory();renderQuick()}}),
+    h('button',{type:'button',text:'Очистить чат',onclick:()=>{conversation++;cid=freshCid();history=[];store(CHAT_KEY,history);renderHistory();renderQuick()}}),
     h('button',{type:'button',text:'Экспорт настроек',onclick:()=>{const a=h('a',{href:URL.createObjectURL(new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'})),download:'tenmayurika-avatar.json'});a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}}),
     h('label',{class:'button-like'},h('span',{text:'Импорт…'}),h('input',{type:'file',accept:'application/json',hidden:true,onchange:async e=>{try{const f=e.target.files[0];if(!f)return;cfg=merge(JSON.parse(await f.text()));setPose(cfg.pose);chatName.textContent=cfg.name;chatImg.src=thumbOf(poseOf(cfg.pose));refreshAll();buildSettings()}catch{alert('Не удалось прочитать файл настроек')}}}))))
   ]}

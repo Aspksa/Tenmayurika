@@ -1,7 +1,8 @@
 'use strict';
 // Общая база «Мозга» для новых слоёв памяти: полезность записей, предпочтения, навыки,
 // сводки тем, причинные связи, выводы и дневник; навыки запоминания, промахи и самоэкзамен; рост: крепнущие связи, карточки сущностей,
-// псевдонимы, свои типы, постепенно растущие зоны и отбор при размышлении. Таблицы создаются один раз на процесс.
+// псевдонимы, свои типы, постепенно растущие зоны и отбор при размышлении; сердцевина (блоки «кто я», «кто ты»,
+// «как мы общаемся») с историей версий. Таблицы создаются один раз на процесс.
 const fs=require('node:fs');
 const path=require('node:path');
 const {DatabaseSync}=require('node:sqlite');
@@ -84,7 +85,14 @@ function open(){
   CREATE INDEX IF NOT EXISTS memory_selftests_source ON memory_selftests(source);
   CREATE TABLE IF NOT EXISTS memory_mskill_snapshots(
   id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, bank TEXT NOT NULL, trial_score REAL,
-  change TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'kept');`);
+  change TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'kept');
+  CREATE TABLE IF NOT EXISTS memory_core_blocks(
+  name TEXT PRIMARY KEY, body TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1,
+  source TEXT NOT NULL DEFAULT 'seed', updated_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS memory_core_history(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, version INTEGER NOT NULL, body TEXT NOT NULL,
+  source TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS memory_core_history_name ON memory_core_history(name,version);`);
   ready.add(file);
  }
  return db;

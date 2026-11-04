@@ -50,6 +50,30 @@ function search(text,limit=3,exceptId=0){
   return rows.map(r=>{const hay=r.text.toLocaleLowerCase();return {...r,score:terms.filter(t=>hay.includes(t)).length}}).filter(r=>r.score>=need).sort((a,b)=>b.score-a.score||b.id-a.id).slice(0,limit);
  }finally{db.close()}
 }
+// Разговоры за промежуток времени (вспоминание по датам). С запросом — только сообщения с его словами
+// и по соседнему сообщению вокруг каждого (вопрос и ответ вместе).
+function stemsOf(text){return [...new Set(String(text||'').toLocaleLowerCase().replace(/ё/g,'е').split(/[^\p{L}\p{N}]+/u).filter(w=>w.length>=3&&!STOP.has(w)).map(w=>w.slice(0,5)))].slice(0,8)}
+function between(from,to,{query='',limit=16,exceptId=0}={}){
+ const a=new Date(from).toISOString(),b=new Date(to).toISOString(),terms=stemsOf(query).filter(t=>!/^(говор|обсуж|болта|разго|расск|спрос|писал|мы$|тобой)/.test(t));
+ const db=open();
+ try{
+  const range='at>=? AND at<? AND id<>?',args=[a,b,exceptId];
+  const total=db.prepare('SELECT COUNT(*) AS n FROM chat_log WHERE '+range).get(...args).n;
+  // Самые свежие сообщения периода, по порядку времени.
+  if(!terms.length)return {total,messages:db.prepare('SELECT id,at,role,text FROM chat_log WHERE '+range+' ORDER BY id DESC LIMIT ?').all(...args,limit).reverse()};
+  db.function('norm_text',{deterministic:true},v=>typeof v==='string'?v.toLocaleLowerCase().replace(/ё/g,'е'):v);
+  const like=' AND ('+terms.map(()=>'norm_text(text) LIKE ?').join(' OR ')+')',likeArgs=terms.map(t=>'%'+t+'%');
+  const matched=db.prepare('SELECT COUNT(*) AS n FROM chat_log WHERE '+range+like).get(...args,...likeArgs).n;
+  const hits=db.prepare('SELECT id,at,role,text FROM chat_log WHERE '+range+like+' ORDER BY id DESC LIMIT ?').all(...args,...likeArgs,limit);
+  // К найденному — пара: вопрос человека и ответ на него.
+  const next=db.prepare("SELECT id,at,role,text FROM chat_log WHERE id>? AND "+range+" ORDER BY id LIMIT 1"),prev=db.prepare("SELECT id,at,role,text FROM chat_log WHERE id<? AND "+range+" ORDER BY id DESC LIMIT 1");
+  const out=new Map();
+  for(const h of hits){out.set(h.id,h);const n=h.role==='user'?next.get(h.id,...args):prev.get(h.id,...args);if(n&&n.role!==h.role)out.set(n.id,n)}
+  return {total,matched,messages:[...out.values()].sort((x,y)=>x.id-y.id).slice(-limit)};
+ }finally{db.close()}
+}
+// Соседи найденного сообщения: n до и n после.
+function around(id,n=2){const db=open();try{return db.prepare('SELECT id,at,role,text FROM chat_log WHERE id BETWEEN ? AND ? ORDER BY id').all(Number(id)-n,Number(id)+n)}finally{db.close()}}
 function recent(limit=50){const db=open();try{return db.prepare('SELECT id,at,role,text,learned,facts FROM chat_log ORDER BY id DESC LIMIT ?').all(limit)}finally{db.close()}}
 
 // Итог разбора — в память: новые факты, новые версии известных (старая уходит в историю) и явно отменённое.
@@ -95,4 +119,4 @@ async function learnPending(limit=BATCH){
   return {processed,facts:added};
  }finally{busy=false}
 }
-module.exports={save,search,stats,recent,message,autoLearn,setAutoLearn,learnPending,relearn,apply};
+module.exports={save,search,between,around,stats,recent,message,autoLearn,setAutoLearn,learnPending,relearn,apply};

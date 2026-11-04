@@ -10,6 +10,7 @@
 //    угасшие связи уходят;
 //  • самоучёба (memskills.js, selfstudy.js): самоэкзамен по недавней переписке, промахи, правка навыков
 //    запоминания кругами с пробой, перезапоминание, откат и просьба о подсказке;
+//  • сердцевина (core.js) — блоки «Кто я», «Кто ты», «Как мы общаемся» пересматриваются, знакомство отмечается;
 //  • дневник — короткая запись о том, что сделано, видна в «Мозге» (окно «Дневник»).
 // Повторно — не чаще раза в час и только если в памяти что-то изменилось.
 const crypto=require('node:crypto');
@@ -22,6 +23,8 @@ const growth=require('./growth');
 const zones=require('./zones');
 const memskills=require('./memskills');
 const selfstudy=require('./selfstudy');
+const core=require('./core');
+const onboarding=require('./onboarding');
 const {use,tx,parse,state,setState}=require('./brain-db');
 const IDLE_MS=Number(process.env.TENMAYURIKA_IDLE_MS)||10*60*1000,GAP_MS=60*60*1000;
 const MAX_INSIGHTS=3,MIN_TOPIC=3,DIARY_KEEP=200;
@@ -179,9 +182,17 @@ function diaryText(d){
  if(sd.rejected)parts.push('попробовала '+sd.summary+', но лучше не стало, оставила как было');
  if(d.rollback)parts.push('вернулась к прежним навыкам запоминания, потому что '+d.rollback.reason);
  for(const r of d.mskills?.retired||[])parts.push('отправила на покой навык «'+r.title+'»');
+ for(const c of d.core||[])parts.push('пересмотрела в себе «'+c.title+'»');
+ if(d.onboarding)parts.push('узнала о тебе всё, что хотела при знакомстве');
  let text='Пока было тихо, '+(parts.length?parts.join(', '):'просто перебрала память, нового не нашлось')+'.';
  if(d.insights.length)text+=' '+(d.insights.length===1?'Вывод: ':'Выводы: ')+d.insights.map(i=>i.text).join(' ');
  return text;
+}
+// Запись в дневник от других слоёв (разбор разговора и т.п.).
+function note(text,details={}){
+ const at=new Date().toISOString(),id=crypto.randomUUID();
+ use(db=>{db.prepare('INSERT INTO brain_diary(id,at,text,details) VALUES(?,?,?,?)').run(id,at,String(text).slice(0,2000),JSON.stringify(details));db.prepare('DELETE FROM brain_diary WHERE id IN (SELECT id FROM brain_diary ORDER BY at DESC LIMIT -1 OFFSET ?)').run(DIARY_KEEP)});
+ return {id,at,text,details};
 }
 function diary(limit=30){return use(db=>db.prepare('SELECT * FROM brain_diary ORDER BY at DESC LIMIT ?').all(limit)).map(r=>({id:r.id,at:r.at,text:r.text,details:parse(r.details,{})}))}
 
@@ -219,10 +230,13 @@ async function run({ws,complete=null,reason='idle'}={}){
   try{d.rollback=selfstudy.watch()}catch(e){console.error('Reflect rollback failed:',e.name)}
   try{if(!d.rollback)d.study=await selfstudy.evolve({complete})}catch(e){console.error('Reflect study failed:',e.name)}
   try{d.mskills={retired:memskills.retireUseless(),graduated:memskills.graduate()}}catch(e){console.error('Reflect skill stats failed:',e.name)}
+  // Сердцевина: «Кто я», «Кто ты», «Как мы общаемся» пересматриваются по свидетельствам (core.js).
+  try{d.core=await core.rethink({complete,context:{diary:diary(5),skills:skills.list().filter(x=>x.status==='active').map(x=>x.rule),insights:insightList(5).map(i=>i.text)}})}catch(e){console.error('Reflect core failed:',e.name)}
+  try{const before=state('onboarding',null)?.finished;const ob=onboarding.refresh();if(!before&&ob.finished)d.onboarding=true}catch(e){console.error('Reflect onboarding failed:',e.name)}
   // Просьба о подсказке появляется в дневнике один раз — когда она возникла.
   try{const h=memskills.evoState().help;if(h&&h.at>=mark.at)d.help=h}catch{}
   let text=diaryText(d);
-  if(complete&&(d.newFacts||d.insights.length||d.cards?.grown||d.zones?.created?.length||d.study?.adopted)){try{
+  if(complete&&(d.newFacts||d.insights.length||d.cards?.grown||d.zones?.created?.length||d.study?.adopted||d.core?.length)){try{
    const msg=await complete({messages:[{role:'system',content:'Ты — ассистентка, которая ведёт дневник своей памяти. Перескажи это в 2–3 тёплых предложениях от первого лица по-русски, ничего не выдумывая.'},{role:'user',content:text}]});
    const s=String(msg.content||'').trim();if(s&&s.length<=800)text=s;
   }catch(e){console.error('Diary model failed:',e.name)}}
@@ -244,4 +258,4 @@ async function maybeRun({ws,complete=null}={}){
  return run({ws,complete,reason:'idle'});
 }
 function status(){const prev=state('reflect.last',null);return {idleMs:idleMs(),idleNeedMs:IDLE_MS,running:!!running,last:prev?.at||null}}
-module.exports={touch,run,maybeRun,status,diary,summaries,summariesFor,insightList,insightsFor,summaryByTemplate};
+module.exports={touch,run,maybeRun,status,note,diary,summaries,summariesFor,insightList,insightsFor,summaryByTemplate};

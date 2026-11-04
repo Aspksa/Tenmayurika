@@ -1189,6 +1189,9 @@ function mount(host){
   const end=x=>(kindName[x.kind]||x.kind)+' «'+(x.title||'…')+'»';
   const hot=(m.working?.facts?.length||0)+(m.working?.notes?.length||0);
   diaBox.replaceChildren(head,status,
+   ...(m.core?[coreSec(m.core,sec)]:[]),
+   ...(m.onboarding?.active?[onboardSec(m.onboarding,sec,row)]:[]),
+   ...(m.review?[reviewRow(m.review)]:[]),
    sec('дневник',...(m.diary.length?m.diary.slice(0,6).map(d=>row(atText(d.at)+' · '+d.text)):[el('div','brain-fix-ok','Пока пусто.')])),
    ...(m.insights.length?[sec('выводы',...m.insights.slice(0,6).map(i=>row(i.text)))]:[]),
    sec('навыки из опыта',...(m.skills.length?m.skills.slice(0,10).map(k=>row((k.status==='retired'?'(на покое) ':'')+k.rule+' · ✓'+k.ok+' ✎'+k.fix,()=>postJson('/api/brain/skills/remove',{id:k.id}),'Убрать навык')):[el('div','brain-fix-ok','Появятся, когда вы подтвердите 👍 несколько похожих ответов.')])),
@@ -1198,6 +1201,54 @@ function mount(host){
    ...(m.memskills?[mskillSec(m.memskills,sec,row)]:[]),
    ...(m.growth?[growthSec(m.growth,sec,row)]:[]),
    ...(hot?[el('p','brain-fix-ok','В рабочей памяти разговора сейчас '+hot+' '+plural(hot,'запись','записи','записей')+'.')]:[]));
+ }
+ // Сердцевина: три блока, которые всегда в подсказке. Можно поправить руками и вернуть прежнюю версию.
+ const srcName={seed:'начальное',chat:'сама в разговоре',reflect:'пересмотрела',review:'из разбора',user:'вы',rules:'из фактов'};
+ function coreSec(blocks,sec){
+  const kids=[el('div','brain-fix-ok','Это всегда у меня перед глазами. Я переписываю это сама, когда узнаю важное; поправить можно и вам.')];
+  for(const b of blocks){
+   const card=el('div','brain-core-block');
+   const title=el('div','brain-fix-q',b.title+' · v'+b.version+(srcName[b.source]?' · '+srcName[b.source]:''));
+   const text=el('div','brain-fix-ok brain-core-text',b.body);
+   const edit=el('button','brain-btn','✎');edit.type='button';edit.title='Поправить «'+b.title+'»';edit.setAttribute('aria-label',edit.title);
+   const back=el('button','brain-btn','↶');back.type='button';back.title='Прежние версии';back.setAttribute('aria-label',back.title);
+   const bar=el('div','brain-dia-row');bar.append(title,edit,back);
+   card.append(bar,text);
+   edit.onclick=()=>{
+    const ta=el('textarea','brain-find brain-core-edit');ta.value=b.body;ta.maxLength=b.limit||1500;ta.rows=5;ta.setAttribute('aria-label',b.title);
+    const save=el('button','brain-btn','Сохранить'),cancel=el('button','brain-btn','Отмена'),count=el('span','brain-fix-ok','');save.type=cancel.type='button';
+    const upd=()=>{count.textContent=ta.value.length+' / '+(b.limit||1500)};ta.oninput=upd;upd();
+    const row2=el('div','brain-dia-row');row2.append(count,save,cancel);
+    save.onclick=async()=>{save.disabled=true;try{const r=await postJson('/api/brain/core',{name:b.name,body:ta.value});if(!r.ok){const e=await r.json().catch(()=>({}));count.textContent=e.error||'Не сохранилось';save.disabled=false;return}}catch{save.disabled=false;return}void renderDiary()};
+    cancel.onclick=()=>void renderDiary();
+    text.replaceWith(ta);card.append(row2);ta.focus();
+   };
+   back.onclick=async()=>{
+    back.disabled=true;let list=[];try{const r=await fetch('/api/brain/core');list=(await r.json()).find(x=>x.name===b.name)?.history||[]}catch{}
+    const box=el('div','brain-core-hist');
+    if(!list.length)box.append(el('div','brain-fix-ok','Прежних версий нет.'));
+    for(const h of list.slice(0,5)){const r=el('div','brain-dia-row');r.append(el('span','brain-fix-ok','v'+h.version+' · '+atText(h.at)+' · '+trim(h.body,140)));const ret=el('button','brain-btn','Вернуть');ret.type='button';ret.onclick=async()=>{ret.disabled=true;try{await postJson('/api/brain/core/restore',{name:b.name,version:h.version})}catch{}void renderDiary()};r.append(ret);box.append(r)}
+    card.append(box);
+   };
+   kids.push(card);
+  }
+  return sec('сердцевина',...kids);
+ }
+ // Знакомство: что я ещё хочу узнать о вас (вопросы задаю в чате, по одному и не часто).
+ function onboardSec(ob,sec,row){
+  const kids=[el('div','brain-fix-ok','Знакомимся: узнала '+ob.done+' из '+ob.total+'. Спрашиваю в разговоре по одному вопросу, когда это к месту.')];
+  for(const it of ob.items.filter(i=>!i.done&&!i.skipped))kids.push(row('○ '+it.q,()=>postJson('/api/brain/onboarding',{action:'skip',item:it.id}),'Не спрашивать об этом'));
+  const end=el('button','brain-btn','Закончить знакомство');end.type='button';end.onclick=async()=>{end.disabled=true;try{await postJson('/api/brain/onboarding',{action:'finish'})}catch{}void renderDiary()};
+  kids.push(end);
+  return sec('знакомство',...kids);
+ }
+ // Разбор разговора на ходу: каждые N сообщений и при сжатии длинного разговора.
+ function reviewRow(rv){
+  const r=el('div','brain-dia-row');
+  r.append(el('span','brain-fix-ok','Разбираю разговор каждые '+rv.every+' сообщений'+(rv.last?' (последний раз '+atText(rv.last)+')':'')+'. С тех пор: '+rv.since+'.'));
+  const b=el('button','brain-btn',rv.running?'Разбираю…':'Разобрать сейчас');b.type='button';b.disabled=!!rv.running;
+  b.onclick=async()=>{b.disabled=true;b.textContent='Разбираю…';try{await postJson('/api/brain/review',{})}catch{}void renderDiary();window.dispatchEvent(new CustomEvent('tenma:memory'))};
+  r.append(b);return r;
  }
  // Чему я научилась запоминать: навыки запоминания, самоэкзамен, промахи, история изменений и просьба о подсказке.
  function mskillSec(ms,sec,row){

@@ -84,10 +84,13 @@ function messageText(msg){
 }
 // Сколько ждать модель: долгий ответ лучше честной ошибки, чем вечные «три точки».
 const TIMEOUT_MS=60000;
+const staleSocket=e=>e instanceof TypeError&&['ECONNRESET','EPIPE','UND_ERR_SOCKET','UND_ERR_CLOSED'].includes(e.cause?.code);
 async function complete({messages,tools}){
  const c=config();if(!c)throw Error('Model not configured');
  const body={model:c.model,messages,...(c.temperature!==undefined?{temperature:c.temperature}:{}),...(c.maxTokens?{max_tokens:c.maxTokens}:{})};
- const send=async withTools=>fetch(c.url,{method:'POST',headers:headers(c.key),body:JSON.stringify({...body,...(withTools&&tools?.length?{tools}:{})}),signal:AbortSignal.timeout(TIMEOUT_MS)});
+ const once=withTools=>fetch(c.url,{method:'POST',headers:headers(c.key),body:JSON.stringify({...body,...(withTools&&tools?.length?{tools}:{})}),signal:AbortSignal.timeout(TIMEOUT_MS)});
+ // Соединение из пула могло закрыться на той стороне, пока простаивало (keep-alive): один повтор на свежем.
+ const send=async withTools=>{try{return await once(withTools)}catch(e){if(!staleSocket(e))throw e;return once(withTools)}};
  const useTools=c.useTools&&tools?.length;
  let r=await send(useTools);
  // Не все модели поддерживают инструменты: при ошибке запроса повторяем без них.
