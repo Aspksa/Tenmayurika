@@ -41,6 +41,7 @@ const libraryCollections=require('./library-collections');
 const libraryAnalysis=require('./library-analysis');
 const libraryOcr=require('./library-ocr');
 const libraryJournal=require('./library-journal');
+const libraryHealth=require('./library-health');
 async function journal(action,detail){try{await libraryJournal.record(action,detail)}catch(e){console.error('Library journal failed:',e.code||e.name)}}
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
@@ -254,6 +255,7 @@ if(p.startsWith('/api/library/')){
   if(req.method==='POST'&&p==='/api/library/collections/remove'){const input=await body(req),item=await libraryCollections.remove(input?.id,input?.path);await journal('collection_removed',{collection:item.name,path:input.path});return respond(res,200,item)}
   if(req.method==='POST'&&p==='/api/library/collections/delete'){const input=await body(req),result=await libraryCollections.drop(input?.id);await journal('collection_deleted',{});return respond(res,200,result)}
   if(req.method==='GET'&&p==='/api/library/journal')return respond(res,200,{items:await libraryJournal.recent()});
+  if(req.method==='GET'&&p==='/api/library/health')return respond(res,200,await libraryHealth.check());
   if(req.method==='POST'&&p==='/api/library/rename'){const input=await body(req),result=await library.renameFile(input?.path,input?.name,libraryCollections.replacePath);if(!result.unchanged)await journal('file_renamed',{path:input.path,target:result.path});return respond(res,200,result)}
   if(req.method==='POST'&&p==='/api/library/folder'){const input=await body(req);await library.mkdir(input?.path);await journal('folder_created',{path:input.path});return respond(res,201,{ok:true})}
   if(req.method==='PUT'&&p==='/api/library/upload'){const rel=url.searchParams.get('path')||'',result=await library.upload(rel,req);await journal('file_uploaded',{path:rel});return respond(res,201,result)}

@@ -40,8 +40,14 @@ async function renameFile(file,newName,replaceReferences){
  const original=await filePath(file),parts=segments(file);parts.pop();const target=[...parts,newName].join('/');if(target===file)return {path:file,unchanged:true};
  const destination=await resolvePath(target,{allowMissingLast:true});
  // Hard link refuses to overwrite an existing target; both names refer to the original data.
- await fsp.link(original,destination);
+ let copied=false;
+ try{await fsp.link(original,destination)}catch(e){
+  // Filesystems such as exFAT may not support hard links. Keep the original in this mode.
+  if(!['EPERM','ENOTSUP','EOPNOTSUPP','ENOSYS','EXDEV'].includes(e.code))throw e;
+  await fsp.copyFile(original,destination,fs.constants.COPYFILE_EXCL);copied=true;
+ }
  try{await replaceReferences(file,target)}catch(e){await fsp.unlink(destination).catch(()=>{});throw e}
+ if(copied)return {path:target,originalRetained:true};
  try{await fsp.unlink(original)}catch{return {path:target,originalRetained:true}}
  return {path:target};
 }
