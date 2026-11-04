@@ -46,3 +46,15 @@ async function proposeFacts(file){
  return {source:file,items:out,truncated:d.text.length>16000};
 }
 module.exports.proposeFacts=proposeFacts;
+
+// Excel preview is extractive: stored/cached values are shown with file, sheet and cell addresses.
+async function tables(files){
+ if(!Array.isArray(files)||!files.length||files.length>5||files.some(x=>typeof x!=='string'||!/\.xlsx$/i.test(x)))throw new TypeError('Выберите от одной до пяти книг XLSX');
+ const books=[];let totalRows=0;
+ for(const file of [...new Set(files)]){const doc=await docs.read(file),sheets=[];let sheet=null;
+  for(const line of doc.text.split(/\r?\n/)){const match=line.match(/^\[Лист: (.+)\]$/);if(match){sheet={name:match[1],rows:0,preview:[]};sheets.push(sheet);continue}if(!sheet||!line.trim())continue;sheet.rows++;totalRows++;if(sheet.preview.length<20)sheet.preview.push(line.slice(0,2000))}
+  books.push({path:file,sheets});
+ }
+ return {books,totalRows,limitPerSheet:20};
+}
+module.exports.tables=tables;
