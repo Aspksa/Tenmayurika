@@ -23,11 +23,11 @@ const MONO='ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospa
 // Палитры роя. tones — три слоя частиц: тёмные угли, основной цвет, раскалённые искры.
 // Медь — как в ролике; лёд и неон — на выбор. Противоречия в любой палитре серые с красным.
 const PALETTES={
- copper:{name:'Медь',haze:[150,62,22],tones:[[150,70,30],[226,128,60],[255,214,160]],colors:{personal:[236,140,66],work:[240,118,52],notes:[246,170,96],facts:[232,132,60],done:[150,110,80],core:[236,136,62]},
+ copper:{name:'Медь',haze:[150,62,22],tones:[[150,70,30],[226,128,60],[255,214,160]],colors:{personal:[236,140,66],work:[240,118,52],notes:[246,170,96],facts:[232,132,60],done:[150,110,80],core:[236,136,62],agents:[255,206,128]},
   spike:[236,140,70],link:[240,150,80],star:[220,120,60],starDot:[255,170,100],glow:['rgba(255,248,230,1)','rgba(255,196,120,.85)','rgba(230,110,40,.2)'],cold:['rgba(170,70,40,.9)','rgba(110,40,20,.6)','rgba(60,20,10,.15)'],accent:'#ee8a3c',hot:'#ffcf9a'},
- ice:{name:'Лёд',haze:[24,64,128],tones:[[36,84,150],[104,176,240],[222,242,255]],colors:{personal:[110,190,255],work:[84,156,255],notes:[150,215,255],facts:[100,180,250],done:[90,110,140],core:[120,190,255]},
+ ice:{name:'Лёд',haze:[24,64,128],tones:[[36,84,150],[104,176,240],[222,242,255]],colors:{personal:[110,190,255],work:[84,156,255],notes:[150,215,255],facts:[100,180,250],done:[90,110,140],core:[120,190,255],agents:[196,236,255]},
   spike:[120,190,250],link:[140,200,255],star:[90,150,230],starDot:[160,210,255],glow:['rgba(240,250,255,1)','rgba(150,210,255,.85)','rgba(40,110,220,.2)'],cold:['rgba(40,80,140,.9)','rgba(20,50,100,.6)','rgba(10,20,50,.15)'],accent:'#6fc3ff',hot:'#cfeaff'},
- neon:{name:'Неон',haze:[88,18,120],tones:[[110,30,160],[236,64,206],[130,255,240]],colors:{personal:[255,70,200],work:[180,90,255],notes:[80,240,230],facts:[255,96,176],done:[120,90,140],core:[230,70,210]},
+ neon:{name:'Неон',haze:[88,18,120],tones:[[110,30,160],[236,64,206],[130,255,240]],colors:{personal:[255,70,200],work:[180,90,255],notes:[80,240,230],facts:[255,96,176],done:[120,90,140],core:[230,70,210],agents:[150,255,200]},
   spike:[240,80,220],link:[120,240,255],star:[170,80,255],starDot:[120,240,255],glow:['rgba(255,240,255,1)','rgba(255,120,230,.85)','rgba(140,40,220,.2)'],cold:['rgba(100,40,140,.9)','rgba(60,20,90,.6)','rgba(30,10,50,.15)'],accent:'#ff4fd8',hot:'#9ffcff'}
 };
 const PALE={haze:[95,95,100],tones:[[120,120,128],[200,200,208],[245,245,250]]};
@@ -178,7 +178,7 @@ function words(text,min=3){const out=[];for(const w of String(text||'').toLocale
 const stemsOf=it=>it.stems||(it.stems=new Set(words(it.title).map(stem)));
 function ts(v){const t=Date.parse(v||'');return Number.isFinite(t)?t:0}
 function plural(n,a,b,c){const m=n%10,h=n%100;return m===1&&h!==11?a:m>=2&&m<=4&&(h<12||h>14)?b:c}
-function buildModel(ws,facts,conflicts,exp=[],topics=[]){
+function buildModel(ws,facts,conflicts,exp=[],topics=[],jobs=[]){
  const app=()=>window.TenmaApp;
  const lobes=[],events=[];
  const add=(id,label,sub,color,items,open)=>{if(items.length)lobes.push({id,label,sub,color,items,open})};
@@ -208,13 +208,18 @@ function buildModel(ws,facts,conflicts,exp=[],topics=[]){
  for(const s of big)add('fs:'+s.name.toLocaleLowerCase(),s.name.toLocaleLowerCase(),factSub(s),COLORS.facts,s.list.map(factItem),()=>app()?.go('facts'));
  add('facts','факты',rest.length+' '+plural(rest.length,'факт','факта','фактов'),COLORS.facts,rest.map(factItem),()=>app()?.go('facts'));
  add('conflicts','противоречия','сбой · '+conflicts.length,COLORS.conflicts,conflicts.map(c=>({id:'c:'+c.id,title:c.subject+' — '+c.predicate+': «'+c.earlier+'» или «'+c.newer+'»',meta:'противоречие',ts:ts(c.detected_at),weight:1.3,open:()=>app()?.go('facts')})),()=>app()?.go('facts'));
+ // Агенты: их дела — нейроны своей зоны. 👍 — крупнее, 👎 и неудача горят (по ним агент учится).
+ const openAgents=()=>window.TenmaAvatar?.openSettings?.('agents');
+ const fixN=jobs.filter(j=>j.feedback==='fix').length,okN=jobs.filter(j=>j.feedback==='ok').length;
+ add('agents','агенты',jobs.length+' '+plural(jobs.length,'дело','дела','дел')+(okN?' · 👍 '+okN:'')+(fixN?' · 👎 '+fixN:''),COLORS.agents||COLORS.done,jobs.map(j=>({id:'a:'+j.id,title:j.name+': '+j.task,meta:'агент · '+(j.ok?'готово':'не вышло')+(j.result?' · '+j.result.slice(0,90):'')+(j.feedback==='ok'?' · 👍':j.feedback==='fix'?' · 👎'+(j.note?' «'+j.note+'»':''):''),ts:ts(j.finishedAt),hot:j.feedback==='fix'||!j.ok,weight:j.feedback==='ok'?1.4:j.from&&j.from!=='yurika'?1.15:1,open:openAgents})),openAgents);
+ for(const j of jobs)events.push({t:ts(j.finishedAt),kind:'агент',color:j.feedback==='fix'||!j.ok?COLORS.conflicts:COLORS.agents||COLORS.done,text:j.name+': '+j.task+(j.result?' → '+j.result.slice(0,80):''),bad:j.feedback==='fix'||!j.ok});
  // Журнал: что мозг узнал и когда.
  for(const t of tasks){events.push({t:ts(t.createdAt),kind:t.category==='work'?'работа':'дело',color:t.category==='work'?COLORS.work:COLORS.personal,text:t.title});if(t.doneAt)events.push({t:ts(t.doneAt),kind:'готово',color:COLORS.done,text:t.title})}
  for(const n of notes)events.push({t:ts(n.createdAt),kind:'заметка',color:COLORS.notes,text:n.title});
  for(const f of facts)events.push({t:ts(f.observed_at),kind:'факт',color:COLORS.facts,text:f.subject+' '+f.predicate+' '+f.object});
  for(const c of conflicts)events.push({t:ts(c.detected_at),kind:'сбой',color:COLORS.conflicts,text:c.subject+': '+c.earlier+' / '+c.newer,bad:true});
  // Опыт аватара: как поняла вопрос и что сделала; поправки пользователя видны отдельно.
- for(const e of exp){const did=e.tools.length?e.tools.join(', '):(e.recalled.facts.length+e.recalled.notes.length)?'вспомнила '+(e.recalled.facts.length+e.recalled.notes.length):'не нашла';
+ for(const e of exp){if(String(e.source||'').startsWith('agent:'))continue;const did=e.tools.length?e.tools.join(', '):(e.recalled.facts.length+e.recalled.notes.length)?'вспомнила '+(e.recalled.facts.length+e.recalled.notes.length):'не нашла';
   events.push({t:ts(e.at),kind:e.feedback==='fix'?'поправка':e.feedback==='ok'?'поняла':'опыт',color:e.feedback==='fix'?COLORS.conflicts:COLORS.done,text:'«'+e.question+'» → '+(e.feedback==='fix'&&e.correction?e.correction:did)})}
  events.sort((a,b)=>b.t-a.t);
  // Связи между фактами: объект одного факта — субъект другого.
@@ -392,7 +397,7 @@ function mount(host){
  stage.classList.toggle('gl',!!glr);
  glc.addEventListener('webglcontextlost',e=>{e.preventDefault();glr=null;dropGL()});
 
- let W=0,H=0,dpr=1,ui=1,quality=1,baseQ=1,fpsT=0,fpsN=0,model={lobes:[],events:[],links:[],facts:0},facts=[],conflicts=[],exp=[],topics=[],dups=[],impactIds=new Set(),impactOf=null,impactInfo=null;
+ let W=0,H=0,dpr=1,ui=1,quality=1,baseQ=1,fpsT=0,fpsN=0,model={lobes:[],events:[],links:[],facts:0},facts=[],conflicts=[],exp=[],topics=[],jobs=[],dups=[],impactIds=new Set(),impactOf=null,impactInfo=null;
  const core={parts:makeParticles(9000,7,MULT.core),pulse:0};
  let satParts=makeParticles(220,31,MULT.sat);
  // Пыль в объёме: редкие тусклые частицы во всём пространстве между зонами, медленно дрейфуют.
@@ -509,7 +514,7 @@ function mount(host){
  let timeCut=null,prevCut=null,timeSpan=null;
  function apply(){
   const ws=window.TenmaApp?.workspace||{notes:[],tasks:[]};
-  model=buildModel(ws,facts,conflicts,exp,topics);
+  model=buildModel(ws,facts,conflicts,exp,topics,jobs);
   // Ползунок времени: видны только записи, появившиеся до выбранного дня.
   {let lo=Infinity;for(const l of model.lobes)for(const it of l.items)if(it.ts&&it.ts<lo)lo=it.ts;timeSpan=Number.isFinite(lo)?{from:lo,to:Date.now()}:null}
   if(timeCut){for(const l of model.lobes)l.items=l.items.filter(it=>!it.ts||it.ts<=timeCut);model.lobes=model.lobes.filter(l=>l.items.length);model.events=model.events.filter(e=>!e.t||e.t<=timeCut)}
@@ -1036,10 +1041,12 @@ function mount(host){
   try{const [f,c,x,tp,dp]=await Promise.all([fetch('/api/facts?limit=2000').then(r=>r.ok?r.json():r.status===400?fetch('/api/facts?limit=500').then(r2=>r2.ok?r2.json():[]):[]),fetch('/api/facts/conflicts?limit=100').then(r=>r.ok?r.json():[]),fetch('/api/experience?limit=40').then(r=>r.ok?r.json():{items:[]}),fetch('/api/facts/communities').then(r=>r.ok?r.json():[]).catch(()=>[]),fetch('/api/facts/duplicates').then(r=>r.ok?r.json():[]).catch(()=>[])]);facts=Array.isArray(f)?f.filter(x=>!x.valid_to):[];conflicts=Array.isArray(c)?c:[];exp=Array.isArray(x?.items)?x.items:[];topics=Array.isArray(tp)?tp:[];dups=Array.isArray(dp)?dp:[];renderDup()}catch{}
   // Опрос раз в 20 с: если факты и противоречия не менялись, мозг не пересобирается (на 10 тыс. записей это заметно).
   void loadChatStat();
+  // Журнал агентов (зона «агенты»): имена встроенных и своих помощников.
+  try{const r=await fetch('/api/agents?journal=120');if(r.ok){const d=await r.json();const names={guardian:'Хранитель',reviewer:'Разборщик',secretary:'Секретарь',researcher:'Исследователь',teacher:'Учитель'};for(const c of d.custom||[])names[c.id]=c.name;jobs=(Array.isArray(d.journal)?d.journal:[]).map(j=>({...j,name:names[j.agent]||'Агент'}))}}catch{}
   try{const r=await fetch('/api/brain/strength');if(r.ok){const d=await r.json();if(d&&typeof d==='object')srv=d}}catch{}
   try{const r=await fetch('/api/brain/memskills/organs');if(r.ok){const d=await r.json();if(Array.isArray(d)){const had=new Set(organs.map(o=>o.name+':'+o.version));if(organs.length)for(const o of d)if(!had.has(o.name+':'+o.version))organFlash.set(o.name,1);organs=d;dirty=true}}}catch{}
   try{const r=await fetch('/api/brain/bonds?limit=400');if(r.ok){const d=await r.json();if(Array.isArray(d)){srvBonds=d;coList=buildCo();dirty=true}}}catch{}
-  const sig=facts.length+':'+facts.map(f=>f.id).join(',')+'|'+conflicts.map(c=>c.id).join(',')+'|'+exp.map(e=>e.id+(e.feedback||'')).join(',')+'|'+topics.map(t=>t.id+':'+t.size).join(',');
+  const sig=facts.length+':'+facts.map(f=>f.id).join(',')+'|'+conflicts.map(c=>c.id).join(',')+'|'+exp.map(e=>e.id+(e.feedback||'')).join(',')+'|'+topics.map(t=>t.id+':'+t.size).join(',')+'|'+jobs.map(j=>j.id+(j.feedback||'')).join(',');
   if(sig===factSig&&applied)return;factSig=sig;
   if(host.isConnected)apply();
   firstVisit=false;
@@ -1224,12 +1231,13 @@ function mount(host){
   const end=x=>(kindName[x.kind]||x.kind)+' «'+(x.title||'…')+'»';
   const hot=(m.working?.facts?.length||0)+(m.working?.notes?.length||0);
   // Дневник по вкладкам: мышление, душа, сердцевина, память, навыки, рост.
-  const TABS={mind:'мышление',soul:'душа',self:'сердцевина',memory:'память',skills:'навыки',growth:'рост'},tab=TABS[cfg.diaTab]?cfg.diaTab:'mind';
+  const TABS={mind:'мышление',soul:'душа',self:'сердцевина',memory:'память',skills:'навыки',growth:'рост',ties:'связи'},tab=TABS[cfg.diaTab]?cfg.diaTab:'mind';
   const tabBar=el('div','brain-tabs');tabBar.setAttribute('role','tablist');
   for(const [k,v] of Object.entries(TABS)){const b=el('button','brain-tab'+(k===tab?' on':''),v);b.type='button';b.setAttribute('role','tab');b.setAttribute('aria-selected',String(k===tab));b.onclick=()=>{cfg.diaTab=k;write(CFG_KEY,cfg);void renderDiary()};tabBar.append(b)}
   let body=[];
   if(tab==='mind')body=[status,...await mindSecs(sec,row)];
   else if(tab==='soul')body=await psycheSecs(sec,row);
+  else if(tab==='ties')body=await tiesSecs(sec,row);
   else if(tab==='self')body=[...(m.core?[coreSec(m.core,sec)]:[]),...(m.onboarding?.active?[onboardSec(m.onboarding,sec,row)]:[]),...(m.review?[reviewRow(m.review)]:[]),
    sec('как вы просили отвечать',...m.preferences.map(p=>row(p.text,()=>postJson('/api/brain/preferences/remove',{id:p.id}),'Убрать предпочтение')),prefForm)];
   else if(tab==='memory')body=[sec('дневник',...(m.diary.length?m.diary.slice(0,8).map(d=>row(atText(d.at)+' · '+d.text)):[el('div','brain-fix-ok','Пока пусто.')])),
@@ -1332,6 +1340,18 @@ function mount(host){
  };
  // Внутренний мир и рост себя: якоря, письмо, мечты, вкусы, летопись, сны, свои правила, самонастройка,
  // свои инструменты и правки своего кода (применяются только по кнопке).
+ // Связи роста: кто кого чему научил (ties.js) и экзамен поведения Учителя.
+ async function tiesSecs(sec,row){
+  let t;try{const r=await fetch('/api/brain/ties');if(!r.ok)throw 0;t=await r.json()}catch{return [el('p','brain-fix-ok','Не удалось открыть связи.')]}
+  const K=t.kinds||{},icon={agent:'✦',episode:'◈',lesson:'✎',goal:'☆',question:'?',exam:'✓',miss:'↺',rule:'§',owner:'♥'};
+  const node=x=>{const n=el('span','brain-tie-node brain-tie-'+x.kind);n.append(el('b','',(icon[x.kind]||'·')+' '+(K[x.kind]||x.kind)),el('span','',x.label));return n};
+  const chain=x=>{const r=el('div','brain-tie');r.append(node(x.from),el('span','brain-tie-arrow','→'),node(x.to));const m=el('div','brain-tie-meta',atText(x.at)+(x.why?' · '+x.why:'')+(x.n>1?' · ×'+x.n:''));r.append(m);return r};
+  const out=[];
+  out.push(sec('кто кого учит',...(t.summary.length?t.summary.map(s=>{const r=el('div','brain-dia-row');r.append(el('span','brain-fix-ok',s.label),el('span','brain-tie-n',String(s.n)));return r}):[el('div','brain-fix-ok','Пока связей нет. Они появятся, когда агенты поработают, ты оценишь их дела, а у души будут мечты.')])));
+  if(t.items.length)out.push(sec('цепочки',...t.items.slice(0,40).map(chain)));
+  if(t.exams?.length)out.push(sec('экзамен поведения',el('div','brain-fix-ok','Учитель проверяет, держатся ли уроки агентов и правила Юрики. Что не держится — уходит на покой.'),...t.exams.slice(0,8).map(e=>row(atText(e.at)+' · уроки '+e.lessons.passed+'/'+e.lessons.n+' · правила '+e.rules.passed+'/'+e.rules.n))));
+  return out;
+ }
  async function psycheSecs(sec,row){
   let p;try{const r=await fetch('/api/brain/psyche');if(!r.ok)throw 0;p=await r.json()}catch{return [el('p','brain-fix-ok','Не удалось открыть душу.')]}
   const act=(name,body)=>()=>postJson('/api/brain/psyche/'+name,body);

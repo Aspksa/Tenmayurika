@@ -6,7 +6,7 @@
 const {use,parse,state,setState}=require('./brain-db');
 const owner=require('./owner');
 const KEEP=400;
-const KINDS={plan:'план',split:'подвопросы',check:'сверка',guess:'догадка',ask:'вопрос',offer:'предложение',reflect:'размышление',review:'разбор',forget:'забывание',wake:'проснулось',learn:'выучила',answer:'ответ',context:'контекст',infer:'вывод',unknown:'не знаю',confirm:'подтверждение',future:'планы',tune:'настройка',dream:'сон',self:'о себе'};
+const KINDS={plan:'план',split:'подвопросы',check:'сверка',guess:'догадка',ask:'вопрос',offer:'предложение',reflect:'размышление',review:'разбор',forget:'забывание',wake:'проснулось',learn:'выучила',answer:'ответ',context:'контекст',infer:'вывод',unknown:'не знаю',confirm:'подтверждение',future:'планы',tune:'настройка',dream:'сон',self:'о себе',agent:'агенты',teach:'учёба'};
 function add(kind,text,details={}){
  // Мысли — её слова о хозяине: безличные «человек»/«пользователь» становятся «хозяином».
  const t=owner.words(String(text||'').trim());if(!t)return null;

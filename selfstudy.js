@@ -43,9 +43,14 @@ function causeOf(expected,source){
 async function selfTest({ws,complete=null,limit=TEST_PER_RUN}={}){
  const {recall}=require('./recall');
  const since=new Date(Date.now()-TEST_DAYS*864e5).toISOString();
- const msgs=chatlog.recent(300).filter(m=>m.role==='user'&&m.learned===1&&m.at>=since&&m.text.trim().length>=12&&!tested('chat:'+m.id)).slice(0,limit);
- const res={messages:0,tested:0,passed:0,misses:[]};
+ // Мечты души задают темы: сообщения о том, к чему она тянется, проверяются первыми.
+ let focus=null,psyche=null;try{psyche=require('./psyche');focus=psyche.focus();if(!focus.goals.length)focus=null}catch{focus=null}
+ const all=chatlog.recent(300).filter(m=>m.role==='user'&&m.learned===1&&m.at>=since&&m.text.trim().length>=12&&!tested('chat:'+m.id));
+ const near=new Map();if(focus)for(const m of all){const x=psyche.focusMatch(m.text,focus);if(x)near.set(m.id,x)}
+ const msgs=[...all.filter(m=>near.has(m.id)),...all.filter(m=>!near.has(m.id))].slice(0,limit);
+ const res={messages:0,tested:0,passed:0,misses:[],focused:0};
  for(const m of msgs){
+  const nm=near.get(m.id);if(nm){res.focused++;try{require('./ties').add({from:{kind:'goal',id:nm.goal.id,label:nm.goal.text},to:{kind:'exam',label:m.text.slice(0,100)},why:'мечта выбрала тему экзамена'})}catch(e){console.error('Tie failed:',e.name)}}
   const source='chat:'+m.id;res.messages++;
   const qs=await questionsFor(m.text,complete);
   if(!qs.length){saveTest(source,'(нечего спросить)','',2,null);continue}
