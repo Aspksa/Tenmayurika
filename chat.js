@@ -32,6 +32,8 @@ const dialog=require('./context');
 const infer=require('./infer');
 const plans=require('./plans');
 const evidence=require('./evidence');
+const tune=require('./tune');
+const factvec=require('./factvec');
 const guesses=require('./guesses');
 const curiosity=require('./curiosity');
 const initiative=require('./initiative');
@@ -626,7 +628,8 @@ async function reply(input,ctx={}){
  try{curiosity.afterReply(out.reply||'')}catch(e){console.error('Curiosity check failed:',e.name)}
  if(answered?.effect){out.answered=answered.effect;out.changed=true}
  // Учимся фоном, не задерживая ответ.
- setImmediate(()=>chatlog.learnPending().catch(e=>console.error('Chat learning failed:',e.name)));
+ // Затем новые факты получают векторы для поиска по смыслу (если выбрана модель эмбеддингов).
+ setImmediate(()=>chatlog.learnPending().then(()=>factvec.index()).catch(e=>console.error('Chat learning failed:',e.name)));
  // Фоном: выпавшее из окна сворачивается в сводку; первое сжатие или каждые N сообщений — разбор разговора.
  setImmediate(()=>afterTurn(input).catch(e=>console.error('After-turn failed:',e.name)));
  try{out.autoLearn=chatlog.autoLearn()}catch{}
@@ -636,8 +639,9 @@ async function reply(input,ctx={}){
  if(out.understood&&experience.detect(message)!=='ok'&&!prefs.length){
   let id=null;try{id=experience.record({question:message,understood:out.understood,recalled:out.recalled,tools:out.tools,answer:out.secret?'':out.reply,source:out.source,ok:!out.fallback&&!out.failed,skills:(out.skills||[]).map(x=>x.id)})}catch(e){console.error('Experience record failed:',e.name)}
   if(id)out.experience={id,used:out.used||[],skills:(out.skills||[]).map(x=>x.id)};
+  if(id)try{tune.remember(id,out.signals||[])}catch(e){console.error('Tune remember failed:',e.name)}
  }
- delete out.understood;delete out.used;delete out.failed;delete out.skills;
+ delete out.signals;delete out.understood;delete out.used;delete out.failed;delete out.skills;
  return out;
 }
 async function afterTurn(input){
@@ -704,7 +708,8 @@ async function answer(input,message,ctx){
  // Логические выводы вокруг найденного: родство через шаг, взаимные связи, возраст, место через место.
  try{if(thoughts.on('infer')){const inf=infer.around(facts,{message});if(inf.length){mind.inferred=inf;result.thinking.inferred=inf.map(infer.text);thoughts.add('infer','Вывела: '+inf.slice(0,2).map(infer.text).join('; '))}}}catch(e){console.error('Inference failed:',e.name)}
  const understood=(words(message).join(', ')||'без ключевых слов')+(past.length?' · опыт: '+past.length:'')+(earlier.length?' · из разговоров: '+earlier.length:'')+(matched.length?' · навык: '+matched.length:'');
- const meta={understood,used:past.map(e=>e.id),skills:matched};
+ // Какими способами нашлось вспомненное: 👍/👎 к ответу подстроит их веса (tune.js).
+ const meta={understood,used:past.map(e=>e.id),skills:matched,signals:[...new Set([...facts,...notes].flatMap(x=>tune.signalsOf(x.why)))]};
  // Что аватар вспомнил для ответа — «Мозг» подсвечивает эти нейроны.
  result.recalled={facts:facts.map(f=>f.id),notes:notes.map(n=>n.id)};
  if(llm.config()){

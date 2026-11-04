@@ -41,7 +41,7 @@ function capture(text,facts,at=new Date().toISOString()){
  const list=(facts||[]).filter(f=>f&&f.id);if(!list.length)return [];
  const now=new Date(at),made=[];
  for(const sentence of String(text||'').split(/(?<=[.!?\n;])\s+/)){
-  const w=when(sentence,now);if(!w)continue;
+  const w=when(sentence,now);if(!w)continue;w.phrase=w.phrase.toLocaleLowerCase();
   const hay=new Set(stems(sentence));
   for(const f of list){
    // Факт из этого предложения: его связь или объект названы в нём.

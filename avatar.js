@@ -489,7 +489,12 @@
    const enabled=h('input',{type:'checkbox',role:'switch'});enabled.checked=v.enabled;
    const useTools=h('input',{type:'checkbox',role:'switch'});useTools.checked=v.useTools;
    const persona=h('textarea',{rows:'4',maxlength:'4000',placeholder:'Характер и стиль ответов. Например: «Ты Юрика — мудрая и игривая кицунэ. Отвечай кратко, с японскими словечками».','aria-label':'Характер'});persona.value=v.systemPrompt||'';
-   const collect=()=>({provider:provider.value,baseUrl:baseUrl.value,model:model.value,temperature:Number(temp.value),maxTokens:Number(maxT.value),enabled:enabled.checked,useTools:useTools.checked,systemPrompt:persona.value,...(key.value.trim()?{apiKey:key.value.trim()}:{})});
+   // Поиск по смыслу: модель эмбеддингов у того же сервиса (тот же адрес и ключ).
+   const embHints=h('datalist',{id:'tenma-emb-models'},...((v.embeddingHints||{})[v.provider]||[]).map(id=>h('option',{value:id})));
+   const embModel=h('input',{type:'text',list:'tenma-emb-models',value:v.embeddingModel||'',placeholder:v.provider==='cloudru'?'Например: BAAI/bge-m3':'Например: text-embedding-3-small','aria-label':'Модель для поиска по смыслу',spellcheck:'false'});
+   provider.addEventListener('change',()=>{embHints.replaceChildren(...((v.embeddingHints||{})[provider.value]||[]).map(id=>h('option',{value:id})))});
+   const embTest=h('button',{type:'button',text:'Проверить поиск по смыслу',onclick:async()=>{embTest.disabled=true;say_('Проверяю эмбеддинги…',true);try{await api('/api/llm',collect());key.value='';const t=await api('/api/llm/embed-test',{});say_('✓ '+t.model+': вектор из '+t.dim+' чисел за '+t.ms+' мс. Факты получат векторы фоном.',true)}catch(e){say_(e.message,false)}embTest.disabled=false}});
+   const collect=()=>({embeddingModel:embModel.value,provider:provider.value,baseUrl:baseUrl.value,model:model.value,temperature:Number(temp.value),maxTokens:Number(maxT.value),enabled:enabled.checked,useTools:useTools.checked,systemPrompt:persona.value,...(key.value.trim()?{apiKey:key.value.trim()}:{})});
    const saveBtn=h('button',{type:'button',class:'primary',text:'Сохранить',onclick:async()=>{try{const nv=await api('/api/llm',collect());key.value='';key.placeholder=nv.hasKey?'Ключ сохранён '+nv.keyHint+' — введите новый, чтобы заменить':'Вставьте ключ API';say_('Сохранено ✓',true);status.className='model-status'+(nv.active?' on':'');status.lastChild.textContent=nv.active?'Подключено · '+nv.activeModel:'Модель не подключена — отвечаю локально'}catch(e){say_(e.message,false)}}});
    const loadBtn=h('button',{type:'button',text:'Загрузить список моделей',onclick:async()=>{loadBtn.disabled=true;say_('Запрашиваю список…',true);try{await api('/api/llm',collect());key.value='';const {models:list}=await api('/api/llm/models',{});models.replaceChildren(...list.map(id=>h('option',{value:id})));modelSelect.replaceChildren(h('option',{value:'',text:'— выберите модель ('+list.length+') —'}),...list.map(id=>h('option',{value:id,text:id,selected:id===model.value})));modelSelect.hidden=!list.length;say_(list.length?'Найдено моделей: '+list.length:'Сервис не вернул список — впишите имя модели вручную',!!list.length)}catch(e){say_(e.message,false)}loadBtn.disabled=false}});
    const testBtn=h('button',{type:'button',text:'Проверить связь',onclick:async()=>{testBtn.disabled=true;say_('Проверяю…',true);try{await api('/api/llm',collect());key.value='';const t=await api('/api/llm/test',{});say_('✓ '+t.model+' ответила за '+t.ms+' мс: «'+t.reply+'»',true)}catch(e){say_(e.message,false)}testBtn.disabled=false}});
@@ -508,7 +513,11 @@
       h('label',{class:'field'},h('span',{text:'Креативность'}),tempOut,temp),
       h('label',{class:'field'},h('span',{text:'Длина ответа (токенов)'}),maxOut,maxT),
       swRow('Использовать модель',enabled,'Выключите, чтобы отвечать только локально'),
-      swRow('Разрешить инструменты',useTools,'Модель сама создаёт заметки, дела, напоминания'))),
+      swRow('Разрешить инструменты',useTools,'Модель сама создаёт заметки, дела, напоминания')),
+     card('Поиск по смыслу',
+      h('label',{class:'field'},h('span',{text:'Модель эмбеддингов'}),h('span'),embModel,embHints),
+      h('small',{class:'hint',text:'По ней Юрика находит факты и заметки по смыслу: «машина» найдёт «автомобиль». Пусто — только по словам.'+(v.embeddingSource==='env'?' Сейчас работает из .env.':'')}),
+      h('div',{class:'row'},embTest))),
     card('Характер',persona),
     h('div',{class:'menu-actions'},saveBtn,testBtn,clearBtn),msg);
   }).catch(e=>wrap.replaceChildren(h('p',{class:'model-msg err',text:'Не удалось загрузить настройки: '+e.message})));

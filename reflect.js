@@ -32,6 +32,9 @@ const meta=require('./meta');
 const guesses=require('./guesses');
 const curiosity=require('./curiosity');
 const thoughts=require('./thoughts');
+const infer=require('./infer');
+const factvec=require('./factvec');
+const tune=require('./tune');
 const {use,tx,parse,state,setState}=require('./brain-db');
 const IDLE_MS=Number(process.env.TENMAYURIKA_IDLE_MS)||10*60*1000,GAP_MS=60*60*1000;
 const MAX_INSIGHTS=3,MIN_TOPIC=3,DIARY_KEEP=200;
@@ -198,6 +201,9 @@ function diaryText(d){
  if(gs.made?.length)parts.push('догадалась: '+gs.made.map(g=>'«'+guesses.text(g)+'»').join(', '));
  if(gs.confirmed)parts.push(gs.confirmed+' '+plural(gs.confirmed,'догадка подтвердилась','догадки подтвердились','догадок подтвердились'));
  if(gs.rejected)parts.push(gs.rejected+' '+plural(gs.rejected,'догадка не подтвердилась','догадки не подтвердились','догадок не подтвердились'));
+ if(d.inferred?.fresh?.length)parts.push('поняла из того, что знаю: '+d.inferred.fresh.slice(0,2).map(x=>'«'+x+'»').join(', '));
+ if(d.vectors?.indexed)parts.push('научилась искать по смыслу ещё '+d.vectors.indexed+' '+plural(d.vectors.indexed,'факт','факта','фактов'));
+ for(const c of d.tune?.changed||[])parts.push('сделала способ вспоминать «'+({text:'слова',vector:'смысл',graph:'связи',fresh:'свежесть',topic:'тема разговора',cause:'причины'}[c.signal]||c.signal)+'» '+(c.to>c.from?'важнее':'тише')+' ('+c.why+')');
  if(d.questions)parts.push('придумала '+d.questions+' '+plural(d.questions,'вопрос','вопроса','вопросов')+' о тебе');
  let text='Пока было тихо, '+(parts.length?parts.join(', '):'просто перебрала память, нового не нашлось')+'.';
  if(d.insights.length)text+=' '+(d.insights.length===1?'Вывод: ':'Выводы: ')+d.insights.map(i=>i.text).join(' ');
@@ -245,6 +251,10 @@ async function run({ws,complete=null,reason='idle'}={}){
   // Время и вид фактов, сила памяти и забывание.
   try{meta.ensure(memory.queryFacts({limit:5000}).filter(f=>!f.valid_to))}catch(e){console.error('Reflect meta failed:',e.name)}
   try{const r=strength.sweep({forget:thoughts.on('forgetting')});d.forget={forgotten:r.forgotten,dormant:r.dormant,fading:r.fading};if(r.forgotten)thoughts.add('forget','Забыла за давностью: '+r.forgottenFacts.slice(0,3).map(f=>f.subject+' — '+f.predicate+' '+f.object).join('; ')+(r.forgotten>3?' и ещё '+(r.forgotten-3):''))}catch(e){console.error('Reflect strength failed:',e.name)}
+  // Логические выводы по всей памяти: что нового следует из фактов (родство через шаг, взаимное, возраст).
+  try{if(thoughts.on('infer')){const all=infer.derive(memory.queryFacts({limit:5000}).filter(f=>!f.valid_to),{limit:500}),keys=all.map(infer.text);const prev=new Set(state('infer.seen',[]));const fresh=all.filter((x,i)=>!prev.has(keys[i]));setState('infer.seen',keys);d.inferred={total:all.length,fresh:fresh.slice(0,5).map(infer.text)};if(fresh.length)thoughts.add('infer','Поняла из того, что знаю: '+fresh.slice(0,3).map(infer.text).join('; '))}}catch(e){console.error('Reflect inference failed:',e.name)}
+  // Векторы для поиска по смыслу: новые факты получают свои, отставленные — теряют.
+  try{d.vectors=await factvec.index({limit:256})}catch(e){console.error('Reflect vectors failed:',e.name)}
   // Догадки: старые проверяются новыми фактами, новые строятся; вопросы о человеке.
   try{if(thoughts.on('guesses')){const c=guesses.check();const made=await guesses.generate({complete});d.guesses={made:made.map(g=>({subject:g.subject,predicate:g.predicate,object:g.object})),confirmed:c.confirmed.length,rejected:c.rejected.length}}}catch(e){console.error('Reflect guesses failed:',e.name)}
   try{if(thoughts.on('curiosity'))d.questions=(await curiosity.generate({complete})).length}catch(e){console.error('Reflect curiosity failed:',e.name)}
@@ -253,13 +263,15 @@ async function run({ws,complete=null,reason='idle'}={}){
   try{d.rollback=selfstudy.watch()}catch(e){console.error('Reflect rollback failed:',e.name)}
   try{if(!d.rollback)d.study=await selfstudy.evolve({complete})}catch(e){console.error('Reflect study failed:',e.name)}
   try{d.mskills={retired:memskills.retireUseless(),graduated:memskills.graduate()}}catch(e){console.error('Reflect skill stats failed:',e.name)}
+  // Самонастройка поиска: отклики 👍/👎 и проба весов на вопросах самоэкзамена.
+  try{if(thoughts.on('tune'))d.tune=await tune.run({ws})}catch(e){console.error('Reflect tune failed:',e.name)}
   // Сердцевина: «Кто я», «Кто ты», «Как мы общаемся» пересматриваются по свидетельствам (core.js).
   try{d.core=await core.rethink({complete,context:{diary:diary(5),skills:skills.list().filter(x=>x.status==='active').map(x=>x.rule),insights:insightList(5).map(i=>i.text)}})}catch(e){console.error('Reflect core failed:',e.name)}
   try{const before=state('onboarding',null)?.finished;const ob=onboarding.refresh();if(!before&&ob.finished)d.onboarding=true}catch(e){console.error('Reflect onboarding failed:',e.name)}
   // Просьба о подсказке появляется в дневнике один раз — когда она возникла.
   try{const h=memskills.evoState().help;if(h&&h.at>=mark.at)d.help=h}catch{}
   let text=diaryText(d);
-  if(complete&&(d.newFacts||d.insights.length||d.cards?.grown||d.zones?.created?.length||d.study?.adopted||d.core?.length)){try{
+  if(complete&&(d.newFacts||d.insights.length||d.inferred?.fresh?.length||d.tune?.changed?.length||d.cards?.grown||d.zones?.created?.length||d.study?.adopted||d.core?.length)){try{
    const msg=await complete({messages:[{role:'system',content:'Ты — ассистентка, которая ведёт дневник своей памяти. Перескажи это в 2–3 тёплых предложениях от первого лица по-русски, ничего не выдумывая.'},{role:'user',content:text}]});
    const s=String(msg.content||'').trim();if(s&&s.length<=800)text=s;
   }catch(e){console.error('Diary model failed:',e.name)}}
