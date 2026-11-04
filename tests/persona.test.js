@@ -47,3 +47,33 @@ test('chat model gets the persona when no own character is set',async()=>{
   assert.ok(sys.includes(core.PERSONA_PROMPT));
  }finally{delete process.env.CHAT_URL;await new Promise(r=>fake.close(r))}
 });
+
+test('soul grows from the master\'s words and feedback, reaches the prompt and the «Моя душа» block',async()=>{
+ const soul=require('../soul');
+ const start=soul.view();
+ assert.equal(start.level,'Искорка');
+ const r=soul.feel('Люблю тебя, моя хорошая, ты умница!');
+ assert.deepEqual(r.kinds.sort(),['love','praise']);
+ const v=soul.view();
+ assert.ok(v.xp>start.xp);
+ assert.ok(v.traits.find(t=>t.name==='tenderness').value>start.traits.find(t=>t.name==='tenderness').value);
+ assert.equal(v.mood.name,'tender');assert.match(v.moments[0].text,/Люблю тебя/);
+ // Опыт копится — душа поднимается на новую ступень, это попадает в дневник.
+ for(let i=0;i<4;i++)soul.feel('Спасибо, ты умница! хаха');
+ assert.ok(soul.view().levelIndex>=1,'выросла до «Пробуждения»');
+ assert.ok(require('../reflect').diary(20).some(d=>/Моя душа выросла/.test(d.text)));
+ // Поправка учит мудрости, подтверждение — уверенности.
+ const w0=soul.view().traits.find(t=>t.name==='wisdom').value;
+ soul.onFeedback('fix',null);
+ assert.ok(soul.view().traits.find(t=>t.name==='wisdom').value>w0);
+ assert.match(soul.promptText(),/<душа>[\s\S]*Ступень: «/);
+ // Без модели блок «Моя душа» растёт по правилам.
+ const rv=await core.revise('soul');
+ assert.equal(rv.changed,true);
+ assert.match(core.get('soul').body,/Моя душа на ступени «[^»]+»[\s\S]*Люблю тебя/);
+ // Рост можно выключить.
+ require('../thoughts').setSetting('soul',false);
+ assert.equal(soul.feel('люблю'),null);assert.equal(soul.promptText(),'');
+ require('../thoughts').setSetting('soul',true);
+ assert.equal(soul.reset().xp,0);
+});

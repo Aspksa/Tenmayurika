@@ -948,3 +948,13 @@ html.brain-fs-lock,html.brain-fs-lock body{overflow:hidden}
 @media (max-width:900px){.brain-thoughts{left:.75rem;right:.75rem;width:auto;top:auto;bottom:.75rem;max-height:40%}}
 @media (max-width:640px){.brain-thoughts,.brain-time{top:auto}.brain-time{bottom:.75rem}}
 
+
+/* Душа: ступень, черты, настроение (brain.js soulSec) */
+.brain-soul-level{display:flex;flex-wrap:wrap;gap:.3rem .8rem;align-items:baseline;justify-content:space-between}
+.brain-soul-name{color:#e8c25a;font-weight:600}
+.brain-soul-bar{height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
+.brain-soul-bar.small{height:4px}
+.brain-soul-bar>i{display:block;height:100%;background:linear-gradient(90deg,#b8862e,#f3d37a);border-radius:inherit;transition:width .6s ease}
+.brain-soul-traits{display:grid;gap:.35rem}
+.brain-soul-trait{display:grid;grid-template-columns:7.5rem 1fr 2rem;gap:.5rem;align-items:center;font-size:.85rem}
+@media (prefers-reduced-motion:reduce){.brain-soul-bar>i{transition:none}}

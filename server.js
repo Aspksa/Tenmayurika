@@ -25,6 +25,7 @@ const aliases=require('./aliases');
 const memskills=require('./memskills');
 const selfstudy=require('./selfstudy');
 const core=require('./core');
+const soul=require('./soul');
 const onboarding=require('./onboarding');
 const review=require('./review');
 const atlas=require('./atlas');
@@ -66,7 +67,7 @@ async function handleBrain(req,res,p,url){
    for(const f of memory.factsById(fids))title.set('fact:'+f.id,f.subject+' — '+f.predicate+' → '+f.object);
    const end=(k,r)=>({kind:k,id:r,title:title.get(k+':'+r)||null});
    return respond(res,200,{diary:reflect.diary(limitParam(url,20,200)),insights:reflect.insightList(20),skills:skills.list(),preferences:preferences.list(),summaries:reflect.summaries().slice(0,30).map(({factIds,...t})=>({...t,size:factIds.length})),
-    links:{count:links.count(),recent:recent.map(l=>({type:l.type,a:end(l.a_kind,l.a_ref),b:end(l.b_kind,l.b_ref),evidence:l.evidence,source:l.source}))},working:working.snapshot(),reflect:reflect.status(),growth:{...growth.stats(),cards:growth.cards(8)},memskills:mskillView(),core:core.list(),onboarding:onboarding.status(),review:review.status()});
+    links:{count:links.count(),recent:recent.map(l=>({type:l.type,a:end(l.a_kind,l.a_ref),b:end(l.b_kind,l.b_ref),evidence:l.evidence,source:l.source}))},working:working.snapshot(),reflect:reflect.status(),growth:{...growth.stats(),cards:growth.cards(8)},memskills:mskillView(),core:core.list(),soul:soul.view(),onboarding:onboarding.status(),review:review.status()});
   }
   if(req.method==='GET'&&p==='/api/brain/memskills/organs')return respond(res,200,memskills.list({all:true}).map(s=>({name:s.name,title:s.title,status:s.status,uses:s.uses,value:s.value,version:s.version,action:s.action})));
   if(req.method==='GET'&&p==='/api/brain/memskills')return respond(res,200,{...mskillView(),misses:memskills.queue({limit:50}),selftests:selfstudy.selftests(50),windows:selfstudy.watchInfo().windows});
@@ -84,6 +85,9 @@ async function handleBrain(req,res,p,url){
   // Сердцевина: блоки «Кто я», «Кто ты», «Как мы общаемся», их версии и возврат (core.js).
   if(req.method==='GET'&&p==='/api/brain/core')return respond(res,200,core.list().map(b=>({...b,history:core.history(b.name,10)})));
   if(req.method==='POST'&&p==='/api/brain/core'){const input=await body(req);if(typeof input?.body!=='string')return respond(res,400,{error:'Invalid body'});return respond(res,200,core.write(input.name,input.body,{source:'user',reason:'поправлено вручную'}))}
+  // Душа: ступень, черты, настроение и дорогие моменты (soul.js); можно начать рост заново.
+  if(req.method==='GET'&&p==='/api/brain/soul')return respond(res,200,soul.view());
+  if(req.method==='POST'&&p==='/api/brain/soul/reset')return respond(res,200,soul.reset());
   if(req.method==='POST'&&p==='/api/brain/core/restore'){const input=await body(req);const r=core.restore(input?.name,input?.version);return r?respond(res,200,r):respond(res,404,{error:'Not found'})}
   // Знакомство: пропустить пункт, закончить или начать заново.
   if(req.method==='POST'&&p==='/api/brain/onboarding'){const input=await body(req),a=input?.action;
