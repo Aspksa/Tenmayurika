@@ -197,6 +197,12 @@ function makeTools(ctx){
    const r=memory.addFact({subject,predicate,object,sourceId:'avatar-chat'});
    return {ok:true,changed:true,text:r.duplicate?'Это я уже помню.':'Запомнила: '+subject+' — '+predicate+' → '+object+(r.conflicts?'\n⚠ Противоречит прежним фактам: '+r.conflicts+'.':'')};
   },
+  async search_memory({query}){
+   const q=String(query||'').trim();if(!q)return {ok:false,text:'Что поискать?'};
+   const {facts,notes}=await recall(q);
+   if(!facts.length&&!notes.length)return {ok:true,text:'По запросу «'+q+'» ничего не нашла.'};
+   return {ok:true,recalled:{facts:facts.map(f=>f.id),notes:notes.map(n=>n.id)},text:[facts.length?'Факты:\n'+facts.map(factLine).join('\n'):'',notes.length?'Заметки:\n'+notes.map(noteLine).join('\n'):''].filter(Boolean).join('\n\n')};
+  },
   async search_library({query}){
    const q=String(query||'').trim();if(!q)return {ok:false,text:'Что поискать в библиотеке?'};
    const [names,content]=await Promise.all([library.search(q),library.searchText(q)]);
@@ -204,12 +210,6 @@ function makeTools(ctx){
    const fragments=content.results.slice(0,5).map(x=>'• '+x.path+', строка '+x.line+': '+x.excerpt);
    const result=[files.length?'По названию:\n'+files.join('\n'):'',fragments.length?'В содержимом:\n'+fragments.join('\n'):''].filter(Boolean);
    return {ok:true,text:result.length?result.join('\n\n')+(names.truncated||content.truncated?'\nПоиск ограничен, показаны не все результаты.':''):'В библиотеке по запросу «'+q+'» ничего не нашла.'};
-  },
-  async search_memory({query}){
-   const q=String(query||'').trim();if(!q)return {ok:false,text:'Что поискать?'};
-   const {facts,notes}=await recall(q);
-   if(!facts.length&&!notes.length)return {ok:true,text:'По запросу «'+q+'» ничего не нашла.'};
-   return {ok:true,recalled:{facts:facts.map(f=>f.id),notes:notes.map(n=>n.id)},text:[facts.length?'Факты:\n'+facts.map(factLine).join('\n'):'',notes.length?'Заметки:\n'+notes.map(noteLine).join('\n'):''].filter(Boolean).join('\n\n')};
   },
   // Самоправка памяти прямо в разговоре (идея самоправки из letta-code).
   async correct_fact({subject,predicate,object,new_object}){
@@ -511,7 +511,13 @@ function helpText(enabled){
 // История от браузера: до MAX_HISTORY сообщений; последние convo.MAX_RECENT идут модели дословно, остальное — в сводку.
 function cleanHistory(history){
  if(!Array.isArray(history))return [];
- return history.filter(m=>m&&['user','assistant'].includes(m.role)&&typeof m.text==='string').slice(-MAX_HISTORY).map(m=>({role:m.role,content:m.text.slice(0,MAX_MESSAGE)}));
+ const safe=[];let skipAssistant=false;
+ for(const m of history){if(!m||!['user','assistant'].includes(m.role)||typeof m.text!=='string')continue;
+  if(m.role==='user'){skipAssistant=parseCommand(m.text)?.fn==='search_library';if(skipAssistant)continue}
+  else if(skipAssistant){skipAssistant=false;continue}
+  if(!m.private)safe.push(m);
+ }
+ return safe.slice(-MAX_HISTORY).map(m=>({role:m.role,content:m.text.slice(0,MAX_MESSAGE)}));
 }
 function localReply(name,facts,notes,enabled,past=[],earlier=[]){
  const lines=[];
@@ -603,6 +609,8 @@ async function reply(input,ctx={}){
  if(!input||typeof input!=='object'||typeof input.message!=='string'||!input.message.trim())throw new TypeError('Invalid message');
  const message=input.message.trim();
  if(message.length>MAX_MESSAGE)throw new TypeError('Сообщение длиннее '+MAX_MESSAGE+' символов. Сократите его или разбейте на части.');
+ // Результаты поиска по локальной библиотеке не попадают в память, журнал или контекст облачной модели.
+ if(parseCommand(message)?.fn==='search_library'){const out=await answer(input,message,ctx);return {...out,secret:true}}
  reflect.touch();
  // Ответ на вопрос, который Юрика задала сама (любопытство, проверка догадки): «да/нет» — не поправка.
  let answered=null;try{answered=curiosity.onMessage(message)}catch(e){console.error('Curiosity answer failed:',e.name)}
@@ -722,3 +730,4 @@ function parseTask(text){
  return {title:args.title||t,category:args.category||null,priority:args.priority||null,due:args.due||null,time:args.time||null};
 }
 module.exports={modelFailure,reply,parseCommand,parseTask,memoryBlock,TOOLS};
+
