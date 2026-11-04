@@ -127,11 +127,12 @@ async function learnPending(limit=BATCH){
  try{
   const db=open();let rows;
   try{rows=db.prepare("SELECT id,at,text FROM chat_log WHERE role='user' AND learned=0 ORDER BY id LIMIT ?").all(limit)}finally{db.close()}
-  for(const row of rows){
+  const inputs=rows.map(row=>({text:row.text,source:'chat:'+row.id,domain:'chat',context:before(row.id)}));const results=await learn.extractBatch(inputs);
+  for(let i=0;i<rows.length;i++){const row=rows[i];
    let n=0;
    try{
     // Соседние реплики: на что человек отвечал и о ком шла речь (в пределах получаса).
-    const r=await learn.extract({text:row.text,source:'chat:'+row.id,domain:'chat',context:before(row.id)});
+    const r=results[i];
     n=apply(r,'chat:'+row.id);
     // Срок в будущем («в следующем месяце переезжаю») — факт становится планом, потом Юрика спросит, сбылось ли.
     if(r.born?.length){try{const made=plans.capture(row.text,memory.factsById(r.born),row.at);if(made.length)thoughts.add('future','Запомнила план: '+made.map(p=>'«'+p.fact.subject+' — '+p.fact.predicate+' '+p.fact.object+'» '+p.phrase).join('; '))}catch(e){console.error('Plan capture failed:',e.name)}}
@@ -142,4 +143,6 @@ async function learnPending(limit=BATCH){
   return {processed,facts:added};
  }finally{busy=false}
 }
-module.exports={before,save,search,between,around,stats,recent,message,autoLearn,setAutoLearn,learnPending,relearn,apply};
+let learningTimer=null;
+function schedule(){if(learningTimer)return;learningTimer=setTimeout(()=>{learningTimer=null;learnPending().then(()=>require('./factvec').index()).catch(e=>console.error('Chat learning failed:',e.name))},15000);learningTimer.unref?.()}
+module.exports={schedule,before,save,search,between,around,stats,recent,message,autoLearn,setAutoLearn,learnPending,relearn,apply};

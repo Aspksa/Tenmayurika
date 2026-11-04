@@ -1,0 +1,9 @@
+'use strict';
+// Local metadata only. No prompts, document text, response bodies or credentials.
+const fs=require('node:fs'),path=require('node:path');
+const {DatabaseSync}=require('node:sqlite');
+const dir=()=>process.env.TENMAYURIKA_DATA_DIR?path.resolve(process.env.TENMAYURIKA_DATA_DIR):path.join(__dirname,'data');
+function record(item){try{fs.mkdirSync(dir(),{recursive:true});const db=new DatabaseSync(path.join(dir(),'cloud-usage.sqlite'));try{db.exec('CREATE TABLE IF NOT EXISTS usage_log(at TEXT NOT NULL, service TEXT NOT NULL, kind TEXT NOT NULL, purpose TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL, input_tokens INTEGER, output_tokens INTEGER)');db.prepare('INSERT INTO usage_log VALUES(?,?,?,?,?,?,?,?)').run(new Date().toISOString(),item.service,item.kind,item.purpose,item.model,item.status,item.input??null,item.output??null)}finally{db.close()}}catch(e){console.error('Usage recording failed:',e.code||e.name)}}
+function list(){try{const db=new DatabaseSync(path.join(dir(),'cloud-usage.sqlite'),{readOnly:true});try{return db.prepare('SELECT substr(at,1,10) AS day,service,kind,purpose,model,status,COUNT(*) AS requests,SUM(input_tokens) AS input_tokens,SUM(output_tokens) AS output_tokens,COUNT(input_tokens) AS measured FROM usage_log GROUP BY day,service,kind,purpose,model,status ORDER BY day DESC LIMIT 500').all()}finally{db.close()}}catch(e){if(e.code==='SQLITE_CANTOPEN'||!fs.existsSync(path.join(dir(),'cloud-usage.sqlite')))return [];throw e}}
+function purpose(stack){if(/chatlog\.js|learn\.js/.test(stack))return 'обучение';if(/factvec\.js|vector-store\.js|recall\.js/.test(stack))return 'поиск и индексация';if(/inner\.js/.test(stack))return 'план и проверка';if(/heart\.js/.test(stack))return 'эмоции';if(/reflect\.js|growth\.js|teacher\.js|psyche\.js/.test(stack))return 'фоновая память';if(/chat\.js/.test(stack))return 'чат';return 'прочее'}
+module.exports={record,list,purpose};

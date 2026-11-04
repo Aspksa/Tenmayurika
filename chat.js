@@ -40,7 +40,6 @@ const infer=require('./infer');
 const plans=require('./plans');
 const evidence=require('./evidence');
 const tune=require('./tune');
-const factvec=require('./factvec');
 const guesses=require('./guesses');
 const curiosity=require('./curiosity');
 const initiative=require('./initiative');
@@ -702,7 +701,7 @@ async function reply(input,ctx={}){
  if(!out.secret&&llm.config())setImmediate(()=>heart.sense(message,{complete:llm.complete}).catch(e=>console.error('Sense failed:',e.name)));
  // Учимся фоном, не задерживая ответ.
  // Затем новые факты получают векторы для поиска по смыслу (если выбрана модель эмбеддингов).
- setImmediate(()=>chatlog.learnPending().then(()=>factvec.index()).catch(e=>console.error('Chat learning failed:',e.name)));
+ chatlog.schedule();
  // Фоном: выпавшее из окна сворачивается в сводку; первое сжатие или каждые N сообщений — разбор разговора.
  setImmediate(()=>afterTurn(input).catch(e=>console.error('After-turn failed:',e.name)));
  try{out.autoLearn=chatlog.autoLearn()}catch{}
