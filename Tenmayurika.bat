@@ -42,7 +42,7 @@ if not exist "%~dp0runtime\python\python.exe" (
 )
 :check_files
 if not exist "%~dp0tools\launcher.js" goto :missing
-"%NODE%" -e "require('dotenv');import('@lancedb/lancedb').then(()=>process.exit(0),()=>process.exit(1))" >nul 2>nul
+"%NODE%" "%~dp0tools\check-deps.js" >nul 2>nul
 if not errorlevel 1 goto :deps_ready
 if exist "%~dp0tools\progress.js" "%NODE%" "%~dp0tools\progress.js" 3
 echo [*] 🔧 Восстановление зависимостей...
@@ -63,7 +63,7 @@ set "PATH=%~dp0runtime\node;%PATH%"
 "%NODE%" "%~dp0tools\run-npm.js" %NPM_MODE% --no-audit --no-fund
 if errorlevel 1 goto :dependencies
 :verify_deps
-"%NODE%" -e "require('dotenv');import('@lancedb/lancedb').then(()=>process.exit(0),()=>process.exit(1))" >nul 2>nul
+"%NODE%" "%~dp0tools\check-deps.js" >nul 2>nul
 if errorlevel 1 goto :dependencies
 :deps_ready
  echo [OK] ✨ Зависимости готовы.
@@ -97,3 +97,4 @@ exit /b 1
 popd
 if defined OLDCP chcp %OLDCP% >nul
 exit /b %RESULT%
+
