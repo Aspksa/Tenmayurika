@@ -1,9 +1,10 @@
 'use strict';
 // Самообучение памяти: из текста (заметка, сообщение в чате) извлекаются кандидаты в факты.
-// С подключённой моделью — её силами, без модели — простыми правилами русского языка.
+// С подключённой моделью — её силами и с навыками запоминания, без модели — простыми правилами русского языка.
 // Кандидаты не сохраняются сами: пользователь подтверждает их в разделе «Мозг».
 const llm=require('./llm');
 const memory=require('./memory-core');
+const memskills=require('./memskills');
 
 const MAX_TEXT=8000,MAX_FACTS=8;
 const VERBS='не любит|любит|обожает|ненавидит|живёт в|живет в|переехал в|переехала в|работает в|работает|учится в|родился в|родилась в|родился|родилась|зовут|предпочитает|боится|увлекается|занимается|хочет|мечтает о|умеет|говорит на|пьёт|пьет|ест|играет в|ездит на|водит';
@@ -35,24 +36,49 @@ function parseLines(text){
  }
  return out;
 }
-async function byModel(text){
+// Разбор моделью с навыками запоминания: под текст подобраны 2–3 навыка (memskills.js), а рядом —
+// похожие факты, которые уже есть, чтобы модель могла не только добавить новое, но и обновить
+// или отставить известное (FACT / UPDATE / RETIRE / NONE).
+async function byModel(text,skills,similar){
+ const known=similar.length?'\n\nУже известно (номер. субъект | связь | объект):\n'+similar.map((f,i)=>(i+1)+'. '+f.subject+' | '+f.predicate+' | '+f.object).join('\n'):'';
+ const ops=similar.length?'\nUPDATE: номер | субъект | связь | объект — известный факт изменился (новая версия целиком)\nRETIRE: номер — известный факт явно отменён или неверен':'';
  const msg=await llm.complete({messages:[
-  {role:'system',content:'Ты извлекаешь устойчивые факты о человеке и его мире: люди, места, предпочтения, привычки, даты, работа. Отвечай только строками вида\nFACT: субъект | связь | объект\nНе больше '+MAX_FACTS+'. Пиши по-русски, коротко. Если пользователь говорит о себе, субъект — «Я». Мнения о погоде, разовые действия и вопросы — не факты. Если фактов нет, ответь NONE.'},
-  {role:'user',content:text}]});
- return parseLines(msg.content);
+  {role:'system',content:'Ты запоминаешь устойчивые факты о человеке и его мире. Пользуйся навыками запоминания:\n'+memskills.promptFor(skills)+'\n\nОтвечай только строками:\nFACT: субъект | связь | объект — новый факт'+ops+'\nНе больше '+MAX_FACTS+' строк. Пиши по-русски, коротко. Если пользователь говорит о себе, субъект — «Я». Если нечего записать, ответь NONE.'},
+  {role:'user',content:text+known}]});
+ return {facts:parseLines(msg.content),...parseOps(msg.content,similar)};
+}
+function parseOps(text,similar){
+ const updates=[],retire=[];
+ for(const line of String(text||'').split(/\r?\n/)){
+  const t=line.trim().replace(/^[-•*\s]+/,'');
+  let m=t.match(/^UPDATE:\s*(\d+)\s*\|(.+)$/i);
+  if(m){const old=similar[Number(m[1])-1],parts=m[2].split('|').map(clean);if(old&&parts.length===3&&parts.every(x=>x&&x.length<=300))updates.push({old,fact:{subject:parts[0],predicate:parts[1].slice(0,150),object:parts[2]}});continue}
+  m=t.match(/^RETIRE:\s*(\d+)/i);if(m){const old=similar[Number(m[1])-1];if(old&&!retire.some(x=>x.id===old.id))retire.push(old)}
+ }
+ return {updates,retire};
+}
+// Похожие известные факты: по словам текста.
+function similarFacts(text,limit=10){
+ try{return memory.factsById(memory.searchIndex(String(text).slice(0,300),{kinds:['fact'],limit}).map(h=>h.ref)).slice(0,limit)}catch{return []}
 }
 // Уже известное не предлагаем повторно.
 function known(f){
  try{const k=x=>String(x).toLocaleLowerCase();return memory.queryFacts({subject:f.subject,limit:500}).some(x=>!x.valid_to&&k(x.predicate)===k(f.predicate)&&k(x.object)===k(f.object))}catch{return false}
 }
-async function extract(input){
+// input: {text, source?, domain?}. Опции: bank — банк навыков для пробы (без записи статистики), dry — не считать применение.
+async function extract(input,{bank=null,dry=false}={}){
  if(!input||typeof input!=='object'||typeof input.text!=='string'||!input.text.trim())throw new TypeError('Invalid text');
  const text=input.text.slice(0,MAX_TEXT);
- let facts,source='rules',note;
- if(llm.config()){try{facts=await byModel(text);source='model'}catch(e){note='Модель не ответила, разобрала по правилам';console.error('Learn model failed:',e.name)}}
+ const domain=['chat','note','task'].includes(input.domain)?input.domain:memskills.domainOf(input.source);
+ let facts,source='rules',note,updates=[],retire=[],used=[];
+ if(llm.config()){try{
+  const similar=similarFacts(text),skills=memskills.select(text,{domain,similar:similar.length,bank});
+  const r=await byModel(text,skills,similar);facts=r.facts;updates=r.updates;retire=r.retire;used=skills.map(s=>s.name);source='model';
+  if(!dry)memskills.recordUse(used,typeof input.source==='string'?input.source:null);
+ }catch(e){note='Модель не ответила, разобрала по правилам';console.error('Learn model failed:',e.name)}}
  if(!facts)facts=byRules(text);
  const seen=new Set(),out=[];
  for(const f of facts){const key=[f.subject,f.predicate,f.object].join('|').toLocaleLowerCase();if(seen.has(key)||known(f))continue;seen.add(key);out.push(f);if(out.length>=MAX_FACTS)break}
- return {facts:out,source,...(note?{note}:{})};
+ return {facts:out,source,domain,skills:used,updates:updates.map(u=>({id:u.old.id,old:{subject:u.old.subject,predicate:u.old.predicate,object:u.old.object},fact:u.fact})),retire:retire.map(f=>({id:f.id,subject:f.subject,predicate:f.predicate,object:f.object})),...(note?{note}:{})};
 }
-module.exports={extract,byRules,parseLines};
+module.exports={extract,byRules,parseLines,parseOps};

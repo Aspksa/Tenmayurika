@@ -74,7 +74,7 @@ function feedback(id,kind,correction){
   db.prepare('UPDATE memory_experience SET feedback=?,correction=COALESCE(?,correction) WHERE id=?').run(kind,kind==='fix'?text:null,id);
   // Оценка переходит на вспомненные записи; смена мнения снимает прежнюю оценку.
   if(prev.feedback!==kind){const rec=parse(prev.recalled,{});try{if(prev.feedback)usefulness.rate(rec,{[prev.feedback]:-1});usefulness.rate(rec,{[kind]:1})}catch(e){console.error('Usefulness update failed:',e.name)}
-   for(const fn of listeners)try{fn(row(prev),kind,prev.feedback||null)}catch(e){console.error('Feedback listener failed:',e.name)}}
+   for(const fn of listeners)try{fn(row(prev),kind,prev.feedback||null,text)}catch(e){console.error('Feedback listener failed:',e.name)}}
   return {id,feedback:kind,previous:prev.feedback||null,episode:row(prev)};
  }finally{db.close()}
 }

@@ -1,6 +1,6 @@
 'use strict';
 // Общая база «Мозга» для новых слоёв памяти: полезность записей, предпочтения, навыки,
-// сводки тем, причинные связи, выводы и дневник; рост: крепнущие связи, карточки сущностей,
+// сводки тем, причинные связи, выводы и дневник; навыки запоминания, промахи и самоэкзамен; рост: крепнущие связи, карточки сущностей,
 // псевдонимы, свои типы, постепенно растущие зоны и отбор при размышлении. Таблицы создаются один раз на процесс.
 const fs=require('node:fs');
 const path=require('node:path');
@@ -60,7 +60,31 @@ function open(){
   CREATE INDEX IF NOT EXISTS memory_zones_zone ON memory_zones(zone);
   CREATE TABLE IF NOT EXISTS memory_zone_info(
   zone TEXT PRIMARY KEY, label TEXT NOT NULL, parent TEXT, created_at TEXT NOT NULL, split_at TEXT);
-  CREATE TABLE IF NOT EXISTS memory_selection(ref TEXT PRIMARY KEY, ok INTEGER NOT NULL DEFAULT 0, fix INTEGER NOT NULL DEFAULT 0, at TEXT NOT NULL);`);
+  CREATE TABLE IF NOT EXISTS memory_selection(ref TEXT PRIMARY KEY, ok INTEGER NOT NULL DEFAULT 0, fix INTEGER NOT NULL DEFAULT 0, at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS memory_mskills(
+  name TEXT PRIMARY KEY, title TEXT NOT NULL, purpose TEXT NOT NULL, when_text TEXT NOT NULL DEFAULT '',
+  how TEXT NOT NULL DEFAULT '', avoid TEXT NOT NULL DEFAULT '', action TEXT NOT NULL DEFAULT 'insert',
+  domains TEXT NOT NULL DEFAULT '["all"]', cues TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'active',
+  version INTEGER NOT NULL DEFAULT 1, uses INTEGER NOT NULL DEFAULT 0, ema REAL NOT NULL DEFAULT 0,
+  ok INTEGER NOT NULL DEFAULT 0, fix INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL DEFAULT 'seed',
+  born_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS memory_mskill_history(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, version INTEGER NOT NULL, change TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '{}', reason TEXT NOT NULL DEFAULT '', at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS memory_mskill_runs(source TEXT PRIMARY KEY, skills TEXT NOT NULL DEFAULT '[]', at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS memory_mskill_facts(fact_id TEXT PRIMARY KEY, skills TEXT NOT NULL DEFAULT '[]', at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS memory_misses(
+  key TEXT PRIMARY KEY, kind TEXT NOT NULL, question TEXT NOT NULL, expected TEXT NOT NULL DEFAULT '',
+  cause TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '', skills TEXT NOT NULL DEFAULT '[]',
+  severity REAL NOT NULL DEFAULT .5, count INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'open',
+  first_at TEXT NOT NULL, last_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS memory_selftests(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, question TEXT NOT NULL, expected TEXT NOT NULL,
+  passed INTEGER NOT NULL, cause TEXT, bank INTEGER NOT NULL DEFAULT 0, at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS memory_selftests_source ON memory_selftests(source);
+  CREATE TABLE IF NOT EXISTS memory_mskill_snapshots(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, bank TEXT NOT NULL, trial_score REAL,
+  change TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'kept');`);
   ready.add(file);
  }
  return db;
