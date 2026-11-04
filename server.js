@@ -261,6 +261,9 @@ if(p.startsWith('/api/library/')){
   if(req.method==='GET'&&p==='/api/library/links')return respond(res,200,{items:await libraryCollections.links()});
   if(req.method==='POST'&&p==='/api/library/links'){const input=await body(req);return respond(res,201,await libraryCollections.connect(input?.a,input?.b,input?.label))}
   if(req.method==='POST'&&p==='/api/library/links/delete'){const input=await body(req);return respond(res,200,await libraryCollections.disconnect(input?.id))}
+  if(req.method==='GET'&&p==='/api/library/memos')return respond(res,200,{items:await libraryCollections.memos()});
+  if(req.method==='POST'&&p==='/api/library/memos'){const input=await body(req);return respond(res,201,await libraryCollections.addMemo(input?.source,input?.kind,input?.text,input?.due))}
+  if(req.method==='POST'&&p==='/api/library/memos/change'){const input=await body(req);return respond(res,200,await libraryCollections.changeMemo(input?.id,input?.action))}
   if(req.method==='GET'&&p==='/api/library/journal')return respond(res,200,{items:await libraryJournal.recent()});
   if(req.method==='GET'&&p==='/api/library/health')return respond(res,200,await libraryHealth.check());
   if(req.method==='POST'&&p==='/api/library/rename'){const input=await body(req),result=await library.renameFile(input?.path,input?.name,libraryCollections.replacePath);if(!result.unchanged)await journal('file_renamed',{path:input.path,target:result.path});return respond(res,200,result)}
