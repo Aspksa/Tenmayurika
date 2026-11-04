@@ -32,6 +32,16 @@ test('short documents, ё in words and commands with «в документах»
  for(const f of ['чай.txt','платёж.txt'])await fsp.unlink(path.join(LIB,f));await queue.scan();reading.readPending();
 });
 
+test('changed document is not mixed with facts from its old version',async()=>{
+ const f=path.join(LIB,'работа.txt');
+ await fsp.writeFile(f,'Анна работает в больнице.');await queue.scan();await queue.run(10);reading.readPending();
+ assert.equal(reading.find('Анна работает')[0].facts[0].object,'больнице');
+ await fsp.writeFile(f,'Анна работает в школе.');await fsp.utimes(f,new Date(),new Date(Date.now()+5000));await queue.scan();await queue.run(10);
+ assert.equal(reading.find('Анна работает').length,0);
+ reading.readPending();const h=reading.find('Анна работает');assert.match(h[0].excerpt,/школе/);assert.equal(h[0].facts[0].object,'школе');
+ await fsp.unlink(f);await queue.scan();reading.readPending();
+});
+
 test('excerpt keeps the matching line even after a long paragraph',async()=>{
  await fsp.mkdir(LIB,{recursive:true});
  await fsp.writeFile(path.join(LIB,'вступление.txt'),'Вступление '.repeat(60).trim()+'\nПлатёж за парковку вносится до десятого числа.');
