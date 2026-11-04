@@ -26,6 +26,10 @@ const SIGNALS=[
  {kind:'thanks',re:/(спасибо|благодар|выручила|помогла)/i,grow:{confidence:1,tenderness:1},xp:2,mood:'joy'},
  {kind:'joke',re:/(х[аe]х[аe]|ахах|лол|😂|🤣|😄|\)\)+|шучу)/i,grow:{playfulness:3},xp:2,mood:'playful'},
  {kind:'sad',re:/(грустно|плохо мне|устал|тяжело|одиноко|болит|заболел|плачу|😢|😭|не могу больше)/i,grow:{tenderness:2,wisdom:1},xp:3,mood:'worried',keep:true},
+ {kind:'happy',re:/(^|[^а-яё])(ура|рад|рада|счастлив|получилось|наконец-то|🎉|😊)([^а-яё]|$)/i,grow:{playfulness:1,tenderness:1},xp:2,mood:'joy'},
+ {kind:'anxious',re:/(боюсь|страшно|волнуюсь|переживаю|тревож|нервничаю)/i,grow:{tenderness:2,wisdom:1},xp:3,mood:'worried',keep:true},
+ {kind:'angry',re:/(бесит|злюсь|достал[оиа]?|раздража|ненавижу|задолбал)/i,grow:{wisdom:2,tenderness:1},xp:2,mood:'worried'},
+ {kind:'tired',re:/(нет сил|вымотал|выдохся|без сил|спать хочу|не выспал)/i,grow:{tenderness:2},xp:2,mood:'worried'},
  {kind:'deep',re:/(почему|как ты думаешь|что ты думаешь|смысл|объясни|расскажи о себе|кто ты)/i,grow:{wisdom:2,curiosity:1},xp:2,mood:'thoughtful'}
 ];
 const clamp=v=>Math.max(0,Math.min(100,v));
@@ -53,6 +57,19 @@ function feel(message){
  const top=hits[0];
  if(top){s.mood={name:top.mood,at:new Date().toISOString(),why:text.slice(0,80)};
   if(hits.some(h=>h.keep)&&text.length>=3){const t=text.slice(0,160);s.moments=s.moments.filter(m=>m.text.toLocaleLowerCase()!==t.toLocaleLowerCase());s.moments.unshift({at:new Date().toISOString(),kind:top.kind,text:t});s.moments=s.moments.slice(0,MOMENTS_KEEP)}}
+ s.xp=Math.round(s.xp*10)/10;
+ const level=save(s,before);
+ for(const c of changed)if(c.to>c.from)note('Во мне стало больше: '+TRAITS[c.trait].label+' ('+Math.round(c.to)+').',{trait:c.trait});
+ return {kinds:hits.map(h=>h.kind),mood:s.mood.name,level};
+}
+// Чувства хозяина, понятые по смыслу (heart.js): то, чего не поймали слова, тоже растит черты и меняет настроение.
+function feelKinds(kinds,text='',{strength=1}={}){
+ if(!on())return null;
+ const hits=SIGNALS.filter(x=>(kinds||[]).includes(x.kind));if(!hits.length)return null;
+ const s=load(),before=s.xp,k=Math.max(.3,Math.min(1.5,Number(strength)||1));let changed=[];
+ for(const h of hits){s.xp+=h.xp*k;changed=changed.concat(nudge(s,Object.fromEntries(Object.entries(h.grow).map(([n,d])=>[n,d*k]))))}
+ const t=String(text||'').trim();s.mood={name:hits[0].mood,at:new Date().toISOString(),why:t.slice(0,80)};
+ if(hits.some(h=>h.keep)&&t.length>=3&&!s.moments.some(m=>m.text.toLocaleLowerCase()===t.slice(0,160).toLocaleLowerCase())){s.moments.unshift({at:new Date().toISOString(),kind:hits[0].kind,text:t.slice(0,160)});s.moments=s.moments.slice(0,MOMENTS_KEEP)}
  s.xp=Math.round(s.xp*10)/10;
  const level=save(s,before);
  for(const c of changed)if(c.to>c.from)note('Во мне стало больше: '+TRAITS[c.trait].label+' ('+Math.round(c.to)+').',{trait:c.trait});
@@ -99,4 +116,4 @@ function grant(xp,grow={},why=''){
  return save(s,before);
 }
 function reset(){setState(KEY,fresh());note('Моя душа начала расти заново.',{soul:'reset'});return view()}
-module.exports={grant,mood,TRAITS,LEVELS,MOODS,detect,feel,onFeedback,view,promptText,evidence,reset,levelOf};
+module.exports={grant,mood,TRAITS,LEVELS,MOODS,SIGNALS,detect,feel,feelKinds,onFeedback,view,promptText,evidence,reset,levelOf};

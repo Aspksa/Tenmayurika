@@ -110,6 +110,8 @@ function dreamSeeds(){
  try{for(const f of pick(require('./memory-core').queryFacts({limit:300}).filter(f=>!f.valid_to),3))out.push(f.subject+' '+f.predicate+' '+f.object)}catch{}
  for(const m of pick(soul.view().moments,2))out.push('хозяин сказал «'+m.text+'»');
  for(const t of pick(tastes(),1))out.push((t.kind==='like'?'мне нравится ':'мне не нравится ')+t.text);
+ // Подсознание (heart.js): то, чего она сама не замечает, всплывает во сне.
+ try{out.unshift(...require('./heart').dreamSeeds(1))}catch{}
  return out.slice(0,5);
 }
 async function dream({complete=null,force=false}={}){
