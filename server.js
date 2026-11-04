@@ -36,6 +36,7 @@ const curiosity=require('./curiosity');
 const initiative=require('./initiative');
 const library=require('./library');
 const libraryDocuments=require('./library-documents');
+const libraryQueue=require('./library-queue');
 let diskHealthy=true;
 function ensureDisk(){try{maintenance.checkDisk();diskHealthy=true}catch(e){diskHealthy=false;throw e}}
 const HOST='127.0.0.1',PORT=Number(process.env.PORT)||5173;
@@ -234,6 +235,10 @@ if(p.startsWith('/api/library/')){
   if(req.method==='GET'&&p==='/api/library/duplicates')return respond(res,200,await library.duplicates());
   if(req.method==='GET'&&p==='/api/library/document')return respond(res,200,await libraryDocuments.describe(url.searchParams.get('path')||''));
   if(req.method==='POST'&&p==='/api/library/compare'){const input=await body(req);return respond(res,200,await libraryDocuments.compare(input?.left,input?.right))}
+  if(req.method==='GET'&&p==='/api/library/queue')return respond(res,200,await libraryQueue.status());
+  if(req.method==='POST'&&p==='/api/library/queue/scan'){const result=await libraryQueue.scan();await libraryQueue.run();return respond(res,200,result)}
+  if(req.method==='POST'&&p==='/api/library/queue/enabled'){const input=await body(req);return respond(res,200,await libraryQueue.setEnabled(input?.enabled))}
+  if(req.method==='POST'&&p==='/api/library/queue/retry'){const input=await body(req);await libraryQueue.retry(input?.path);return respond(res,200,{ok:true})}
   if(req.method==='POST'&&p==='/api/library/folder'){const input=await body(req);await library.mkdir(input?.path);return respond(res,201,{ok:true})}
   if(req.method==='PUT'&&p==='/api/library/upload')return respond(res,201,await library.upload(url.searchParams.get('path')||'',req));
   if(req.method==='GET'&&p==='/api/library/download'){
@@ -280,6 +285,6 @@ if(req.method==='GET'&&AVATAR_PATH.test(p)){const file=path.join(ROOT,p.slice(1)
 return respond(res,404,{error:'Not found'})
 }catch(e){console.error('Request failed:',e.name,e.code||'',e instanceof SyntaxError?'invalid JSON':'request processing error');respond(res,e.message==='Request too large'?413:e instanceof SyntaxError?400:500,{error:e.message==='Request too large'?'Request too large':e instanceof SyntaxError?'Invalid JSON':'Internal server error'})}});
 server.on('error',e=>{console.error('Server error:',e.code||e.name);process.exitCode=1});
-if(require.main===module)Promise.resolve().then(()=>ensureDisk()).then(()=>storage.connect()).then(()=>server.listen(PORT,HOST,()=>{console.log('Tenmayurika: http://'+HOST+':'+PORT);syncWorker.run().catch(console.error);const timer=setInterval(()=>{syncWorker.run().catch(console.error);chatlog.learnPending().catch(console.error);idleReflect()},60000);timer.unref();chatlog.learnPending().catch(console.error);startBackupSchedule();const maintenanceTimer=setInterval(()=>{try{ensureDisk();maintenance.maintenance()}catch(e){console.error('Disk maintenance failed:',e.code||e.name)}},3600000);maintenanceTimer.unref()})).catch(e=>{console.error('Database connection failed:',e.message);process.exitCode=1});
+if(require.main===module)Promise.resolve().then(()=>ensureDisk()).then(()=>storage.connect()).then(()=>server.listen(PORT,HOST,()=>{console.log('Tenmayurika: http://'+HOST+':'+PORT);syncWorker.run().catch(console.error);const timer=setInterval(()=>{syncWorker.run().catch(console.error);chatlog.learnPending().catch(console.error);idleReflect();libraryQueue.status().then(s=>s.enabled?libraryQueue.scan().then(()=>libraryQueue.run()):null).catch(e=>console.error('Library queue failed:',e.name))},60000);timer.unref();chatlog.learnPending().catch(console.error);startBackupSchedule();const maintenanceTimer=setInterval(()=>{try{ensureDisk();maintenance.maintenance()}catch(e){console.error('Disk maintenance failed:',e.code||e.name)}},3600000);maintenanceTimer.unref()})).catch(e=>{console.error('Database connection failed:',e.message);process.exitCode=1});
 module.exports={server};
 
