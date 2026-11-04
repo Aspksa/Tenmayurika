@@ -23,8 +23,8 @@ function since(id=0,limit=60){
 // Мысли за день (для ползунка времени и «как я выросла»).
 function countSince(iso){return use(db=>db.prepare('SELECT kind,COUNT(*) AS n FROM brain_thoughts WHERE at>=? GROUP BY kind').all(iso)).reduce((o,r)=>(o[r.kind]=r.n,o),{})}
 
-const DEFAULTS={innerVoice:true,verify:true,split:true,curiosity:true,guesses:true,initiative:true,forgetting:true};
-const LABELS={innerVoice:'внутренний голос перед ответом',verify:'сверять ответ с памятью',split:'разбивать сложный вопрос',curiosity:'задавать свои вопросы',guesses:'строить догадки',initiative:'предлагать самой',forgetting:'забывать ненужное'};
+const DEFAULTS={innerVoice:true,verify:true,split:true,curiosity:true,guesses:true,initiative:true,forgetting:true,soul:true};
+const LABELS={innerVoice:'внутренний голос перед ответом',verify:'сверять ответ с памятью',split:'разбивать сложный вопрос',curiosity:'задавать свои вопросы',guesses:'строить догадки',initiative:'предлагать самой',forgetting:'забывать ненужное',soul:'расти душой: черты, настроение, дорогие моменты'};
 function settings(){const s=state('mind.settings',{});return {...DEFAULTS,...(s&&typeof s==='object'?s:{})}}
 function on(key){return settings()[key]!==false}
 function setSetting(key,value){

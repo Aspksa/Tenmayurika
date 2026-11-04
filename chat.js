@@ -19,6 +19,7 @@ const reflect=require('./reflect');
 const correct=require('./correct');
 const growth=require('./growth');
 const core=require('./core');
+const soul=require('./soul');
 const onboarding=require('./onboarding');
 const convo=require('./convo');
 const review=require('./review');
@@ -527,6 +528,7 @@ async function modelReply(name,message,all,facts,notes,enabled,impl,result,past=
  let side='';
  // Сердцевина, оглавление памяти, знакомство и сводка начала разговора (идеи letta-code).
  try{side+=core.promptText({tools:selfEdit})}catch(e){console.error('Core prompt failed:',e.name)}
+ try{side+=soul.promptText()}catch(e){console.error('Soul prompt failed:',e.name)}
  try{side+=memoryBlock([atlas.promptText({tool:allowed.includes('open_zone')})].filter(Boolean))}catch(e){console.error('Atlas prompt failed:',e.name)}
  try{side+=convo.context(cid,older)}catch(e){console.error('Conversation summary failed:',e.name)}
  let asking='';try{if(selfEdit)asking=onboarding.turn()}catch(e){console.error('Onboarding failed:',e.name)}side+=asking;
@@ -538,7 +540,7 @@ async function modelReply(name,message,all,facts,notes,enabled,impl,result,past=
  if(facts.some(f=>f.tag))side+='\nПометки у фактов: «в прошлом» — уже не так; [мнение] — чьё-то мнение, а не факт; уверенность ниже 100% — говори осторожно.';
  // Внутренний голос: короткий план до ответа.
  if(thoughts.on('innerVoice')){try{const p=await inner.plan(llm.complete,{message,facts,notes,history});if(p){result.thinking.plan=p;thoughts.add('plan',p);side+='\nТвой план ответа (внутренний голос, не пересказывай его дословно):\n'+p}}catch(e){console.error('Inner voice failed:',e.name)}}
- const system=(persona||'Ты '+name+' — девятихвостая лиса-кицунэ, хранительница личной памяти Tenmayurika. Отвечай по-русски, тепло и кратко.')+' Твоё имя: '+name+'. Сегодня '+new Date().toLocaleDateString('ru-RU')+'.'+(allowed.length?' Используй инструменты, когда пользователь просит что-то сделать.':'')
+ const system=(persona||'Ты '+name+' — девятихвостая лиса-кицунэ, хранительница личной памяти Tenmayurika. '+core.PERSONA_PROMPT+' Отвечай по-русски, тепло и кратко.')+' Твоё имя: '+name+'. Сегодня '+new Date().toLocaleDateString('ru-RU')+'.'+(allowed.length?' Используй инструменты, когда пользователь просит что-то сделать.':'')
   // Предпочтения пользователя — правила общения, они важнее характера по умолчанию.
   +(mind.preferences?'\n'+mind.preferences:'')
   +(mind.skills?'\n'+mind.skills:'')
@@ -596,6 +598,8 @@ async function reply(input,ctx={}){
  // Ответ на вопрос, который Юрика задала сама (любопытство, проверка догадки): «да/нет» — не поправка.
  let answered=null;try{answered=curiosity.onMessage(message)}catch(e){console.error('Curiosity answer failed:',e.name)}
  const corrected=answered?.effect?null:await learnFromFeedback(input,message);
+ // Душа откликается на слова хозяина: черты крепнут, настроение меняется, дорогое запоминается (soul.js).
+ let felt=null;try{felt=soul.feel(message)}catch(e){console.error('Soul failed:',e.name)}
  // Предпочтения («отвечай короче») действуют сразу, уже в этом ответе.
  let prefs=[];try{prefs=preferences.learnFrom(message,'chat')}catch(e){console.error('Preference learning failed:',e.name)}
  // Каждое сообщение сохраняется; команды («дело: …»), поправки и пожелания к ответам не разбираются фоном
@@ -615,6 +619,7 @@ async function reply(input,ctx={}){
  // Задала ли модель вопрос из любопытства — если нет, он вернётся в очередь.
  try{curiosity.afterReply(out.reply||'')}catch(e){console.error('Curiosity check failed:',e.name)}
  if(answered?.effect){out.answered=answered.effect;out.changed=true}
+ if(felt?.level)out.soulGrew=felt.level;
  // Учимся фоном, не задерживая ответ.
  setImmediate(()=>chatlog.learnPending().catch(e=>console.error('Chat learning failed:',e.name)));
  // Фоном: выпавшее из окна сворачивается в сводку; первое сжатие или каждые N сообщений — разбор разговора.
